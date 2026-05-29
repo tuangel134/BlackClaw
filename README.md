@@ -13,6 +13,10 @@ or in the cloud.
 [![Release](https://img.shields.io/github/v/release/tuangel134/BlackClaw?include_prereleases&label=release)](https://github.com/tuangel134/BlackClaw/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
+### [⬇️ Download the latest APK](https://github.com/tuangel134/BlackClaw/releases/latest)
+
+<sub>Sideload the signed APK from the Releases page. Android 9+ · ~160 MB</sub>
+
 > ⚠️ **Beta.** BlackClaw is under active development. Expect rough edges and
 > behavior that varies across OEM skins. Bug reports are very welcome — see
 > [Reporting bugs](#reporting-bugs).
