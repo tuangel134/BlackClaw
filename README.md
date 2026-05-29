@@ -52,8 +52,45 @@ rather than relying on per-app integrations.
   screen content and messages never leave the phone.
 - **Cloud-optional.** Bring your own key for a frontier model when you want more
   reasoning power. The key is stored only in local app storage.
+- **Remote-controllable.** Drive the phone by messaging it from Telegram,
+  Discord, or WeChat — useful for an agent that runs while the device is away.
 - **Broad reach.** ~85 built-in tools spanning UI control, device settings,
   messaging, files, network, perception, and automation.
+
+---
+
+## What you can ask it
+
+Plain-language examples — BlackClaw figures out the steps:
+
+- *"Open WhatsApp and tell Mom I'll be 20 minutes late."*
+- *"Check my notifications and summarize anything important."*
+- *"How much battery do I have, and turn on battery saver if it's under 20%."*
+- *"Search YouTube for lo-fi beats and play the first result."*
+- *"Read the text on screen and tap the Continue button"* (works in games via OCR).
+- *"Every weekday at 8am, read me the weather out loud."* (scheduled task).
+- *"Watch for messages from my boss and auto-reply that I'm in a meeting."*
+- *"What does my clipboard say, and translate it to English."*
+
+If a request is just a question or a chat, BlackClaw answers in text without
+touching the phone.
+
+---
+
+## Tools at a glance
+
+| Category | Examples |
+|---|---|
+| **UI control** | tap · long-press · swipe · pinch · drag-and-drop · path trace · type · scroll-to-find |
+| **Navigation** | open app · switch app · back/home/recents · find & tap by text |
+| **Privileged (ADB/Shizuku)** | fast tap/swipe in games · force-stop · arbitrary shell · burst tap |
+| **Perception** | read screen (accessibility tree) · OCR over screen capture · screenshot |
+| **Device** | battery · memory · network · volume · brightness · WiFi/BT/flashlight toggles |
+| **Comms** | send message (WhatsApp/Telegram/…) · SMS · calls · contacts · notifications |
+| **Personal data** | calendar · call log · clipboard |
+| **Web & data** | web search · fetch URL · weather · translate · currency/unit convert · QR · hash · JSON/regex |
+| **Files & memory** | read/write files · long-term facts · shared knowledge base |
+| **Automation** | cron-style scheduled tasks · multi-step plan execution · external API (Tasker/ADB) |
 
 ---
 
@@ -79,13 +116,32 @@ rather than relying on per-app integrations.
   can read and tap text in games and custom-rendered surfaces where the
   accessibility tree is empty.
 
-### Messaging & automation
+### Messaging & remote control
 - Send messages on WhatsApp, Telegram, Discord, and more
+- **Drive the phone remotely** by messaging it from a Telegram / Discord / WeChat
+  bot — the agent runs tasks and replies with the result, even while the device
+  is away from you
 - **Auto-Replies:** dedicated profiles with free-form personality and context,
   plus the ability to import a WhatsApp chat export so a reply persona matches
   how you actually write
 - Cron-style scheduled tasks via `AlarmManager`
 - External automation API (Tasker / MacroDroid / ADB broadcasts)
+
+### Models — local or cloud, your choice
+- **On-device (private):** Google Gemma E2B / E4B via LiteRT-LM, with optional
+  **uncensored** community ports (Qwen 3 0.6B/1.7B, Llama 3.2 1B, Phi-3 mini —
+  abliterated) downloadable from within the app
+- **Cloud (bring your own key):** OpenAI, Anthropic, Google Gemini, Groq,
+  DeepSeek, Cerebras, or any OpenAI-compatible endpoint via a custom base URL
+- Switch modes anytime; chat can stay local while heavy tasks use the cloud
+
+### Reliability & safety
+- **Stuck detection** breaks out of loops and re-plans instead of repeating a
+  failed action
+- **Action guard** refuses destructive calls (uninstall, data wipe) and never
+  auto-confirms purchases, payments, or password entry
+- **Token budget + rate-limit handling** keep cloud usage bounded and recover
+  automatically when a provider asks you to slow down
 
 ### Productivity tools
 - Device state (battery, memory, network), settings toggles, volume/brightness
@@ -145,7 +201,8 @@ for and retries).
 - ~4 GB RAM minimum for the local Gemma E2B model (E4B for 10 GB+ devices)
 - Permissions granted once in-app: Accessibility, Notification access, Overlay,
   and battery whitelist
-- Cloud mode: your own API key for an OpenAI-compatible / Anthropic / Groq endpoint
+- Cloud mode: your own API key for OpenAI / Anthropic / Google Gemini / Groq /
+  DeepSeek / Cerebras, or any OpenAI-compatible endpoint
 
 ---
 
