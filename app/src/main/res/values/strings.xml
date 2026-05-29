@@ -1,0 +1,265 @@
+<resources>
+    <string name="app_name">BlackClaw</string>
+
+    <!-- Comunes -->
+    <string name="common_confirm">Aceptar</string>
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_close">Cerrar</string>
+    <string name="common_save">Guardar</string>
+    <string name="common_agree">De acuerdo</string>
+    <string name="common_bound">Conectado</string>
+    <string name="common_unbound">No conectado</string>
+    <string name="common_unconfigured">Sin configurar</string>
+    <string name="common_unbound_success">Desconectado</string>
+    <string name="channel_discord">Discord</string>
+    <string name="channel_telegram">Telegram</string>
+    <string name="channel_wechat">WeChat</string>
+    <string name="common_load_failed">Error al cargar: %s</string>
+
+    <string name="app_slogan">El agente de IA que controla tu teléfono</string>
+
+    <!-- Guía -->
+    <string name="guide_page_title">Configuración de permisos</string>
+    <string name="guide_page_subtitle">Activa los siguientes permisos para que la app funcione correctamente</string>
+    <string name="guide_skip">Saltar</string>
+    <string name="guide_start">Empezar</string>
+    <string name="guide_title_accessibility">Servicio de accesibilidad</string>
+    <string name="guide_desc_accessibility">Permite a BlackClaw leer la pantalla y pulsar botones por ti. Pulsa para activar.</string>
+    <string name="guide_title_notification">Notificaciones de tareas</string>
+    <string name="guide_desc_notification">Permite a BlackClaw mostrar el progreso mientras hay una tarea o monitor activo. Pulsa para activar.</string>
+    <string name="guide_title_overlay">Ventana flotante</string>
+    <string name="guide_desc_overlay">Muestra un panel flotante con el estado mientras se ejecutan tareas. Pulsa para activar.</string>
+    <string name="guide_title_battery">Lista blanca de batería</string>
+    <string name="guide_desc_battery">Evita que el sistema cierre BlackClaw en segundo plano. Pulsa para permitir.</string>
+    <string name="guide_title_storage">Acceso a archivos</string>
+    <string name="guide_desc_storage">Permite a BlackClaw leer y escribir archivos en tu dispositivo. Pulsa para activar.</string>
+
+    <!-- Inicio -->
+    <string name="home_need_notification_permission">Se necesita permiso para notificaciones</string>
+    <string name="home_enable_accessibility">Activa el servicio de accesibilidad de BlackClaw</string>
+    <string name="home_accessibility_enabled">Servicio de accesibilidad activado</string>
+    <string name="home_notification_enabled">Notificaciones de tareas activadas</string>
+    <string name="home_overlay_enabled">Ventana flotante activada</string>
+    <string name="home_battery_ignored">Optimización de batería desactivada</string>
+    <string name="home_permission_enabled">Activado</string>
+    <string name="home_card_accessibility_title">Servicio de accesibilidad</string>
+    <string name="home_card_accessibility_subtitle">Para automatizar el control del teléfono</string>
+    <string name="home_card_notification_title">Notificaciones de tareas</string>
+    <string name="home_card_notification_subtitle">Solo mientras hay tareas o monitorización activa</string>
+    <string name="home_card_system_window_title">Ventana del sistema</string>
+    <string name="home_card_system_window_subtitle">Panel flotante superpuesto</string>
+    <string name="home_card_battery_title">Lista blanca de batería</string>
+    <string name="home_card_battery_subtitle">Evita que se cierre en segundo plano</string>
+    <string name="home_card_storage_title">Acceso a archivos</string>
+    <string name="home_card_storage_subtitle">Leer y escribir archivos del dispositivo</string>
+    <string name="home_storage_enabled">Acceso a archivos concedido</string>
+    <string name="home_enable_storage">Permite el acceso a todos los archivos</string>
+    <string name="home_cancel_task">Detener la tarea actual</string>
+    <string name="home_cancel_task_success">Tarea de IA detenida</string>
+    <string name="home_no_task_running">No hay ninguna tarea ejecutándose</string>
+
+    <!-- Ajustes -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_group_channel">Canales</string>
+    <string name="settings_group_model">Modelo</string>
+
+    <!-- Desconectar -->
+    <string name="unbind_title">Desconectar</string>
+    <string name="unbind_message">¿Desconectar %1$s? Dejarás de recibir mensajes vía %2$s.</string>
+    <string name="unbind_action">Desconectar</string>
+
+    <!-- Configuración de canal -->
+    <string name="channel_config_discord_title">Configurar Discord</string>
+    <string name="channel_config_discord_tip">Introduce el Bot Token (del portal de desarrolladores de Discord → página del Bot). El Message Content Intent debe estar activado.</string>
+    <string name="channel_config_discord_hint1">Introduce el Bot Token</string>
+    <string name="channel_config_telegram_title">Configurar Telegram</string>
+    <string name="channel_config_telegram_tip">Introduce el Bot Token (crea un bot en @BotFather en Telegram para obtener el token)</string>
+    <string name="channel_config_telegram_hint1">Introduce el Bot Token</string>
+    <string name="channel_config_wechat_title">Configurar WeChat</string>
+    <string name="channel_config_wechat_tip">Escanea el código QR con WeChat para autorizar el bot. El token y la URL de la API se guardan automáticamente al confirmar.</string>
+    <string name="channel_config_wechat_btn_scan">Obtener código QR</string>
+    <string name="channel_config_wechat_scanning">Esperando escaneo…</string>
+    <string name="channel_config_wechat_confirmed">Autorización confirmada</string>
+    <string name="wechat_qr_failed">Error al obtener el código QR de WeChat</string>
+    <string name="wechat_unsupported_media">Mensaje %s recibido, este tipo aún no es compatible. Envía un comando de texto.</string>
+    <string name="wechat_media_image">imagen</string>
+    <string name="wechat_media_video">vídeo</string>
+    <string name="wechat_media_file">archivo</string>
+    <string name="wechat_media_voice">audio</string>
+    <string name="wechat_media_unknown">multimedia</string>
+    <string name="channel_config_saved">Configuración guardada</string>
+    <string name="channel_config_lan_hint">💡 Activa "Configuración LAN" en Ajustes para configurar desde el navegador</string>
+    <string name="channel_config_lan_hint_running">💡 Abre %s en tu navegador para configurar</string>
+    <string name="channel_config_lan_copied">Dirección copiada</string>
+
+    <!-- Configuración LLM -->
+    <string name="llm_config_title">Configuración del LLM</string>
+    <string name="llm_config_tip">Introduce tu API key, base URL y nombre del modelo. Los datos se guardan solo localmente.</string>
+    <string name="llm_config_api_key">API Key</string>
+    <string name="llm_config_api_key_hint">ej. sk-xxx (OpenAI) o la clave de tu proveedor</string>
+    <string name="llm_config_base_url">Base URL</string>
+    <string name="llm_config_base_url_hint">ej. https://api.openai.com/v1 (déjalo vacío para OpenAI por defecto)</string>
+    <string name="llm_config_model_name">Nombre del modelo</string>
+    <string name="llm_config_model_name_hint">ej. gpt-4o, gpt-4o-mini, claude-3-5-sonnet</string>
+    <string name="llm_config_saved">Configuración del LLM guardada</string>
+    <string name="llm_config_api_key_required">Introduce la API Key</string>
+    <string name="menu_llm_config">Configurar LLM</string>
+
+    <!-- Menú de Ajustes -->
+    <string name="menu_discord">Discord</string>
+    <string name="menu_telegram">Telegram</string>
+    <string name="menu_wechat">WeChat</string>
+    <string name="menu_lan_config">Configuración LAN</string>
+    <string name="lan_config_stopped">Apagado</string>
+    <string name="lan_config_no_wifi">Conéctate primero al Wi-Fi</string>
+
+    <!-- Protocolo -->
+    <string name="protocol_agree_title">Política de privacidad</string>
+    <string name="protocol_alert_title">Términos y privacidad</string>
+    <string name="protocol_disagree">No acepto</string>
+    <string name="protocol_agree_continue">Aceptar y continuar</string>
+
+    <!-- Flotante -->
+    <string name="floating_ai_label">IA</string>
+    <string name="floating_task_received">Recibido: \"%s\"</string>
+
+    <!-- Notificación de servicio en primer plano -->
+    <string name="notification_channel_name">Estado de BlackClaw</string>
+    <string name="notification_channel_description">Muestra el estado y estadísticas de BlackClaw</string>
+    <string name="notification_content_title">BlackClaw · Tarea en curso</string>
+    <string name="notification_content_text">Ejecutando tarea…</string>
+
+    <!-- Mensajes de canal -->
+    <string name="channel_msg_task_cancelled">Tarea cancelada manualmente</string>
+    <string name="channel_msg_service_not_ready">Servicio no listo, inténtalo más tarde</string>
+    <string name="channel_msg_tool_success">Éxito</string>
+    <string name="channel_msg_tool_failure">Error</string>
+    <string name="channel_msg_tool_execution">[%1$s]: %2$s</string>
+    <string name="channel_msg_task_error">Error: %s</string>
+    <string name="channel_msg_no_accessibility">Falta el permiso de accesibilidad, no puedo ejecutar la tarea</string>
+    <string name="channel_msg_task_in_progress">Ya hay una tarea en curso, espera</string>
+    <string name="channel_msg_system_dialog_blocked">Un diálogo del sistema puede estar bloqueando la pantalla. Compruébalo manualmente y vuelve a intentarlo.</string>
+
+    <!-- Accesibilidad -->
+    <string name="cd_back_button">Atrás</string>
+    <string name="cd_settings">Ajustes</string>
+    <string name="cd_clear_input">Borrar entrada</string>
+    <string name="cd_checkbox">Casilla</string>
+    <string name="cd_selected">Seleccionado</string>
+    <string name="cd_task_success">Tarea completada</string>
+    <string name="cd_task_error">Tarea fallida</string>
+    <string name="cd_channel_logo">Logo del canal</string>
+    <string name="cd_app_logo">Logo de la app</string>
+    <string name="cd_floating_idle">BlackClaw — pulsa para enfocar</string>
+    <string name="cd_qr_code">Código QR</string>
+    <string name="cd_toggle_password">Mostrar u ocultar contraseña</string>
+    <string name="cd_copy">Copiar</string>
+    <string name="cd_arrow_right">Más</string>
+    <string name="cd_empty_state">Sin datos</string>
+    <string name="cd_error_state">Error al cargar</string>
+
+    <!-- Agente -->
+    <string name="agent_accessibility_not_enabled">El servicio de accesibilidad no está activo</string>
+    <string name="agent_task_cancelled">Tarea cancelada</string>
+    <string name="agent_task_completed">Tarea completada</string>
+    <string name="agent_task_cancel">Tarea cancelada</string>
+    <string name="agent_api_call_failed">Llamada al servicio de IA fallida: %s</string>
+    <string name="agent_max_iterations">Se alcanzó el número máximo de iteraciones (%d) sin completar la tarea</string>
+
+    <!-- Herramientas de archivo -->
+    <string name="tool_no_storage_permission">Sin permiso de lectura/escritura</string>
+    <string name="tool_file_not_found">Archivo no encontrado: %s</string>
+    <string name="tool_not_a_file">La ruta no es un archivo: %s</string>
+    <string name="tool_no_task_channel">No hay canal de tarea activo</string>
+    <string name="tool_file_sent">Archivo enviado: %s</string>
+    <string name="tool_file_send_failed">Error al enviar el archivo: %s</string>
+
+    <!-- Nombres de herramientas -->
+    <string name="tool_name_screenshot">Captura</string>
+    <string name="tool_name_send_file">Enviar archivo</string>
+    <string name="tool_name_wait">Esperar</string>
+    <string name="tool_name_get_screen_info">Leer pantalla</string>
+    <string name="tool_name_finish">Finalizar tarea</string>
+    <string name="tool_name_open_app">Abrir app</string>
+    <string name="tool_name_get_installed_apps">Apps instaladas</string>
+    <string name="tool_name_system_key">Tecla del sistema</string>
+    <string name="tool_name_tap">Pulsar</string>
+    <string name="tool_name_swipe">Deslizar</string>
+    <string name="tool_name_input_text">Introducir texto</string>
+    <string name="tool_name_find_node_info">Buscar nodo</string>
+    <string name="tool_name_long_press">Pulsación larga</string>
+    <string name="tool_name_repeat_actions">Repetir acciones</string>
+    <string name="tool_name_volume_up">Subir volumen</string>
+    <string name="tool_name_volume_down">Bajar volumen</string>
+    <string name="tool_name_dpad_up">D-pad arriba</string>
+    <string name="tool_name_dpad_down">D-pad abajo</string>
+    <string name="tool_name_dpad_left">D-pad izquierda</string>
+    <string name="tool_name_dpad_right">D-pad derecha</string>
+    <string name="tool_name_dpad_center">D-pad centro</string>
+    <string name="tool_name_press_menu">Menú</string>
+    <string name="tool_name_press_power">Encender/apagar</string>
+    <string name="tool_name_search_app">Buscar app</string>
+    <string name="tool_name_clipboard">Portapapeles</string>
+    <string name="tool_name_scroll_to_find">Desplazar para buscar</string>
+
+    <!-- Diálogo de entrada -->
+    <string name="input_dialog_need_more">Introduce al menos %d caracteres</string>
+    <string name="input_dialog_need_less">Introduce como máximo %d caracteres</string>
+    <string name="input_dialog_no_zero">Introduce un valor distinto de cero</string>
+
+    <!-- Entrada por voz (#44) -->
+    <string name="voice_input_button_cd">Entrada por voz</string>
+    <string name="voice_input_prompt">Habla ahora…</string>
+    <string name="voice_input_unavailable">El reconocimiento de voz no está disponible en este dispositivo</string>
+    <string name="voice_input_error">Error en la entrada por voz. Inténtalo de nuevo.</string>
+
+    <!-- Prompt global (#45) -->
+    <string name="global_prompt_title">Instrucciones globales</string>
+    <string name="global_prompt_dialog_title">Editar instrucciones globales</string>
+    <string name="global_prompt_hint">Instrucciones que se aplicarán a cada conversación. Déjalo vacío para desactivarlas.</string>
+    <string name="global_prompt_not_set">No definidas</string>
+    <string name="global_prompt_set_status">Definidas (%d caracteres)</string>
+
+    <!-- URL de modelo local personalizado (#36) -->
+    <string name="custom_local_model_url_title">URL personalizada de modelo</string>
+    <string name="custom_local_model_url_dialog_title">URL de descarga personalizada</string>
+    <string name="custom_local_model_url_hint">https://… URL directa de descarga .litertlm. Avanzado: la validación de tamaño es flexible para modelos personalizados.</string>
+    <string name="custom_local_model_url_not_set">No definida</string>
+    <string name="custom_local_model_url_set">URL personalizada definida</string>
+    <string name="custom_local_model_url_invalid">La URL debe empezar por http:// o https://</string>
+
+    <!-- Skills (creadas por el usuario) -->
+    <string name="skills_title">Mis skills</string>
+    <string name="skills_subtitle">Crea automatizaciones reutilizables</string>
+    <string name="skills_empty">Aún no tienes skills. Pulsa + para crear la primera.</string>
+    <string name="skills_create">Crear skill</string>
+    <string name="skills_edit">Editar skill</string>
+    <string name="skills_delete">Eliminar skill</string>
+    <string name="skills_run">Ejecutar</string>
+    <string name="skill_field_name">Nombre</string>
+    <string name="skill_field_description">Descripción</string>
+    <string name="skill_field_prompt">Prompt (qué debe hacer la IA)</string>
+    <string name="skill_field_trigger">Disparador (frase del usuario)</string>
+    <string name="skill_saved">Skill guardada</string>
+    <string name="skill_deleted">Skill eliminada</string>
+
+    <!-- Quick Tasks -->
+    <string name="quick_tasks_title">Plantillas rápidas</string>
+    <string name="quick_tasks_toggle">Alternar plantillas</string>
+
+    <!-- Settings labels (modernos en español) -->
+    <string name="settings_section_permissions">Permisos</string>
+    <string name="settings_section_appearance">Apariencia</string>
+    <string name="settings_section_tools">Herramientas</string>
+    <string name="settings_section_remote">Control remoto</string>
+    <string name="settings_section_about">Acerca de</string>
+    <string name="settings_section_skills">Skills</string>
+    <string name="settings_theme">Tema</string>
+    <string name="settings_manage_tools">Gestionar herramientas</string>
+    <string name="settings_external_automation">Automatización externa</string>
+    <string name="settings_telegram_bot">Bot de Telegram</string>
+    <string name="settings_report_bug">Reportar un fallo</string>
+    <string name="settings_share_debug_report">Compartir informe de depuración</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_task_budget">Presupuesto de tarea</string>
+</resources>

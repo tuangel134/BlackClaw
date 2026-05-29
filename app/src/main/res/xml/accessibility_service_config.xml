@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Optimized accessibility config:
+      notificationTimeout: 100ms → 16ms (frame-aligned, more reactive UI events)
+      Removed flagReportViewIds (expensive view-id resolution we rarely use)
+      Removed flagRequestTouchExplorationMode (only useful for blind users; causes
+        every touch on the device to be routed through accessibility, wasting CPU)
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:notificationTimeout="16"
+    android:settingsActivity="com.blackclaw.android.ui.settings.SettingsActivity" />

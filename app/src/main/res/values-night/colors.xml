@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BlackClaw Dark Theme — Carbon Black + Electric Cyan -->
+<resources>
+    <!-- ==================== Text ==================== -->
+    <color name="colorTextPrimary">#F0FFFFFF</color>
+    <color name="colorTextSecondary">#99FFFFFF</color>
+    <color name="colorTextTertiary">#55FFFFFF</color>
+    <color name="colorTextDisabled">#30FFFFFF</color>
+    <color name="colorTextInverse">#FF0A0A0F</color>
+    <color name="colorTextFixedWhitePrimary">#E6FFFFFF</color>
+    <color name="colorTextFixedWhiteSecondary">#99FFFFFF</color>
+    <color name="colorTextFixedBlackPrimary">#F2000000</color>
+    <color name="colorTextFixedBlackSecondary">#99000000</color>
+
+    <!-- ==================== Fills ==================== -->
+    <color name="colorFillPrimary">#50FFFFFF</color>
+    <color name="colorFillSecondary">#3CFFFFFF</color>
+    <color name="colorFillTertiary">#28FFFFFF</color>
+    <color name="colorFillQuaternary">#18FFFFFF</color>
+
+    <!-- ==================== Containers ==================== -->
+    <color name="colorContainerBrighten">#FF1A1A2A</color>
+    <color name="colorContainerLow">#FF0F0F1A</color>
+    <color name="colorContainerBase">#FF141420</color>
+    <color name="colorContainerHigh">#FF1E1E30</color>
+    <color name="colorContainerHighest">#FF252538</color>
+    <color name="colorContainerInverse">#FFE8EBF5</color>
+
+    <!-- ==================== Backgrounds ==================== -->
+    <!-- Deep carbon black — the signature BlackClaw dark bg -->
+    <color name="colorBgPrimary">#FF0A0A0F</color>
+    <color name="colorBgSecondary">#FF0F0F1A</color>
+    <color name="colorBgTertiary">#FF141420</color>
+
+    <!-- ==================== Chat (BlackClaw Dark — Cyan accent) ==================== -->
+    <color name="colorChatUserBubble">#FF0066CC</color>
+    <color name="colorChatAiBubble">#FF141420</color>
+    <color name="colorChatAiBubbleBorder">#FF1E1E30</color>
+    <color name="colorChatAvatarBg">#FF0055AA</color>
+    <color name="colorChatInputBorder">#FF1E1E30</color>
+    <color name="colorChatSendText">#FF00D4FF</color>
+    <color name="colorChatToolOk">#FF00D4FF</color>
+    <color name="colorChatToolDefault">#FF3A3A55</color>
+    <color name="colorChatDivider">#FF0F0F1A</color>
+
+    <!-- ==================== Borders & Dividers ==================== -->
+    <color name="colorBorderLow">#08FFFFFF</color>
+    <color name="colorBorderBase">#12FFFFFF</color>
+    <color name="colorBorderHigh">#1E1E30</color>
+
+    <!-- ==================== Overlays ==================== -->
+    <color name="colorOverlayDim">#B00A0A0F</color>
+    <color name="colorOverlayScrim">#600A0A0F</color>
+    <color name="colorOverlayLabel">#99FFFFFF</color>
+
+    <!-- ==================== Brand — Electric Cyan ==================== -->
+    <color name="colorBrandPrimary">#FF00D4FF</color>
+    <color name="colorBrandOnPrimary">#FF0A0A0F</color>
+    <color name="colorBrandContainer">#FF001A22</color>
+    <color name="colorBrandOnContainer">#FF80EEFF</color>
+    <color name="colorBrandFixedOnContainer">#FF003D52</color>
+    <color name="colorBrandVariant">#FF0099BB</color>
+    <color name="colorBrandOnVariant">#FF001A22</color>
+    <color name="colorBrandLowButtonBg">#FF001A22</color>
+
+    <!-- ==================== Error ==================== -->
+    <color name="colorErrorPrimary">#FFFF6B6B</color>
+    <color name="colorErrorOnPrimary">#FF0A0A0F</color>
+    <color name="colorErrorContainer">#FF2A0A0A</color>
+    <color name="colorErrorOnContainer">#FFFFB3B3</color>
+
+    <!-- ==================== Warning ==================== -->
+    <color name="colorWarningPrimary">#FFFBBF24</color>
+    <color name="colorWarningOnPrimary">#FF0A0A0F</color>
+    <color name="colorWarningContainer">#FF2A1A00</color>
+    <color name="colorWarningOnContainer">#FFFDE68A</color>
+
+    <!-- ==================== Success ==================== -->
+    <color name="colorSuccessPrimary">#FF34D399</color>
+    <color name="colorSuccessOnPrimary">#FF0A0A0F</color>
+    <color name="colorSuccessContainer">#FF002A1A</color>
+    <color name="colorSuccessOnContainer">#FF6EE7B7</color>
+
+    <!-- ==================== Info ==================== -->
+    <color name="colorInfoPrimary">#FF60A5FA</color>
+    <color name="colorInfoOnPrimary">#FF0A0A0F</color>
+    <color name="colorInfoContainer">#FF001A3A</color>
+    <color name="colorInfoOnContainer">#FF93C5FD</color>
+</resources>

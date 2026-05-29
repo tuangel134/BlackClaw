@@ -1,0 +1,24 @@
+.env
+*.iml
+.gradle
+/local.properties
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.jks
+/.claude/
+/.idea/
+*.mp4
+!docs/*.mp4
+
+# Build fingerprint (auto-generated)
+app/src/main/assets/.pcfp
+
+# Claude Code local session state (not for git)
+CLAUDE.local.md
+thoughts/
+.claudeignore
+/.kotlin/

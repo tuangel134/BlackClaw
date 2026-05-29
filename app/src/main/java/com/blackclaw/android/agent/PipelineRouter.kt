@@ -1,0 +1,129 @@
+package com.blackclaw.android.agent
+
+import android.content.Context
+import android.content.Intent
+import com.blackclaw.android.agent.skill.SkillRegistry
+import com.blackclaw.android.tool.ToolResult
+import com.blackclaw.android.tool.ToolRegistry
+import com.blackclaw.android.utils.XLog
+
+/**
+ * 3-Tier Pipeline Router.
+ *
+ * Tier 1: Deterministic parser (regex) → 0 LLM calls
+ * Tier 2: LLM classifier (1 call) → routes to skill or agent
+ * Tier 3: UI agent loop (3-30 calls) → full perception/reasoning/action
+ *
+ * 3-tier routing: deterministic → skill → agent loop.
+ */
+class PipelineRouter(private val context: Context) {
+
+    sealed class Route {
+        /** Tier 1: Execute Android intent directly */
+        data class DirectIntent(val intent: Intent, val description: String) : Route()
+
+        /** Tier 1: Execute a tool directly (e.g., screenshot, back, home) */
+        data class DirectTool(val toolName: String, val params: Map<String, Any>, val description: String) : Route()
+
+        /** Tier 2: Execute a registered skill */
+        data class Skill(val skillId: String, val params: Map<String, String>, val description: String) : Route()
+
+        /** Tier 2/3: Run the full agent loop */
+        data class AgentLoop(val task: String, val app: String? = null) : Route()
+
+        /** Tier 2: Pure chat response (no phone control) */
+        data class Chat(val task: String) : Route()
+    }
+
+    /**
+     * Route a user task through the 3-tier pipeline.
+     *
+     * @param task user's task text
+     * @return the routing decision
+     */
+    fun route(task: String): Route {
+        // Compound tasks (containing "and", "then", "after") should go to agent loop,
+        // not be partially handled by Tier 1 deterministic matching.
+        val lower = task.lowercase()
+        if (lower.contains(" and ") || lower.contains(" then ") || lower.contains(" after ")) {
+            XLog.i(TAG, "Compound task detected, skipping Tier 1: $task")
+            return Route.AgentLoop(task)
+        }
+
+        // Tier 1: Deterministic regex matching
+        val parseResult = TaskParser.parse(task)
+        if (parseResult != null) {
+            XLog.i(TAG, "Tier 1 match: ${parseResult.action} → ${parseResult.description}")
+
+            // Intent-based action (call, alarm, settings, URL)
+            if (parseResult.intent != null) {
+                return Route.DirectIntent(parseResult.intent, parseResult.description)
+            }
+
+            // Tool-based action (screenshot, back, home, open app)
+            if (parseResult.toolName != null) {
+                return Route.DirectTool(
+                    parseResult.toolName,
+                    parseResult.toolParams ?: emptyMap(),
+                    parseResult.description
+                )
+            }
+        }
+
+        // Tier 1.5: Skill trigger matching (deterministic, 0 LLM calls)
+        val matchedSkill = SkillRegistry.findByTrigger(task)
+        if (matchedSkill != null) {
+            val params = extractSkillParams(task, matchedSkill.triggerPatterns)
+            XLog.i(TAG, "Tier 1.5 skill match: ${matchedSkill.id} params=$params")
+            return Route.Skill(matchedSkill.id, params, matchedSkill.description)
+        }
+
+        // No deterministic match → Tier 3 agent loop
+        XLog.i(TAG, "No deterministic match, falling through to agent loop: $task")
+        return Route.AgentLoop(task)
+    }
+
+    /**
+     * Execute a Tier 1 direct intent.
+     */
+    fun executeIntent(intent: Intent) {
+        try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            XLog.i(TAG, "Executed intent: ${intent.action}")
+        } catch (e: Exception) {
+            XLog.e(TAG, "Failed to execute intent: ${intent.action}", e)
+        }
+    }
+
+    /**
+     * Execute a Tier 1 direct tool call.
+     */
+    fun executeTool(toolName: String, params: Map<String, Any>): ToolResult {
+        val result = ToolRegistry.getInstance().executeTool(toolName, params)
+        XLog.i(TAG, "Executed tool: $toolName → ${if (result.isSuccess) "success" else result.error}")
+        return result
+    }
+
+    /**
+     * Extract parameter values from a task string using trigger patterns.
+     * E.g., "search for cat videos" + pattern "search for {query}" → {"query": "cat videos"}
+     */
+    private fun extractSkillParams(task: String, patterns: List<String>): Map<String, String> {
+        val lower = task.lowercase()
+        for (pattern in patterns) {
+            val paramNames = Regex("\\{(\\w+)\\}").findAll(pattern).map { it.groupValues[1] }.toList()
+            val regexStr = pattern.lowercase()
+                .replace(Regex("\\{\\w+\\}"), "(.+)")
+            val match = Regex(regexStr).find(lower)
+            if (match != null && match.groupValues.size > 1) {
+                return paramNames.zip(match.groupValues.drop(1)).toMap()
+            }
+        }
+        return emptyMap()
+    }
+
+    companion object {
+        private const val TAG = "PipelineRouter"
+    }
+}

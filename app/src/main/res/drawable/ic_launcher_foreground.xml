@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    BlackClaw foreground — angular "C" rune with two outer claws.
+    Neon-line style with a cyan→violet gradient. Recreated from the art the user shared.
+    Sits in the safe zone of the 108dp adaptive-icon canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Top arm of the angular C -->
+    <path
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M68,22 L46,22 L34,32 L34,46 L40,52 L40,42 L48,34 L60,34 L68,30 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="34" android:startY="22"
+                android:endX="68"   android:endY="52"
+                android:startColor="#5DE9FF"
+                android:endColor="#79A7FF" />
+        </aapt:attr>
+    </path>
+
+    <!-- Bottom arm of the angular C (mirrored) -->
+    <path
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M68,86 L46,86 L34,76 L34,62 L40,56 L40,66 L48,74 L60,74 L68,78 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="34" android:startY="56"
+                android:endX="68"   android:endY="86"
+                android:startColor="#79A7FF"
+                android:endColor="#8B5CFF" />
+        </aapt:attr>
+    </path>
+
+    <!-- Spine connecting top and bottom arms -->
+    <path
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M34,46 L34,62">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="34" android:startY="46"
+                android:endX="34"   android:endY="62"
+                android:startColor="#5DE9FF"
+                android:endColor="#8B5CFF" />
+        </aapt:attr>
+    </path>
+
+    <!-- Top outer claw (curved blade) -->
+    <path
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M62,38 C72,30 82,30 88,28 C84,38 76,46 70,50 L62,46 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="62" android:startY="28"
+                android:endX="88"   android:endY="50"
+                android:startColor="#5DE9FF"
+                android:endColor="#79A7FF" />
+        </aapt:attr>
+    </path>
+
+    <!-- Bottom outer claw -->
+    <path
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M62,70 C72,78 82,78 88,80 C84,70 76,62 70,58 L62,62 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="62" android:startY="58"
+                android:endX="88"   android:endY="80"
+                android:startColor="#79A7FF"
+                android:endColor="#8B5CFF" />
+        </aapt:attr>
+    </path>
+
+    <!-- Inner accent dots — evoke the "code rain" inside the original art -->
+    <path
+        android:fillColor="#5DE9FF"
+        android:pathData="M50,46 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0" />
+    <path
+        android:fillColor="#5DE9FF"
+        android:pathData="M56,52 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0" />
+    <path
+        android:fillColor="#5DE9FF"
+        android:pathData="M50,58 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0" />
+    <path
+        android:fillColor="#5DE9FF"
+        android:pathData="M56,64 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0" />
+
+</vector>
