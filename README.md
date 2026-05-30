@@ -90,6 +90,7 @@ touching the phone.
 | **Personal data** | calendar · call log · clipboard |
 | **Web & data** | web search · fetch URL · weather · translate · currency/unit convert · QR · hash · JSON/regex |
 | **Files & memory** | read/write files · long-term facts · shared knowledge base |
+| **Assistant hub** | reminders · alarms · notes · calendar · alerts · finances (native, push) |
 | **Automation** | cron-style scheduled tasks · multi-step plan execution · external API (Tasker/ADB) |
 
 ---
@@ -116,14 +117,27 @@ touching the phone.
   can read and tap text in games and custom-rendered surfaces where the
   accessibility tree is empty.
 
+### Assistant hub (native)
+- A built-in **Assistant** that keeps reminders, alarms, notes, calendar
+  events, alerts and **finances** inside the app — no bouncing out to the
+  system Clock / Calendar / Notes apps
+- **Real alarms:** full-screen ringing over the lock screen, looping sound,
+  vibration, and dismiss / snooze — not just a passive notification
+- Time-based items fire **native push notifications** and survive reboots
+- A modern, color-coded UI (gradient header, native clock time picker, swipe-in
+  access from the chat drawer) with manual add / complete / delete
+- The AI manages the hub end-to-end: *"remind me to call the dentist tomorrow
+  at 5"*, *"what reminders do I have?"*, *"cancel the 7am alarm"*, *"log that I
+  spent 200 on food"* all read and write the native hub
+
 ### Proactive assistant
 - Opt-in mode where **every incoming notification wakes the AI** for a cheap
   one-shot check against your natural-language instructions
 - If something is time-sensitive and you didn't act, it acts for you: a night
   message saying *"be at the office at 7am"* with no alarm set → it sets the
-  alarm; a deadline → it adds a reminder; something worth remembering → a note
+  alarm; a deadline → it adds a reminder; a charge → it logs the expense
 - You choose which autonomous actions are allowed (alarms, reminders, notes,
-  calendar) and which apps to watch; a log shows everything it did
+  calendar, finances) and which apps to watch; a log shows everything it did
 
 ### Messaging & remote control
 - Send messages on WhatsApp, Telegram, Discord, and more
@@ -252,11 +266,13 @@ app/
   src/main/java/com/blackclaw/android/
     adb/              Self-ADB pairing + connection (TLS 1.3 + SPAKE2) and shell
     agent/            LLM clients, agent loop, prompts, tool selection, skills
+    assistant/        Native Assistant hub (reminders/alarms/notes/finance) + alarm ring
     autoreply/        Auto-reply profiles + WhatsApp export parser
     automation/       External automation API (RUN_TASK / RUN_CHAT)
     channel/          Discord, Telegram, WeChat handlers
     floating/         Overlay floating control
     perception/       MediaProjection screen capture + ML Kit OCR
+    proactive/        Proactive assistant (notification → AI → autonomous action)
     scheduler/        Cron-style scheduled tasks
     server/           NanoHTTPD LAN config server
     service/          Accessibility, notification listener, foreground services
