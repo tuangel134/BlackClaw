@@ -24,6 +24,7 @@ object ProactiveConfig {
     private const val KEY_ALLOW_REMINDERS = "proactive_allow_reminders"
     private const val KEY_ALLOW_NOTES = "proactive_allow_notes"
     private const val KEY_ALLOW_CALENDAR = "proactive_allow_calendar"
+    private const val KEY_ALLOW_FINANCE = "proactive_allow_finance"
     private const val KEY_QUIET_ONLY_IMPORTANT = "proactive_quiet_only_important"
     private const val KEY_WATCH_ALL_APPS = "proactive_watch_all_apps"
     private const val KEY_WATCHED_APPS = "proactive_watched_apps"
@@ -59,6 +60,10 @@ object ProactiveConfig {
     var allowCalendar: Boolean
         get() = KVUtils.getBoolean(KEY_ALLOW_CALENDAR, false)
         set(v) { KVUtils.putBoolean(KEY_ALLOW_CALENDAR, v); KVUtils.sync() }
+
+    var allowFinance: Boolean
+        get() = KVUtils.getBoolean(KEY_ALLOW_FINANCE, false)
+        set(v) { KVUtils.putBoolean(KEY_ALLOW_FINANCE, v); KVUtils.sync() }
 
     /** When true, the assistant acts silently and only notifies for important things. */
     var quietUnlessImportant: Boolean

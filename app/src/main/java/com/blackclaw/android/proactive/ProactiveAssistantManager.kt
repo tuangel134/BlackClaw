@@ -88,6 +88,7 @@ object ProactiveAssistantManager {
             if (ProactiveConfig.allowReminders) add("reminder")
             if (ProactiveConfig.allowNotes) add("note")
             if (ProactiveConfig.allowCalendar) add("calendar")
+            if (ProactiveConfig.allowFinance) add("finance")
             add("notify")
             add("ignore")
         }
@@ -111,16 +112,19 @@ object ProactiveAssistantManager {
             appendLine("- reminder: a scheduled reminder notification at a future time.")
             appendLine("- note: save a short note/todo for later.")
             appendLine("- calendar: create a calendar event.")
+            appendLine("- finance: record a payment/charge/income (include amount, negative=expense).")
             appendLine("- notify: just surface a heads-up to the user now (important info).")
             appendLine("- ignore: do nothing (promotions, spam, social, casual chat).")
             appendLine()
             appendLine("## Respond with ONE strict JSON object, no prose, no markdown:")
             appendLine("{")
-            appendLine("  \"action\": \"alarm|reminder|note|calendar|notify|ignore\",")
+            appendLine("  \"action\": \"alarm|reminder|note|calendar|finance|notify|ignore\",")
             appendLine("  \"reason\": \"<one short sentence>\",")
-            appendLine("  \"datetime\": \"YYYY-MM-DD HH:MM\"  // for alarm/reminder/calendar; omit otherwise")
-            appendLine("  ,\"label\": \"<short label/title>\",")
-            appendLine("  \"message\": \"<text for note/notify>\"")
+            appendLine("  \"datetime\": \"YYYY-MM-DD HH:MM\",  // for alarm/reminder/calendar; omit otherwise")
+            appendLine("  \"label\": \"<short label/title>\",")
+            appendLine("  \"message\": \"<text for note/notify>\",")
+            appendLine("  \"amount\": 0,        // for finance: negative=expense, positive=income")
+            appendLine("  \"category\": \"\"     // for finance: optional category")
             appendLine("}")
             appendLine("If unsure, use \"ignore\". Only act when clearly justified by the instructions.")
         }
@@ -160,47 +164,53 @@ object ProactiveAssistantManager {
         when (action) {
             "alarm" -> {
                 if (!ProactiveConfig.allowAlarms) return
-                val (h, m) = parseHourMinute(datetime) ?: run {
-                    XLog.w(TAG, "Proactive alarm: no parseable time in '$datetime'"); return
-                }
-                val r = registry.executeTool("set_alarm", mapOf(
-                    "mode" to "alarm", "hour" to h, "minute" to m, "label" to label,
+                if (datetime == null) { XLog.w(TAG, "Proactive alarm: no datetime"); return }
+                val r = registry.executeTool("assistant_alarm", mapOf(
+                    "when" to datetime, "label" to label,
                 ))
-                logAction("⏰ Alarma puesta $h:${"%02d".format(m)} — $label", r.isSuccess)
-                if (r.isSuccess) {
-                    notifyUser("Alarma creada", "Puse una alarma a las $h:${"%02d".format(m)} por: $label")
-                }
+                logAction("⏰ Alarma — $label ($datetime)", r.isSuccess)
             }
             "reminder" -> {
                 if (!ProactiveConfig.allowReminders) return
                 if (datetime == null) { XLog.w(TAG, "Proactive reminder: no datetime"); return }
-                val r = registry.executeTool("schedule_task", mapOf(
-                    "text" to "Recordatorio: $message",
+                val r = registry.executeTool("assistant_reminder", mapOf(
+                    "title" to (label.ifBlank { message }),
                     "when" to datetime,
-                    "mode" to "chat",
-                    "recurrence" to "once",
+                    "body" to message,
                 ))
                 logAction("🔔 Recordatorio $datetime — $message", r.isSuccess)
-                if (r.isSuccess) {
-                    notifyUser("Recordatorio programado", "$datetime · $message")
-                }
             }
             "calendar" -> {
                 if (!ProactiveConfig.allowCalendar) return
                 if (datetime == null) { XLog.w(TAG, "Proactive calendar: no datetime"); return }
-                val r = registry.executeTool("create_calendar_event", mapOf(
+                val r = registry.executeTool("assistant_event", mapOf(
                     "title" to label, "start" to datetime,
                 ))
                 logAction("📅 Evento $datetime — $label", r.isSuccess)
             }
             "note" -> {
                 if (!ProactiveConfig.allowNotes) return
-                val r = registry.executeTool("kb_add_todo", mapOf("text" to message))
-                logAction("📝 Nota guardada — $message", r.isSuccess)
+                val r = registry.executeTool("assistant_note", mapOf(
+                    "title" to label, "body" to message,
+                ))
+                logAction("📝 Nota guardada — ${label.ifBlank { message }}", r.isSuccess)
             }
-            "notify" -> {
-                notifyUser(label, message)
-                logAction("📢 Aviso — $label: $message", true)
+            "finance" -> {
+                if (!ProactiveConfig.allowFinance) return
+                val amt = decision.optDouble("amount", 0.0)
+                if (amt == 0.0) { XLog.w(TAG, "Proactive finance: no amount"); return }
+                val r = registry.executeTool("assistant_finance", mapOf(
+                    "description" to (label.ifBlank { message }),
+                    "amount" to amt,
+                    "category" to decision.optString("category", ""),
+                ))
+                logAction("💰 Finanza — ${label.ifBlank { message }} ($amt)", r.isSuccess)
+            }
+            "notify", "alert" -> {
+                val r = registry.executeTool("assistant_alert", mapOf(
+                    "title" to label, "body" to message,
+                ))
+                logAction("📢 Aviso — $label: $message", r.isSuccess)
             }
             else -> XLog.d(TAG, "Proactive: unknown action '$action'")
         }
@@ -208,21 +218,10 @@ object ProactiveAssistantManager {
 
     private fun notifyUser(title: String, body: String) {
         runCatching {
-            ToolRegistry.getInstance().executeTool("system_notify", mapOf(
-                "title" to "🐾 $title", "body" to body,
+            ToolRegistry.getInstance().executeTool("assistant_alert", mapOf(
+                "title" to title, "body" to body,
             ))
         }
-    }
-
-    /** Parse "YYYY-MM-DD HH:MM" or "HH:MM" → (hour, minute). */
-    private fun parseHourMinute(datetime: String?): Pair<Int, Int>? {
-        if (datetime.isNullOrBlank()) return null
-        val timePart = datetime.trim().substringAfterLast(' ')
-        val m = Regex("""(\d{1,2}):(\d{2})""").find(timePart) ?: return null
-        val h = m.groupValues[1].toIntOrNull() ?: return null
-        val min = m.groupValues[2].toIntOrNull() ?: return null
-        if (h !in 0..23 || min !in 0..59) return null
-        return h to min
     }
 
     private fun logAction(line: String, ok: Boolean) {

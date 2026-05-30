@@ -100,7 +100,7 @@ class SettingsActivity : BaseActivity() {
                 onOpenScheduled = { startActivity(Intent(this, ScheduledTasksActivity::class.java)) },
                 onOpenToolBrowser = { startActivity(Intent(this, ToolBrowserActivity::class.java)) },
                 onOpenAutoReplies = { startActivity(Intent(this, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
-                onOpenProactive = { startActivity(Intent(this, com.blackclaw.android.ui.proactive.ProactiveAssistantActivity::class.java)) },
+                onOpenProactive = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
                 onOpenShizuku = { startActivity(Intent(this, com.blackclaw.android.ui.shizuku.ShizukuSetupActivity::class.java)) },
                 onOpenAdbPro = { startActivity(Intent(this, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
                 onOpenTelegram = { ChannelConfigActivity.start(this, ChannelConfigActivity.ChannelType.TELEGRAM) },
@@ -363,9 +363,9 @@ private fun ModernSettingsScreen(
                 Divider(colors)
                 NavRow(
                     icon = Icons.Outlined.AutoAwesome,
-                    title = "Asistente proactivo",
-                    subtitle = "La IA actúa sola con tus notificaciones",
-                    trailing = if (com.blackclaw.android.proactive.ProactiveConfig.enabled) "Activo" else "Desactivado",
+                    title = "Asistente",
+                    subtitle = "Recordatorios, notas, alarmas, finanzas + modo proactivo",
+                    trailing = if (com.blackclaw.android.proactive.ProactiveConfig.enabled) "Proactivo ON" else "Abrir",
                     trailingHighlight = com.blackclaw.android.proactive.ProactiveConfig.enabled,
                     colors = colors,
                     onClick = onOpenProactive,

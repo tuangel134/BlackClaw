@@ -25,6 +25,11 @@ class BootReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 XLog.e(TAG, "Failed to re-arm scheduled tasks", e)
             }
+            try {
+                com.blackclaw.android.assistant.AssistantScheduler.rearmAll(context.applicationContext)
+            } catch (e: Exception) {
+                XLog.e(TAG, "Failed to re-arm assistant alarms", e)
+            }
         }
     }
 }

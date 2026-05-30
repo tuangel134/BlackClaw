@@ -55,6 +55,7 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var allowReminders by remember { mutableStateOf(ProactiveConfig.allowReminders) }
     var allowNotes by remember { mutableStateOf(ProactiveConfig.allowNotes) }
     var allowCalendar by remember { mutableStateOf(ProactiveConfig.allowCalendar) }
+    var allowFinance by remember { mutableStateOf(ProactiveConfig.allowFinance) }
     var watchAll by remember { mutableStateOf(ProactiveConfig.watchAllApps) }
     var log by remember { mutableStateOf(ProactiveAssistantManager.recentLog()) }
 
@@ -166,8 +167,11 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     ToggleRow("📝 Guardar notas", "Apunta cosas importantes en tu lista",
                         allowNotes, colors) { allowNotes = it; ProactiveConfig.allowNotes = it }
                     DividerLine(colors)
-                    ToggleRow("📅 Eventos de calendario", "Crea eventos (abre el calendario para confirmar)",
+                    ToggleRow("📅 Eventos de calendario", "Crea eventos en el calendario nativo del asistente",
                         allowCalendar, colors) { allowCalendar = it; ProactiveConfig.allowCalendar = it }
+                    DividerLine(colors)
+                    ToggleRow("💰 Registrar finanzas", "Anota pagos, cargos o ingresos que detecte en notificaciones",
+                        allowFinance, colors) { allowFinance = it; ProactiveConfig.allowFinance = it }
                 }
             }
 

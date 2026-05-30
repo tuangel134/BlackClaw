@@ -113,6 +113,11 @@
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".ui.assistant.AssistantActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".perception.ScreenCapturePermissionActivity"
             android:exported="false"
             android:excludeFromRecents="true"
@@ -253,6 +258,15 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.blackclaw.android.SCHEDULED_TASK" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Native Assistant hub — reminders/alarms/events fired by AlarmManager -->
+        <receiver
+            android:name=".assistant.AssistantReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.blackclaw.android.ASSISTANT_FIRE" />
             </intent-filter>
         </receiver>
 
