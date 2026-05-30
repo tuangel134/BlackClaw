@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
@@ -24,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -67,15 +69,15 @@ class AssistantActivity : BaseActivity() {
     }
 }
 
-private data class TabDef(val type: AssistantItemType, val label: String, val emoji: String)
+private data class TabDef(val type: AssistantItemType, val label: String, val emoji: String, val tint: Color)
 
 private val TABS = listOf(
-    TabDef(AssistantItemType.REMINDER, "Recordatorios", "🔔"),
-    TabDef(AssistantItemType.ALARM, "Alarmas", "⏰"),
-    TabDef(AssistantItemType.NOTE, "Notas", "📝"),
-    TabDef(AssistantItemType.EVENT, "Calendario", "📅"),
-    TabDef(AssistantItemType.ALERT, "Avisos", "📢"),
-    TabDef(AssistantItemType.FINANCE, "Finanzas", "💰"),
+    TabDef(AssistantItemType.REMINDER, "Recordatorios", "🔔", Color(0xFF8B5CF6)),
+    TabDef(AssistantItemType.ALARM, "Alarmas", "⏰", Color(0xFFF59E0B)),
+    TabDef(AssistantItemType.NOTE, "Notas", "📝", Color(0xFF38BDF8)),
+    TabDef(AssistantItemType.EVENT, "Calendario", "📅", Color(0xFFEC4899)),
+    TabDef(AssistantItemType.ALERT, "Avisos", "📢", Color(0xFFEF4444)),
+    TabDef(AssistantItemType.FINANCE, "Finanzas", "💰", Color(0xFF22C55E)),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,12 +100,8 @@ private fun AssistantScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Asistente", fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary)
-                        Text("Tu centro nativo: recordatorios, notas, finanzas…",
-                            fontSize = 11.sp, color = colors.textSecondary)
-                    }
+                    Text("Asistente", fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary)
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -111,81 +109,105 @@ private fun AssistantScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = onOpenProactive) {
-                        Text("Proactivo", color = colors.accent, fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold)
+                    Surface(
+                        color = colors.accent.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.padding(end = 10.dp).clickable { onOpenProactive() },
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, null, tint = colors.accent,
+                                modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Proactivo", color = colors.accent, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = colors.surface, titleContentColor = colors.textPrimary),
+                    containerColor = colors.background, titleContentColor = colors.textPrimary),
             )
         },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showAdd = true },
-                containerColor = colors.accent, contentColor = colors.background,
-            ) { Icon(Icons.Default.Add, "Añadir") }
+                containerColor = tab.tint, contentColor = Color.White,
+                elevation = FloatingActionButtonDefaults.elevation(6.dp),
+            ) { Icon(Icons.Default.Add, "Añadir ${tab.label}") }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            // Tab chips
+            // Hero header: gradient card summarizing the selected category.
+            HeroHeader(tab, items, colors, refresh)
+
+            // Pill tabs with counts
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TABS.forEachIndexed { i, t ->
                     val sel = i == selectedTab
+                    val count = remember(refresh, i) { AssistantStore.byType(t.type).count { !it.done } }
                     Surface(
-                        color = if (sel) colors.accent else colors.surface,
-                        shape = RoundedCornerShape(20.dp),
+                        color = if (sel) t.tint else colors.surface,
+                        shape = RoundedCornerShape(22.dp),
                         border = if (sel) null else BorderStroke(0.5.dp, colors.aiBubbleBorder),
                         modifier = Modifier.clickable { selectedTab = i },
                     ) {
-                        Text("${t.emoji} ${t.label}", fontSize = 13.sp,
-                            color = if (sel) colors.background else colors.textSecondary,
-                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(t.emoji, fontSize = 13.sp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(t.label, fontSize = 13.sp,
+                                color = if (sel) Color.White else colors.textSecondary,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
+                            if (count > 0) {
+                                Spacer(Modifier.width(6.dp))
+                                Box(
+                                    Modifier.clip(CircleShape)
+                                        .background(if (sel) Color.White.copy(alpha = 0.3f)
+                                                    else t.tint.copy(alpha = 0.2f))
+                                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                                ) {
+                                    Text("$count", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                        color = if (sel) Color.White else t.tint)
+                                }
+                            }
+                        }
                     }
-                }
-            }
-
-            // Finance balance banner
-            if (tab.type == AssistantItemType.FINANCE) {
-                val bal = remember(refresh) { AssistantStore.financeBalance() }
-                Surface(
-                    color = if (bal >= 0) Color(0xFF22C55E).copy(alpha = 0.12f)
-                            else Color(0xFFEF4444).copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-                ) {
-                    Text("Balance: ${"%.2f".format(bal)}",
-                        fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                        color = if (bal >= 0) Color(0xFF22C55E) else Color(0xFFEF4444),
-                        modifier = Modifier.padding(14.dp))
                 }
             }
 
             if (items.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(tab.emoji, fontSize = 40.sp)
-                        Spacer(Modifier.height(8.dp))
+                        Box(
+                            Modifier.size(80.dp).clip(CircleShape)
+                                .background(tab.tint.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(tab.emoji, fontSize = 38.sp) }
+                        Spacer(Modifier.height(14.dp))
                         Text("Sin ${tab.label.lowercase()} todavía",
-                            fontSize = 14.sp, color = colors.textSecondary)
-                        Text("Añade uno o deja que la IA lo haga por ti",
+                            fontSize = 15.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Toca + o pídeselo a la IA en el chat",
                             fontSize = 12.sp, color = colors.textTertiary)
                     }
                 }
             } else {
                 LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 90.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(items, key = { it.id }) { item ->
                         ItemCard(
-                            item = item, colors = colors,
+                            item = item, tint = tab.tint, colors = colors,
                             onToggle = { AssistantStore.toggleDone(item.id); refresh++ },
                             onDelete = {
                                 AssistantScheduler.cancel(ctx, item.id)
@@ -207,38 +229,100 @@ private fun AssistantScreen(
     }
 }
 
+/** Gradient hero summarizing the active category. */
+@Composable
+private fun HeroHeader(
+    tab: TabDef,
+    items: List<AssistantItem>,
+    colors: BlackClawColors,
+    refresh: Int,
+) {
+    val subtitle: String = when (tab.type) {
+        AssistantItemType.FINANCE -> {
+            val bal = remember(refresh) { AssistantStore.financeBalance() }
+            "Balance ${"%.2f".format(bal)}"
+        }
+        else -> {
+            val pending = items.count { !it.done }
+            val next = items.filter { it.triggerAtMs > System.currentTimeMillis() && !it.done }
+                .minByOrNull { it.triggerAtMs }
+            when {
+                next != null -> "Próximo: ${AssistantTime.format(next.triggerAtMs)}"
+                pending > 0 -> "$pending pendiente${if (pending == 1) "" else "s"}"
+                else -> "Todo al día"
+            }
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+    ) {
+        Box(
+            Modifier.fillMaxWidth().background(
+                Brush.linearGradient(
+                    listOf(tab.tint.copy(alpha = 0.85f), tab.tint.copy(alpha = 0.45f))
+                )
+            ),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(52.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(tab.emoji, fontSize = 26.sp) }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(tab.label, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(subtitle, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ItemCard(
     item: AssistantItem,
+    tint: Color,
     colors: BlackClawColors,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val checkable = item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE
     Surface(
-        color = colors.surface, shape = RoundedCornerShape(12.dp),
+        color = colors.surface, shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(0.5.dp, colors.aiBubbleBorder),
     ) {
         Row(
             Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE) {
+            // Leading: checkbox for todos/reminders, colored emoji badge otherwise.
+            if (checkable) {
                 Box(
-                    Modifier.size(26.dp).clip(CircleShape)
-                        .background(if (item.done) colors.accent else Color.Transparent)
-                        .border(1.5.dp, colors.accent, CircleShape)
+                    Modifier.size(28.dp).clip(CircleShape)
+                        .background(if (item.done) tint else Color.Transparent)
+                        .border(2.dp, tint, CircleShape)
                         .clickable { onToggle() },
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (item.done) Icon(Icons.Default.Check, null, tint = colors.background,
-                        modifier = Modifier.size(16.dp))
+                    if (item.done) Icon(Icons.Default.Check, null, tint = Color.White,
+                        modifier = Modifier.size(17.dp))
                 }
-                Spacer(Modifier.width(12.dp))
+            } else {
+                Box(
+                    Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
+                        .background(tint.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(TABS.first { it.type == item.type }.emoji, fontSize = 19.sp) }
             }
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     item.title, fontSize = 15.sp, color = colors.textPrimary,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     textDecoration = if (item.done) TextDecoration.LineThrough else null,
                 )
                 if (item.body.isNotBlank()) {
@@ -247,23 +331,23 @@ private fun ItemCard(
                 val meta = buildList {
                     if (item.triggerAtMs > 0) add(AssistantTime.format(item.triggerAtMs))
                     if (item.repeat != "none") add("· ${item.repeat}")
-                    if (item.source == "ai") add("· IA")
+                    if (item.source == "ai") add("· 🐾 IA")
                 }.joinToString(" ")
                 if (meta.isNotBlank()) {
-                    Text(meta, fontSize = 11.sp, color = colors.textTertiary,
-                        modifier = Modifier.padding(top = 2.dp))
+                    Spacer(Modifier.height(3.dp))
+                    Text(meta, fontSize = 11.sp, color = tint)
                 }
             }
             if (item.type == AssistantItemType.FINANCE) {
                 val sign = if (item.amount >= 0) "+" else ""
                 Text("$sign${"%.2f".format(item.amount)}",
-                    fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
                     color = if (item.amount >= 0) Color(0xFF22C55E) else Color(0xFFEF4444))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
             }
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                 Icon(Icons.Default.Delete, "Borrar", tint = colors.textTertiary,
-                    modifier = Modifier.size(20.dp))
+                    modifier = Modifier.size(18.dp))
             }
         }
     }
