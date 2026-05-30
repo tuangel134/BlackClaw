@@ -162,6 +162,7 @@ class ComposeChatActivity : ComponentActivity() {
                 onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
                 onOpenModels = { startActivity(Intent(this, LlmConfigActivity::class.java)) },
                 onOpenAutoReplies = { startActivity(Intent(this, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
+                onOpenAssistant = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
                 onFixPermissions = { startActivity(Intent(this, SettingsActivity::class.java)) },
                 onAttach = { Toast.makeText(this, "Image upload coming soon", Toast.LENGTH_SHORT).show() },
                 conversations = _conversations.toList(),

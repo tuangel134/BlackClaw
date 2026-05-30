@@ -56,6 +56,18 @@ object AmbientContext {
                     parts.add("privileged shell: none (use accessibility tap/swipe)")
             }
         }
+        runCatching {
+            val pendingRem = com.blackclaw.android.assistant.AssistantStore
+                .countPending(com.blackclaw.android.assistant.AssistantItemType.REMINDER)
+            val alarms = com.blackclaw.android.assistant.AssistantStore
+                .byType(com.blackclaw.android.assistant.AssistantItemType.ALARM).size
+            val notes = com.blackclaw.android.assistant.AssistantStore
+                .countPending(com.blackclaw.android.assistant.AssistantItemType.NOTE)
+            if (pendingRem > 0 || alarms > 0 || notes > 0) {
+                parts.add("assistant hub: $pendingRem reminders, $alarms alarms, $notes notes " +
+                    "(use assistant_list to read, assistant_reminder/alarm/note/event/finance to add)")
+            }
+        }
         return if (parts.isEmpty()) "" else parts.joinToString("; ")
     }
 

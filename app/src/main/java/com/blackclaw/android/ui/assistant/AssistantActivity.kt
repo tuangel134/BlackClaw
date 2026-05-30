@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.view.WindowCompat
 import com.blackclaw.android.assistant.AssistantItem
 import com.blackclaw.android.assistant.AssistantItemType
@@ -278,36 +280,101 @@ private fun AddItemDialog(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
-    var whenStr by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("none") }
     val needsTime = type == AssistantItemType.REMINDER || type == AssistantItemType.ALARM ||
         type == AssistantItemType.EVENT
+    val canRepeat = type == AssistantItemType.ALARM || type == AssistantItemType.REMINDER
     val isFinance = type == AssistantItemType.FINANCE
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = colors.surface,
-        title = { Text("Nuevo ${TABS.first { it.type == type }.label.lowercase().trimEnd('s')}",
-            color = colors.textPrimary) },
-        text = {
-            Column {
+    // Time state
+    val cal = remember { java.util.Calendar.getInstance() }
+    val timeState = rememberTimePickerState(
+        initialHour = cal.get(java.util.Calendar.HOUR_OF_DAY),
+        initialMinute = cal.get(java.util.Calendar.MINUTE),
+        is24Hour = true,
+    )
+    var dateMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val tabLabel = TABS.first { it.type == type }.label.lowercase().trimEnd('s')
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            color = colors.surface, shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+            ) {
+                Text("Nuevo $tabLabel", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary)
+                Spacer(Modifier.height(16.dp))
+
                 OutlinedTextField(
                     value = title, onValueChange = { title = it },
                     label = { Text(if (isFinance) "Descripción" else "Título") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(colors),
                 )
+
                 if (needsTime) {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = whenStr, onValueChange = { whenStr = it },
-                        label = { Text("Cuándo (ej: tomorrow 09:00, in 2h, 07:30)") },
-                        singleLine = true, modifier = Modifier.fillMaxWidth(),
-                        colors = fieldColors(colors),
-                    )
+                    Spacer(Modifier.height(16.dp))
+                    // Date chip (for reminders/events; alarms default to next occurrence)
+                    if (type != AssistantItemType.ALARM) {
+                        AssistChipRow(
+                            label = "📅 ${AssistantTime.format(stripTime(dateMs))}".substringBefore(" "),
+                            fullLabel = java.text.SimpleDateFormat("EEE dd MMM", java.util.Locale.getDefault())
+                                .format(java.util.Date(dateMs)),
+                            colors = colors,
+                        ) { showDatePicker = true }
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    Text("HORA", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = colors.textTertiary, letterSpacing = 0.8.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TimePicker(
+                            state = timeState,
+                            colors = TimePickerDefaults.colors(
+                                clockDialColor = colors.aiBubble,
+                                clockDialSelectedContentColor = colors.background,
+                                clockDialUnselectedContentColor = colors.textPrimary,
+                                selectorColor = colors.accent,
+                                periodSelectorBorderColor = colors.accent,
+                                timeSelectorSelectedContainerColor = colors.accent.copy(alpha = 0.25f),
+                                timeSelectorUnselectedContainerColor = colors.aiBubble,
+                                timeSelectorSelectedContentColor = colors.textPrimary,
+                                timeSelectorUnselectedContentColor = colors.textSecondary,
+                            ),
+                        )
+                    }
                 }
-                if (isFinance) {
+
+                if (canRepeat) {
                     Spacer(Modifier.height(8.dp))
+                    Text("REPETIR", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = colors.textTertiary, letterSpacing = 0.8.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("none" to "Una vez", "daily" to "Diario", "weekly" to "Semanal")
+                            .forEach { (value, lbl) ->
+                                val sel = repeat == value
+                                Surface(
+                                    color = if (sel) colors.accent else colors.aiBubble,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.clickable { repeat = value },
+                                ) {
+                                    Text(lbl, fontSize = 12.sp,
+                                        color = if (sel) colors.background else colors.textSecondary,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                }
+                            }
+                    }
+                }
+
+                if (isFinance) {
+                    Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = amount, onValueChange = { amount = it },
                         label = { Text("Monto (negativo = gasto)") },
@@ -315,35 +382,87 @@ private fun AddItemDialog(
                         colors = fieldColors(colors),
                     )
                 }
-                if (!isFinance) {
-                    Spacer(Modifier.height(8.dp))
+                if (!isFinance && type != AssistantItemType.ALARM) {
+                    Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = body, onValueChange = { body = it },
                         label = { Text("Detalle (opcional)") },
                         modifier = Modifier.fillMaxWidth(), colors = fieldColors(colors),
                     )
                 }
+
+                Spacer(Modifier.height(20.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancelar", color = colors.textSecondary)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (title.isBlank()) return@Button
+                            val ts = if (needsTime) composeTrigger(type, dateMs, timeState.hour, timeState.minute) else 0L
+                            val amt = if (isFinance) amount.toDoubleOrNull() ?: 0.0 else 0.0
+                            val item = AssistantStore.create(
+                                type = type, title = title.trim(), body = body.trim(),
+                                triggerAtMs = ts, repeat = repeat, amount = amt, source = "user",
+                            )
+                            if (ts > 0) AssistantScheduler.arm(ctx, item)
+                            onSave()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.accent, contentColor = colors.background),
+                        shape = RoundedCornerShape(12.dp),
+                    ) { Text("Guardar", fontWeight = FontWeight.SemiBold) }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (title.isBlank()) return@TextButton
-                    val ts = if (needsTime) AssistantTime.parse(whenStr) else 0L
-                    val amt = if (isFinance) amount.toDoubleOrNull() ?: 0.0 else 0.0
-                    val item = AssistantStore.create(
-                        type = type, title = title.trim(), body = body.trim(),
-                        triggerAtMs = ts, amount = amt, source = "user",
-                    )
-                    if (ts > 0) AssistantScheduler.arm(ctx, item)
-                    onSave()
-                },
-            ) { Text("Guardar", color = colors.accent, fontWeight = FontWeight.SemiBold) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar", color = colors.textSecondary) }
-        },
-    )
+        }
+    }
+
+    if (showDatePicker) {
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = dateMs)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dateState.selectedDateMillis?.let { dateMs = it }
+                    showDatePicker = false
+                }) { Text("OK", color = colors.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancelar", color = colors.textSecondary)
+                }
+            },
+        ) { DatePicker(state = dateState) }
+    }
+}
+
+/** Combine a chosen date (ms) + hour/minute into a trigger timestamp. For
+ *  alarms with no date, pick the next occurrence of that time. */
+private fun composeTrigger(type: AssistantItemType, dateMs: Long, hour: Int, minute: Int): Long {
+    val cal = java.util.Calendar.getInstance()
+    if (type != AssistantItemType.ALARM) cal.timeInMillis = dateMs
+    cal.set(java.util.Calendar.HOUR_OF_DAY, hour)
+    cal.set(java.util.Calendar.MINUTE, minute)
+    cal.set(java.util.Calendar.SECOND, 0)
+    cal.set(java.util.Calendar.MILLISECOND, 0)
+    if (type == AssistantItemType.ALARM && cal.timeInMillis <= System.currentTimeMillis()) {
+        cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+    }
+    return cal.timeInMillis
+}
+
+private fun stripTime(ms: Long): Long = ms
+
+@Composable
+private fun AssistChipRow(label: String, fullLabel: String, colors: BlackClawColors, onClick: () -> Unit) {
+    Surface(
+        color = colors.aiBubble, shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Text("📅 $fullLabel", fontSize = 14.sp, color = colors.textPrimary,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

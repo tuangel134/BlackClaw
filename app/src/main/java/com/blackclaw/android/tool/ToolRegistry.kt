@@ -70,6 +70,8 @@ object ToolRegistry {
         register(AssistantEventTool())
         register(AssistantAlertTool())
         register(AssistantFinanceTool())
+        register(AssistantListTool())
+        register(AssistantRemoveTool())
 
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())

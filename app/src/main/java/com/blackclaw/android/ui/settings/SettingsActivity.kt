@@ -360,16 +360,6 @@ private fun ModernSettingsScreen(
                     colors = colors,
                     onClick = onOpenAutoReplies,
                 )
-                Divider(colors)
-                NavRow(
-                    icon = Icons.Outlined.AutoAwesome,
-                    title = "Asistente",
-                    subtitle = "Recordatorios, notas, alarmas, finanzas + modo proactivo",
-                    trailing = if (com.blackclaw.android.proactive.ProactiveConfig.enabled) "Proactivo ON" else "Abrir",
-                    trailingHighlight = com.blackclaw.android.proactive.ProactiveConfig.enabled,
-                    colors = colors,
-                    onClick = onOpenProactive,
-                )
             }
 
             // ── Avanzado ───────────────────────────────────────────────────────

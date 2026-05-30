@@ -138,6 +138,7 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onOpenModels: () -> Unit,
     onOpenAutoReplies: () -> Unit = {},
+    onOpenAssistant: () -> Unit = {},
     onFixPermissions: () -> Unit,
     onAttach: () -> Unit,
     conversations: List<ChatHistoryManager.ConversationSummary>,
@@ -217,6 +218,10 @@ fun ChatScreen(
                     onAutoReplies = {
                         scope.launch { drawerState.close() }
                         onOpenAutoReplies()
+                    },
+                    onAssistant = {
+                        scope.launch { drawerState.close() }
+                        onOpenAssistant()
                     },
                     colors = colors,
                 )
@@ -1689,6 +1694,7 @@ private fun SidebarContent(
     onSettings: () -> Unit,
     onModels: () -> Unit,
     onAutoReplies: () -> Unit,
+    onAssistant: () -> Unit = {},
     colors: BlackClawColors,
 ) {
     var actionTarget by remember { mutableStateOf<ChatHistoryManager.ConversationSummary?>(null) }
@@ -1902,6 +1908,23 @@ private fun SidebarContent(
         }
 
         HorizontalDivider(color = colors.divider)
+
+        // Assistant hub — reminders, alarms, notes, calendar, finance (native)
+        TextButton(
+            onClick = onAssistant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("Asistente", color = colors.textPrimary, fontWeight = FontWeight.Medium)
+            }
+        }
 
         // Bottom nav
         TextButton(

@@ -57,16 +57,18 @@ object ToolSelector {
         ),
         Category(
             triggers = listOf("calendario", "evento", "cita", "calendar", "event", "reunion", "reunión"),
-            tools = listOf("get_calendar_events", "create_calendar_event"),
+            tools = listOf("assistant_event", "assistant_list", "get_calendar_events", "create_calendar_event"),
         ),
         Category(
-            triggers = listOf("alarma", "alarm", "recordatorio", "reminder", "despierta", "timer", "temporizador"),
-            tools = listOf("set_alarm", "schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"),
+            triggers = listOf("alarma", "alarm", "recordatorio", "reminder", "despierta", "timer", "temporizador",
+                "avisame", "avísame", "recuerdame", "recuérdame"),
+            tools = listOf("assistant_alarm", "assistant_reminder", "assistant_list", "assistant_remove",
+                "set_alarm", "schedule_task"),
         ),
         Category(
             triggers = listOf("cron", "programa", "schedule", "cada dia", "cada día", "diariamente",
                 "periodic", "repite", "automatiza"),
-            tools = listOf("schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"),
+            tools = listOf("assistant_reminder", "schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"),
         ),
         Category(
             triggers = listOf("volumen", "volume", "brillo", "brightness", "wifi", "bluetooth",
@@ -159,6 +161,15 @@ object ToolSelector {
             triggers = listOf("recuerda", "remember", "memoria", "nota", "apunta", "olvida", "forget"),
             tools = listOf("remember_fact", "recall_facts", "forget_fact",
                 "kb_write", "kb_read", "kb_search", "kb_append", "kb_add_todo"),
+        ),
+        Category(
+            triggers = listOf("nota", "note", "apunta", "apuntar", "anota", "todo", "tarea pendiente", "lista"),
+            tools = listOf("assistant_note", "assistant_list", "kb_add_todo", "kb_write"),
+        ),
+        Category(
+            triggers = listOf("finanza", "finanzas", "gasto", "gastos", "ingreso", "pago", "pagué", "compré",
+                "cobro", "salario", "dinero", "balance", "presupuesto", "finance", "expense", "income"),
+            tools = listOf("assistant_finance", "assistant_list"),
         ),
         Category(
             triggers = listOf("skill", "habilidad", "ejecuta skill"),

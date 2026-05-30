@@ -85,8 +85,15 @@ class AssistantReceiver : BroadcastReceiver() {
             XLog.w(TAG, "Fire for unknown item $id"); return
         }
 
+        // Alarms ring full-screen (sound loop + vibration + dismiss/snooze),
+        // not a passive notification.
+        if (item.type == AssistantItemType.ALARM) {
+            ringAlarm(context, item)
+            rescheduleIfRepeating(context, item)
+            return
+        }
+
         val emoji = when (item.type) {
-            AssistantItemType.ALARM -> "⏰"
             AssistantItemType.REMINDER -> "🔔"
             AssistantItemType.EVENT -> "📅"
             AssistantItemType.ALERT -> "📢"
@@ -95,25 +102,67 @@ class AssistantReceiver : BroadcastReceiver() {
         val title = "$emoji ${item.title}"
         val body = item.body.ifBlank {
             when (item.type) {
-                AssistantItemType.ALARM -> "Alarma"
                 AssistantItemType.EVENT -> "Evento ahora"
                 else -> "Recordatorio"
             }
         }
-        val high = item.type == AssistantItemType.ALARM || item.type == AssistantItemType.ALERT ||
-            item.type == AssistantItemType.REMINDER
+        val high = item.type == AssistantItemType.ALERT || item.type == AssistantItemType.REMINDER
         postNotification(context, title, body, high)
         XLog.i(TAG, "Fired assistant ${item.type} '${item.title}'")
 
-        // Repeat handling.
+        rescheduleIfRepeating(context, item)
+    }
+
+    private fun rescheduleIfRepeating(context: Context, item: AssistantItem) {
         val next = nextOccurrence(item)
         if (next != null) {
             val updated = item.copy(triggerAtMs = next)
             AssistantStore.upsert(updated)
             AssistantScheduler.arm(context, updated)
         }
-        // One-shot items stay in the list (marked by time in the past) so the
-        // user still sees history; they just won't re-fire.
+    }
+
+    /**
+     * Fire a real alarm. We BOTH start the full-screen activity AND post a
+     * full-screen-intent notification. On Android 10+ background activity
+     * starts can be blocked, in which case the full-screen-intent notification
+     * is what surfaces the ringing UI — so we always have a path that works.
+     */
+    private fun ringAlarm(context: Context, item: AssistantItem) {
+        XLog.i(TAG, "Ringing ALARM '${item.title}'")
+        val ringIntent = Intent(context, AlarmRingActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(AlarmRingActivity.EXTRA_TITLE, item.title)
+            putExtra(AlarmRingActivity.EXTRA_ITEM_ID, item.id)
+        }
+        // Try direct launch first (works when app recently foregrounded / has perm).
+        runCatching { context.startActivity(ringIntent) }
+            .onFailure { XLog.w(TAG, "Direct alarm activity launch failed: ${it.message}") }
+
+        // Always post a full-screen-intent notification as the reliable path.
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(
+                CHANNEL_ID_HIGH, "Asistente · Alarmas y avisos",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply { description = "Alarmas y avisos importantes"; enableVibration(true) }
+            nm.createNotificationChannel(ch)
+        }
+        val fsPending = PendingIntent.getActivity(
+            context, item.id.hashCode(), ringIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_ID_HIGH)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setContentTitle("⏰ ${item.title}")
+            .setContentText("Alarma")
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(fsPending, true)
+            .setAutoCancel(true)
+            .setOngoing(true)
+            .build()
+        nm.notify(item.id.hashCode(), n)
     }
 
     private fun nextOccurrence(item: AssistantItem): Long? {

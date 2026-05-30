@@ -179,3 +179,62 @@ class AssistantFinanceTool : BaseTool() {
         return ToolResult.success("Registrado: $desc ($sign$amount). Balance: ${"%.2f".format(bal)}")
     }
 }
+
+/** Read what's currently in the Assistant hub (so the AI can manage it). */
+class AssistantListTool : BaseTool() {
+    override fun getName() = "assistant_list"
+    override fun getDisplayName() = "Ver asistente"
+    override fun getDescriptionEN() =
+        "List items in the Assistant hub. Optional type filter: reminder|alarm|note|event|alert|finance. " +
+        "Use to check what reminders/alarms/notes/events exist, the finance balance, or before " +
+        "editing/avoiding duplicates. Returns a compact summary with ids."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "lista lo que hay en el hub del asistente (recordatorios, notas, finanzas…)"
+    override fun getParameters() = listOf(
+        ToolParameter("type", "string",
+            "Optional filter: reminder|alarm|note|event|alert|finance. Omit for all.", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val filter = optionalString(params, "type", "").trim().uppercase()
+        val items = if (filter.isNotBlank()) {
+            val t = runCatching { com.blackclaw.android.assistant.AssistantItemType.valueOf(filter) }.getOrNull()
+                ?: return ToolResult.error("Tipo inválido. Usa reminder|alarm|note|event|alert|finance.")
+            com.blackclaw.android.assistant.AssistantStore.byType(t)
+        } else {
+            com.blackclaw.android.assistant.AssistantStore.all()
+        }
+        if (items.isEmpty()) return ToolResult.success("El hub del asistente está vacío.")
+        val sb = StringBuilder()
+        items.forEach { i ->
+            sb.append("[${i.id}] ${i.type.name.lowercase()}: ${i.title}")
+            if (i.triggerAtMs > 0) sb.append(" @ ${com.blackclaw.android.assistant.AssistantTime.format(i.triggerAtMs)}")
+            if (i.type == com.blackclaw.android.assistant.AssistantItemType.FINANCE) sb.append(" (${i.amount})")
+            if (i.done) sb.append(" ✓")
+            sb.append('\n')
+        }
+        val bal = com.blackclaw.android.assistant.AssistantStore.financeBalance()
+        if (filter.isBlank() || filter == "FINANCE") sb.append("Balance finanzas: ${"%.2f".format(bal)}")
+        return ToolResult.success(sb.toString().trim())
+    }
+}
+
+/** Delete / complete an item by id. */
+class AssistantRemoveTool : BaseTool() {
+    override fun getName() = "assistant_remove"
+    override fun getDisplayName() = "Quitar del asistente"
+    override fun getDescriptionEN() =
+        "Delete an Assistant hub item by id (from assistant_list). Use to cancel a reminder/alarm/event " +
+        "or remove a done note. Cancels its alarm too."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "borra o cancela un elemento del hub por id"
+    override fun getParameters() = listOf(
+        ToolParameter("id", "string", "Item id from assistant_list.", true),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val id = requireString(params, "id").trim()
+        com.blackclaw.android.assistant.AssistantScheduler.cancel(ClawApplication.instance, id)
+        val ok = com.blackclaw.android.assistant.AssistantStore.delete(id)
+        return if (ok) ToolResult.success("Elemento $id eliminado.")
+        else ToolResult.error("No encontré el elemento $id.")
+    }
+}
