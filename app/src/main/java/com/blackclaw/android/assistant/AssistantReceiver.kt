@@ -23,7 +23,12 @@ class AssistantReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION = "com.blackclaw.android.ASSISTANT_FIRE"
         private const val TAG = "AssistantReceiver"
-        private const val CHANNEL_ID = "blackclaw_assistant"
+        // Two channels: a normal one and a HIGH one. Channel importance is fixed
+        // at creation time on Android O+ (you can't upgrade it later), so we use
+        // a dedicated high-importance channel for alarms/alerts so they pop as
+        // heads-up with sound instead of arriving silently.
+        private const val CHANNEL_ID = "blackclaw_assistant_v2"
+        private const val CHANNEL_ID_HIGH = "blackclaw_assistant_high_v2"
 
         /** Tapping the notification opens the Assistant hub. */
         private fun contentIntent(context: Context): PendingIntent {
@@ -39,20 +44,33 @@ class AssistantReceiver : BroadcastReceiver() {
 
         fun postNotification(context: Context, title: String, body: String, highPriority: Boolean) {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = if (highPriority) CHANNEL_ID_HIGH else CHANNEL_ID
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val ch = NotificationChannel(
-                    CHANNEL_ID, "Asistente BlackClaw",
-                    if (highPriority) NotificationManager.IMPORTANCE_HIGH
-                    else NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = "Recordatorios, alarmas y avisos del asistente" }
-                nm.createNotificationChannel(ch)
+                if (highPriority) {
+                    val ch = NotificationChannel(
+                        CHANNEL_ID_HIGH, "Asistente · Alarmas y avisos",
+                        NotificationManager.IMPORTANCE_HIGH,
+                    ).apply {
+                        description = "Alarmas y avisos importantes del asistente"
+                        enableVibration(true)
+                    }
+                    nm.createNotificationChannel(ch)
+                } else {
+                    val ch = NotificationChannel(
+                        CHANNEL_ID, "Asistente · Recordatorios",
+                        NotificationManager.IMPORTANCE_DEFAULT,
+                    ).apply { description = "Recordatorios y notas del asistente" }
+                    nm.createNotificationChannel(ch)
+                }
             }
-            val n = NotificationCompat.Builder(context, CHANNEL_ID)
+            val n = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setPriority(if (highPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+                .setCategory(if (highPriority) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(true)
                 .setContentIntent(contentIntent(context))
                 .build()
@@ -82,7 +100,8 @@ class AssistantReceiver : BroadcastReceiver() {
                 else -> "Recordatorio"
             }
         }
-        val high = item.type == AssistantItemType.ALARM || item.type == AssistantItemType.ALERT
+        val high = item.type == AssistantItemType.ALARM || item.type == AssistantItemType.ALERT ||
+            item.type == AssistantItemType.REMINDER
         postNotification(context, title, body, high)
         XLog.i(TAG, "Fired assistant ${item.type} '${item.title}'")
 

@@ -62,6 +62,14 @@ object ProactiveAssistantManager {
     }
 
     private fun process(pkg: String, title: String, text: String) {
+        // Some OEMs / apps redact notification content ("Contenido oculto",
+        // "Datos confidenciales ocultos", "1 mensaje nuevo"). We can't classify
+        // what we can't read — skip quietly but leave a breadcrumb in the log so
+        // the user understands why nothing happened.
+        if (isRedacted(title, text)) {
+            XLog.d(TAG, "Proactive: notification content hidden by OS/app for $pkg")
+            return
+        }
         val decision = classify(pkg, title, text) ?: return
         val action = decision.optString("action", "ignore").lowercase()
         if (action == "ignore") {
@@ -70,6 +78,18 @@ object ProactiveAssistantManager {
         }
         XLog.i(TAG, "Proactive decision for $pkg: $action — ${decision.optString("reason")}")
         executeDecision(pkg, title, text, action, decision)
+    }
+
+    private fun isRedacted(title: String, text: String): Boolean {
+        val s = (title + " " + text).lowercase()
+        val markers = listOf(
+            "contenido oculto", "datos confidenciales", "confidential",
+            "content hidden", "nuevo mensaje", "new message", "mensajes nuevos",
+            "messages", "te ha enviado un mensaje", "sent you a message",
+        )
+        // Treat as redacted only when the text is essentially just a marker
+        // (very short and matching), not when it merely contains the word.
+        return text.length < 40 && markers.any { s.contains(it) }
     }
 
     /**
