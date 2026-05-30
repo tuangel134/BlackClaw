@@ -66,7 +66,8 @@ public class ClawNotificationListener extends NotificationListenerService {
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (sbn == null) return;
         String pkg = sbn.getPackageName();
-        if (!MESSAGING_APPS.contains(pkg)) return;
+        // Never react to our own notifications (avoids feedback loops).
+        if (pkg != null && pkg.equals("com.blackclaw.android")) return;
 
         Notification notification = sbn.getNotification();
         if (notification == null || notification.extras == null) return;
@@ -75,6 +76,19 @@ public class ClawNotificationListener extends NotificationListenerService {
         String title = extras.getString(Notification.EXTRA_TITLE, "");
         String text = extras.getString(Notification.EXTRA_TEXT, "");
 
+        if (title.isEmpty() && text.isEmpty()) return;
+
+        // Proactive Assistant sees notifications from ANY app (it applies its
+        // own per-app filter + LLM importance check). Fail-safe: never throws.
+        try {
+            com.blackclaw.android.proactive.ProactiveAssistantManager.INSTANCE
+                    .onNotification(pkg, title, text);
+        } catch (Throwable t) {
+            XLog.w(TAG, "Proactive hook failed: " + t.getMessage());
+        }
+
+        // Auto-Replies only care about messaging apps and need both fields.
+        if (!MESSAGING_APPS.contains(pkg)) return;
         if (title.isEmpty() || text.isEmpty()) return;
 
         XLog.d(TAG, "Notification from " + pkg + ": title='" + title + "' text='" + text + "'");

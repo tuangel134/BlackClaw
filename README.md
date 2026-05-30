@@ -116,6 +116,15 @@ touching the phone.
   can read and tap text in games and custom-rendered surfaces where the
   accessibility tree is empty.
 
+### Proactive assistant
+- Opt-in mode where **every incoming notification wakes the AI** for a cheap
+  one-shot check against your natural-language instructions
+- If something is time-sensitive and you didn't act, it acts for you: a night
+  message saying *"be at the office at 7am"* with no alarm set → it sets the
+  alarm; a deadline → it adds a reminder; something worth remembering → a note
+- You choose which autonomous actions are allowed (alarms, reminders, notes,
+  calendar) and which apps to watch; a log shows everything it did
+
 ### Messaging & remote control
 - Send messages on WhatsApp, Telegram, Discord, and more
 - **Drive the phone remotely** by messaging it from a Telegram / Discord / WeChat
