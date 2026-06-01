@@ -281,3 +281,56 @@ class AssistantLocationReminderTool : BaseTool() {
         return ToolResult.success("Recordatorio por ubicación: '$title' cuando $verb ese lugar (${radius}m).")
     }
 }
+
+/** Add an item to the shopping list. */
+class AssistantShoppingTool : BaseTool() {
+    override fun getName() = "assistant_shopping_add"
+    override fun getDisplayName() = "Lista de compras"
+    override fun getDescriptionEN() =
+        "Add one or more items to the shopping list in the Assistant hub. " +
+        "Pass a single item in 'item', or several comma-separated in 'items'."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "añade artículos a la lista de compras"
+    override fun getParameters() = listOf(
+        ToolParameter("item", "string", "A single item to add.", false),
+        ToolParameter("items", "string", "Comma-separated items to add.", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val single = optionalString(params, "item", "").trim()
+        val multi = optionalString(params, "items", "")
+        val list = buildList {
+            if (single.isNotBlank()) add(single)
+            addAll(multi.split(",").map { it.trim() }.filter { it.isNotBlank() })
+        }.distinct()
+        if (list.isEmpty()) return ToolResult.error("Indica 'item' o 'items'.")
+        list.forEach {
+            com.blackclaw.android.assistant.AssistantStore.create(
+                type = com.blackclaw.android.assistant.AssistantItemType.SHOPPING,
+                title = it, source = "ai")
+        }
+        return ToolResult.success("Añadido a la lista: ${list.joinToString()}")
+    }
+}
+
+/** Set the monthly spending budget. */
+class AssistantBudgetTool : BaseTool() {
+    override fun getName() = "assistant_set_budget"
+    override fun getDisplayName() = "Presupuesto"
+    override fun getDescriptionEN() =
+        "Set the user's monthly spending budget. The assistant warns when expenses approach it. " +
+        "amount in the user's currency; 0 clears the budget."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "fija el presupuesto mensual de gastos"
+    override fun getParameters() = listOf(
+        ToolParameter("amount", "number", "Monthly budget amount (0 to clear).", true),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val amount = (params["amount"] as? Number)?.toDouble()
+            ?: params["amount"]?.toString()?.toDoubleOrNull()
+            ?: return ToolResult.error("amount inválido")
+        com.blackclaw.android.assistant.AssistantStore.monthlyBudget = amount.coerceAtLeast(0.0)
+        val spent = com.blackclaw.android.assistant.AssistantStore.monthExpenses()
+        return if (amount <= 0) ToolResult.success("Presupuesto mensual eliminado.")
+        else ToolResult.success("Presupuesto mensual: ${"%.2f".format(amount)}. Gastado este mes: ${"%.2f".format(spent)}.")
+    }
+}

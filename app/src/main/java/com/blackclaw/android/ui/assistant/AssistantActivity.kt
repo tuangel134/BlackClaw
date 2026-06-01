@@ -78,6 +78,7 @@ private val TABS = listOf(
     TabDef(AssistantItemType.EVENT, "Calendario", "📅", Color(0xFFEC4899)),
     TabDef(AssistantItemType.ALERT, "Avisos", "📢", Color(0xFFEF4444)),
     TabDef(AssistantItemType.FINANCE, "Finanzas", "💰", Color(0xFF22C55E)),
+    TabDef(AssistantItemType.SHOPPING, "Compras", "🛒", Color(0xFF14B8A6)),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,6 +91,7 @@ private fun AssistantScreen(
     var selectedTab by remember { mutableStateOf(0) }
     var refresh by remember { mutableStateOf(0) }
     var showAdd by remember { mutableStateOf(false) }
+    var showBudget by remember { mutableStateOf(false) }
 
     val tab = TABS[selectedTab]
     val items = remember(refresh, selectedTab) { AssistantStore.byType(tab.type) }
@@ -109,6 +111,12 @@ private fun AssistantScreen(
                     }
                 },
                 actions = {
+                    if (tab.type == AssistantItemType.FINANCE) {
+                        TextButton(onClick = { showBudget = true }) {
+                            Text("Presupuesto", color = colors.accent, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     Surface(
                         color = colors.accent.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(20.dp),
@@ -227,6 +235,40 @@ private fun AssistantScreen(
             onSave = { showAdd = false; refresh++ },
         )
     }
+
+    if (showBudget) {
+        var budgetText by remember { mutableStateOf(
+            AssistantStore.monthlyBudget.takeIf { it > 0 }?.let { "%.0f".format(it) } ?: "") }
+        AlertDialog(
+            onDismissRequest = { showBudget = false },
+            containerColor = colors.surface,
+            title = { Text("Presupuesto mensual", color = colors.textPrimary) },
+            text = {
+                Column {
+                    Text("Te avisaré cuando tus gastos del mes se acerquen a este límite.",
+                        fontSize = 12.sp, color = colors.textSecondary, lineHeight = 16.sp)
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = budgetText, onValueChange = { budgetText = it },
+                        label = { Text("Monto (0 = sin límite)") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        colors = fieldColors(colors),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    AssistantStore.monthlyBudget = budgetText.toDoubleOrNull() ?: 0.0
+                    showBudget = false; refresh++
+                }) { Text("Guardar", color = colors.accent, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBudget = false }) {
+                    Text("Cancelar", color = colors.textSecondary)
+                }
+            },
+        )
+    }
 }
 
 /** Gradient hero summarizing the active category. */
@@ -240,7 +282,15 @@ private fun HeroHeader(
     val subtitle: String = when (tab.type) {
         AssistantItemType.FINANCE -> {
             val bal = remember(refresh) { AssistantStore.financeBalance() }
-            "Balance ${"%.2f".format(bal)}"
+            val budget = remember(refresh) { AssistantStore.monthlyBudget }
+            if (budget > 0) {
+                val spent = AssistantStore.monthExpenses()
+                "Mes: ${"%.0f".format(spent)} / ${"%.0f".format(budget)} · Balance ${"%.2f".format(bal)}"
+            } else "Balance ${"%.2f".format(bal)}"
+        }
+        AssistantItemType.SHOPPING -> {
+            val pend = items.count { !it.done }
+            if (pend > 0) "$pend por comprar" else "Lista vacía"
         }
         else -> {
             val pending = items.count { !it.done }
@@ -290,7 +340,8 @@ private fun ItemCard(
     onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val checkable = item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE
+    val checkable = item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE ||
+        item.type == AssistantItemType.SHOPPING
     Surface(
         color = colors.surface, shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),

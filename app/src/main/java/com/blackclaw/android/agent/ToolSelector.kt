@@ -170,7 +170,12 @@ object ToolSelector {
         Category(
             triggers = listOf("finanza", "finanzas", "gasto", "gastos", "ingreso", "pago", "pagué", "compré",
                 "cobro", "salario", "dinero", "balance", "presupuesto", "finance", "expense", "income"),
-            tools = listOf("assistant_finance", "assistant_list"),
+            tools = listOf("assistant_finance", "assistant_set_budget", "assistant_list"),
+        ),
+        Category(
+            triggers = listOf("compra", "compras", "lista de compra", "supermercado", "mercado",
+                "shopping", "comprar", "carrito", "despensa"),
+            tools = listOf("assistant_shopping_add", "assistant_list"),
         ),
         Category(
             triggers = listOf("skill", "habilidad", "ejecuta skill"),

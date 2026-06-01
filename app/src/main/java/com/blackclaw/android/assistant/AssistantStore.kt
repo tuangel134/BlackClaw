@@ -17,7 +17,7 @@ import java.util.UUID
  * One flat list keyed by [AssistantItem.type] keeps persistence trivial (a single
  * MMKV JSON array) while the UI filters per tab.
  */
-enum class AssistantItemType { REMINDER, NOTE, ALARM, EVENT, ALERT, FINANCE }
+enum class AssistantItemType { REMINDER, NOTE, ALARM, EVENT, ALERT, FINANCE, SHOPPING }
 
 data class AssistantItem(
     val id: String,
@@ -119,6 +119,8 @@ object AssistantStore {
         items.forEach { arr.put(it.toJson()) }
         KVUtils.putString(KEY, arr.toString())
         KVUtils.sync()
+        // Keep the home-screen widget + QS tile in sync.
+        runCatching { AssistantWidget.refresh(com.blackclaw.android.ClawApplication.instance) }
     }
 
     @Synchronized
@@ -174,6 +176,24 @@ object AssistantStore {
 
     /** Sum of finance amounts (income positive, expense negative). */
     fun financeBalance(): Double = byType(AssistantItemType.FINANCE).sumOf { it.amount }
+
+    /** Total expenses (absolute) in the current calendar month. */
+    fun monthExpenses(): Double {
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 1)
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val monthStart = cal.timeInMillis
+        return byType(AssistantItemType.FINANCE)
+            .filter { it.amount < 0 && it.createdAtMs >= monthStart }
+            .sumOf { -it.amount }
+    }
+
+    /** User's monthly budget (0 = not set). */
+    var monthlyBudget: Double
+        get() = KVUtils.getDouble("assistant_monthly_budget", 0.0)
+        set(v) { KVUtils.putDouble("assistant_monthly_budget", v); KVUtils.sync() }
 
     fun countPending(type: AssistantItemType): Int =
         byType(type).count { !it.done }

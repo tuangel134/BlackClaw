@@ -291,6 +291,30 @@
             </intent-filter>
         </receiver>
 
+        <!-- Assistant home-screen widget -->
+        <receiver
+            android:name=".assistant.AssistantWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/assistant_widget_info" />
+        </receiver>
+
+        <!-- Assistant Quick Settings tile -->
+        <service
+            android:name=".assistant.AssistantTile"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_monochrome"
+            android:label="Asistente"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

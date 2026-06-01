@@ -95,6 +95,17 @@ object ProactiveBriefing {
         if (kind == Kind.NIGHT) {
             val bal = AssistantStore.financeBalance()
             if (bal != 0.0) sb.appendLine("Balance finanzas: ${"%.2f".format(bal)}")
+            val budget = AssistantStore.monthlyBudget
+            if (budget > 0) {
+                val spent = AssistantStore.monthExpenses()
+                sb.appendLine("Presupuesto mes: ${"%.0f".format(spent)} de ${"%.0f".format(budget)} gastado")
+            }
+        }
+        // Shopping list reminder in both briefings.
+        val shopping = AssistantStore.byType(AssistantItemType.SHOPPING).filter { !it.done }
+        if (shopping.isNotEmpty()) {
+            sb.appendLine("Lista de compras (${shopping.size}): " +
+                shopping.take(8).joinToString(", ") { it.title })
         }
 
         // System calendar events in the window (best-effort via existing tool).
