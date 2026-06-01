@@ -91,6 +91,10 @@ object AssistantStore {
     private const val TAG = "AssistantStore"
     private const val KEY = "KEY_ASSISTANT_ITEMS_V1"
 
+    /** Item types whose creation feeds habit learning (timed, user-routine items). */
+    private val HABIT_TRACKED_TYPES = setOf(
+        AssistantItemType.ALARM, AssistantItemType.REMINDER, AssistantItemType.EVENT)
+
     @Synchronized
     fun all(): List<AssistantItem> {
         val raw = KVUtils.getString(KEY, "")
@@ -156,6 +160,13 @@ object AssistantStore {
             lat = lat, lon = lon, radiusM = radiusM, geoTrigger = geoTrigger, source = source,
         )
         upsert(item)
+        // Habit learning: record timed alarm/reminder/event creations so the
+        // assistant can later offer to automate recurring patterns.
+        if (triggerAtMs > 0 && type in HABIT_TRACKED_TYPES) {
+            runCatching {
+                com.blackclaw.android.proactive.HabitTracker.record(type.name.lowercase(), triggerAtMs)
+            }
+        }
         return item
     }
 

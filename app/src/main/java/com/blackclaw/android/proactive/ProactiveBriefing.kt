@@ -49,10 +49,30 @@ object ProactiveBriefing {
             if (ProactiveConfig.speakBriefings) {
                 Speaker.speak("$title. $text")
             }
+            // After the morning briefing, surface at most one newly-learned habit
+            // as a gentle suggestion the user can act on.
+            if (kind == Kind.MORNING) runCatching { surfaceHabitSuggestion() }
             XLog.i(TAG, "$kind briefing delivered")
         } catch (e: Throwable) {
             XLog.w(TAG, "Briefing failed: ${e.message}")
         }
+    }
+
+    /**
+     * Offer ONE newly-learned habit as a suggestion (logged in the hub + push).
+     * We mark it as suggested so we don't nag about the same pattern again.
+     */
+    private fun surfaceHabitSuggestion() {
+        val habit = HabitTracker.newHabits().firstOrNull() ?: return
+        val text = HabitTracker.describe(habit)
+        AssistantStore.create(
+            type = AssistantItemType.ALERT,
+            title = "💡 Patrón detectado",
+            body = text, category = "habit", source = "ai",
+        )
+        AssistantReceiver.postNotification(ClawApplication.instance, "💡 Patrón detectado", text, highPriority = false)
+        HabitTracker.markSuggested(habit)
+        XLog.i(TAG, "Surfaced habit suggestion: ${habit.id}")
     }
 
     /**
