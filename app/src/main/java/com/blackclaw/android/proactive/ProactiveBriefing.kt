@@ -32,11 +32,12 @@ object ProactiveBriefing {
 
     private const val TAG = "ProactiveBriefing"
 
-    enum class Kind { MORNING, NIGHT }
+    enum class Kind { MORNING, NIGHT, WEEKLY }
 
     fun run(kind: Kind) {
         if (!ProactiveConfig.enabled) return
         try {
+            if (kind == Kind.WEEKLY) { runWeeklyFinance(); return }
             val state = gatherState(kind)
             val text = summarize(kind, state) ?: fallback(kind, state)
             val title = if (kind == Kind.MORNING) "☀️ Buenos días" else "🌙 Resumen de la noche"
@@ -52,6 +53,86 @@ object ProactiveBriefing {
         } catch (e: Throwable) {
             XLog.w(TAG, "Briefing failed: ${e.message}")
         }
+    }
+
+    /**
+     * Weekly finance recap: spending/income over the last 7 days, top categories,
+     * and how the month is tracking against the budget. Fully local maths; the LLM
+     * only phrases it nicely (with a deterministic fallback so it always lands).
+     */
+    private fun runWeeklyFinance() {
+        val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        val spent = AssistantStore.expensesSince(weekAgo)
+        val income = AssistantStore.incomeSince(weekAgo)
+        val byCat = AssistantStore.expensesByCategorySince(weekAgo)
+        val budget = AssistantStore.monthlyBudget
+        val monthSpent = AssistantStore.monthExpenses()
+
+        // Build a compact data block.
+        val data = buildString {
+            appendLine("Resumen de los últimos 7 días:")
+            appendLine("- Gastos: ${"%.2f".format(spent)}")
+            if (income > 0) appendLine("- Ingresos: ${"%.2f".format(income)}")
+            appendLine("- Neto: ${"%.2f".format(income - spent)}")
+            if (byCat.isNotEmpty()) {
+                appendLine("Gastos por categoría:")
+                byCat.take(6).forEach { (cat, amt) -> appendLine("- $cat: ${"%.2f".format(amt)}") }
+            }
+            if (budget > 0) {
+                val pct = (monthSpent / budget * 100).toInt()
+                appendLine("Presupuesto del mes: ${"%.0f".format(monthSpent)} de ${"%.0f".format(budget)} ($pct%)")
+                val remaining = budget - monthSpent
+                appendLine("Disponible este mes: ${"%.0f".format(remaining)}")
+            }
+        }.trim()
+
+        val title = "📊 Resumen financiero semanal"
+        val text = summarizeWeekly(data, spent, income, budget, monthSpent) ?: weeklyFallback(spent, income, byCat, budget, monthSpent)
+        AssistantStore.create(type = AssistantItemType.ALERT, title = title, body = text, source = "ai")
+        AssistantReceiver.postNotification(ClawApplication.instance, title, text, highPriority = false)
+        if (ProactiveConfig.speakBriefings) Speaker.speak("$title. $text")
+        XLog.i(TAG, "Weekly finance summary delivered")
+    }
+
+    private fun summarizeWeekly(
+        data: String, spent: Double, income: Double, budget: Double, monthSpent: Double,
+    ): String? {
+        if (spent == 0.0 && income == 0.0 && monthSpent == 0.0) return null
+        val prompt = buildString {
+            appendLine("Eres el asistente personal del usuario. Dale un resumen financiero semanal breve y útil.")
+            appendLine()
+            appendLine("Datos (no inventes nada fuera de esto):")
+            appendLine(data)
+            appendLine()
+            ProactiveMemory.preferencesSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
+            appendLine("Instrucciones:")
+            appendLine("- Máximo 4 líneas, español, tono cercano y claro.")
+            appendLine("- Resalta el gasto total de la semana y la categoría donde más gastó.")
+            appendLine("- Si hay presupuesto, di si va bien o si debe cuidarse el resto del mes.")
+            appendLine("- Da UN consejo accionable si aplica. No inventes cifras.")
+        }
+        return LlmSessionManager.singleShot(prompt, 0.4)?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun weeklyFallback(
+        spent: Double, income: Double, byCat: List<Pair<String, Double>>,
+        budget: Double, monthSpent: Double,
+    ): String {
+        if (spent == 0.0 && income == 0.0 && monthSpent == 0.0)
+            return "Esta semana no registré movimientos de dinero. Si quieres, ve anotando tus gastos y te haré el resumen."
+        val sb = StringBuilder()
+        sb.append("Esta semana gastaste ${"%.2f".format(spent)}")
+        if (income > 0) sb.append(" e ingresaste ${"%.2f".format(income)}")
+        sb.append(".")
+        byCat.firstOrNull()?.let { (cat, amt) ->
+            sb.append(" Donde más gastaste: $cat (${"%.2f".format(amt)}).")
+        }
+        if (budget > 0) {
+            val remaining = budget - monthSpent
+            val pct = (monthSpent / budget * 100).toInt()
+            sb.append(" Llevas $pct% del presupuesto del mes; te quedan ${"%.0f".format(remaining)}.")
+        }
+        return sb.toString()
     }
 
     /** Collect a compact snapshot of what the assistant knows for the window. */

@@ -59,6 +59,7 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var watchAll by remember { mutableStateOf(ProactiveConfig.watchAllApps) }
     var morningOn by remember { mutableStateOf(ProactiveConfig.morningBriefingEnabled) }
     var nightOn by remember { mutableStateOf(ProactiveConfig.nightBriefingEnabled) }
+    var weeklyFinOn by remember { mutableStateOf(ProactiveConfig.weeklyFinanceEnabled) }
     var askUnsure by remember { mutableStateOf(ProactiveConfig.askWhenUnsure) }
     var deepRead by remember { mutableStateOf(ProactiveConfig.deepRead) }
     var speakBriefings by remember { mutableStateOf(ProactiveConfig.speakBriefings) }
@@ -234,6 +235,22 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     DividerLine(colors)
                     ToggleRow("🔊 Leer en voz alta", "Lee el resumen con voz (TTS) al dispararse",
                         speakBriefings, colors) { speakBriefings = it; ProactiveConfig.speakBriefings = it }
+                    DividerLine(colors)
+                    BriefingRow(
+                        emoji = "📊", title = "Resumen financiero semanal",
+                        hour = ProactiveConfig.weeklyFinanceHour, minute = ProactiveConfig.weeklyFinanceMinute,
+                        enabled = weeklyFinOn, colors = colors, weekly = true,
+                        weekday = ProactiveConfig.weeklyFinanceDay,
+                        onToggle = { weeklyFinOn = it; ProactiveConfig.weeklyFinanceEnabled = it
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.WEEKLY) },
+                        onTime = { h, m -> ProactiveConfig.weeklyFinanceHour = h; ProactiveConfig.weeklyFinanceMinute = m
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.WEEKLY) },
+                        onWeekday = { d -> ProactiveConfig.weeklyFinanceDay = d
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.WEEKLY) },
+                    )
                 }
             }
 
@@ -459,24 +476,63 @@ private fun BriefingRow(
     emoji: String, title: String, hour: Int, minute: Int,
     enabled: Boolean, colors: BlackClawColors,
     onToggle: (Boolean) -> Unit, onTime: (Int, Int) -> Unit,
+    weekly: Boolean = false, weekday: Int = java.util.Calendar.SUNDAY,
+    onWeekday: (Int) -> Unit = {},
 ) {
     var showPicker by remember { mutableStateOf(false) }
     var h by remember { mutableStateOf(hour) }
     var m by remember { mutableStateOf(minute) }
+    var wd by remember { mutableStateOf(weekday) }
+    var showDays by remember { mutableStateOf(false) }
+    val dayNames = listOf("Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb")
+    fun dayLabel(d: Int) = dayNames.getOrElse(d - 1) { "Dom" }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text("$emoji $title", fontSize = 14.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium)
-            Text(if (enabled) "Cada día a las %02d:%02d".format(h, m) else "Desactivado",
+            val schedule = if (weekly) "${dayLabel(wd)} a las %02d:%02d".format(h, m)
+                else "Cada día a las %02d:%02d".format(h, m)
+            Text(if (enabled) schedule else "Desactivado",
                 fontSize = 11.sp, color = if (enabled) colors.accent else colors.textSecondary,
                 modifier = Modifier.clickable(enabled = enabled) { showPicker = true })
+            if (weekly && enabled) {
+                Text("Cambiar día: ${dayLabel(wd)}", fontSize = 11.sp, color = colors.textTertiary,
+                    modifier = Modifier.clickable { showDays = true }.padding(top = 2.dp))
+            }
         }
         Spacer(Modifier.width(10.dp))
         Switch(checked = enabled, onCheckedChange = onToggle,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = colors.background, checkedTrackColor = colors.accent))
+    }
+    if (showDays) {
+        AlertDialog(
+            onDismissRequest = { showDays = false },
+            containerColor = colors.surface,
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showDays = false }) { Text("Cerrar", color = colors.textSecondary) }
+            },
+            title = { Text("Día del resumen", color = colors.textPrimary) },
+            text = {
+                Column {
+                    (1..7).forEach { d ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { wd = d; onWeekday(d); showDays = false }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(dayLabel(d), fontSize = 15.sp,
+                                color = if (d == wd) colors.accent else colors.textPrimary,
+                                fontWeight = if (d == wd) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
+                }
+            },
+        )
     }
     if (showPicker) {
         val state = rememberTimePickerState(initialHour = h, initialMinute = m, is24Hour = true)

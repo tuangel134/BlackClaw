@@ -42,6 +42,11 @@ object ProactiveConfig {
     private const val KEY_NIGHT_HOUR = "proactive_night_hour"
     private const val KEY_NIGHT_MIN = "proactive_night_min"
     private const val KEY_SPEAK_BRIEFINGS = "proactive_speak_briefings"
+    // ── Weekly finance summary ──
+    private const val KEY_WEEKLY_ENABLED = "proactive_weekly_finance_enabled"
+    private const val KEY_WEEKLY_DAY = "proactive_weekly_finance_day"   // Calendar.DAY_OF_WEEK (1=Sun..7=Sat)
+    private const val KEY_WEEKLY_HOUR = "proactive_weekly_finance_hour"
+    private const val KEY_WEEKLY_MIN = "proactive_weekly_finance_min"
 
     /** Default guidance the user can edit — sets the assistant's judgment. */
     const val DEFAULT_INSTRUCTIONS =
@@ -162,4 +167,24 @@ object ProactiveConfig {
     var speakBriefings: Boolean
         get() = KVUtils.getBoolean(KEY_SPEAK_BRIEFINGS, false)
         set(v) { KVUtils.putBoolean(KEY_SPEAK_BRIEFINGS, v); KVUtils.sync() }
+
+    // ──────────────────────── Weekly finance summary ────────────────────────
+
+    /** Weekly recap of spending/income vs budget. Off by default. */
+    var weeklyFinanceEnabled: Boolean
+        get() = KVUtils.getBoolean(KEY_WEEKLY_ENABLED, false)
+        set(v) { KVUtils.putBoolean(KEY_WEEKLY_ENABLED, v); KVUtils.sync() }
+
+    /** Day of week to deliver it (Calendar.DAY_OF_WEEK; 1=Sun..7=Sat). Default Sunday. */
+    var weeklyFinanceDay: Int
+        get() = KVUtils.getInt(KEY_WEEKLY_DAY, java.util.Calendar.SUNDAY)
+        set(v) { KVUtils.putInt(KEY_WEEKLY_DAY, v.coerceIn(1, 7)); KVUtils.sync() }
+
+    var weeklyFinanceHour: Int
+        get() = KVUtils.getInt(KEY_WEEKLY_HOUR, 20)
+        set(v) { KVUtils.putInt(KEY_WEEKLY_HOUR, v.coerceIn(0, 23)); KVUtils.sync() }
+
+    var weeklyFinanceMinute: Int
+        get() = KVUtils.getInt(KEY_WEEKLY_MIN, 0)
+        set(v) { KVUtils.putInt(KEY_WEEKLY_MIN, v.coerceIn(0, 59)); KVUtils.sync() }
 }

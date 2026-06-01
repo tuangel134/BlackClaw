@@ -20,16 +20,19 @@ object BriefingScheduler {
     const val EXTRA_KIND = "briefing_kind"
     private const val REQ_MORNING = 70001
     private const val REQ_NIGHT = 70002
+    private const val REQ_WEEKLY = 70003
 
     fun syncAll(context: Context) {
         sync(context, ProactiveBriefing.Kind.MORNING)
         sync(context, ProactiveBriefing.Kind.NIGHT)
+        sync(context, ProactiveBriefing.Kind.WEEKLY)
     }
 
     fun sync(context: Context, kind: ProactiveBriefing.Kind) {
         val enabled = ProactiveConfig.enabled && when (kind) {
             ProactiveBriefing.Kind.MORNING -> ProactiveConfig.morningBriefingEnabled
             ProactiveBriefing.Kind.NIGHT -> ProactiveConfig.nightBriefingEnabled
+            ProactiveBriefing.Kind.WEEKLY -> ProactiveConfig.weeklyFinanceEnabled
         }
         if (enabled) arm(context, kind) else cancel(context, kind)
     }
@@ -38,11 +41,18 @@ object BriefingScheduler {
         val (hour, min) = when (kind) {
             ProactiveBriefing.Kind.MORNING -> ProactiveConfig.morningHour to ProactiveConfig.morningMinute
             ProactiveBriefing.Kind.NIGHT -> ProactiveConfig.nightHour to ProactiveConfig.nightMinute
+            ProactiveBriefing.Kind.WEEKLY -> ProactiveConfig.weeklyFinanceHour to ProactiveConfig.weeklyFinanceMinute
         }
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, min)
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+            if (kind == ProactiveBriefing.Kind.WEEKLY) {
+                set(Calendar.DAY_OF_WEEK, ProactiveConfig.weeklyFinanceDay)
+                // Roll forward to the next matching day if it's already past.
+                if (timeInMillis <= System.currentTimeMillis()) add(Calendar.WEEK_OF_YEAR, 1)
+            } else if (timeInMillis <= System.currentTimeMillis()) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
         }
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pi = pendingIntent(context, kind)
@@ -69,7 +79,11 @@ object BriefingScheduler {
             putExtra(EXTRA_KIND, kind.name)
             `package` = context.packageName
         }
-        val req = if (kind == ProactiveBriefing.Kind.MORNING) REQ_MORNING else REQ_NIGHT
+        val req = when (kind) {
+            ProactiveBriefing.Kind.MORNING -> REQ_MORNING
+            ProactiveBriefing.Kind.NIGHT -> REQ_NIGHT
+            ProactiveBriefing.Kind.WEEKLY -> REQ_WEEKLY
+        }
         return PendingIntent.getBroadcast(
             context, req, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,

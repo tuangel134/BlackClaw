@@ -190,6 +190,26 @@ object AssistantStore {
             .sumOf { -it.amount }
     }
 
+    /** Total expenses (absolute) since [sinceMs]. */
+    fun expensesSince(sinceMs: Long): Double =
+        byType(AssistantItemType.FINANCE)
+            .filter { it.amount < 0 && it.createdAtMs >= sinceMs }
+            .sumOf { -it.amount }
+
+    /** Total income since [sinceMs]. */
+    fun incomeSince(sinceMs: Long): Double =
+        byType(AssistantItemType.FINANCE)
+            .filter { it.amount > 0 && it.createdAtMs >= sinceMs }
+            .sumOf { it.amount }
+
+    /** Expenses (absolute) grouped by category since [sinceMs], biggest first. */
+    fun expensesByCategorySince(sinceMs: Long): List<Pair<String, Double>> =
+        byType(AssistantItemType.FINANCE)
+            .filter { it.amount < 0 && it.createdAtMs >= sinceMs }
+            .groupBy { it.category.ifBlank { "otros" } }
+            .map { (cat, items) -> cat to items.sumOf { -it.amount } }
+            .sortedByDescending { it.second }
+
     /** User's monthly budget (0 = not set). */
     var monthlyBudget: Double
         get() = KVUtils.getDouble("assistant_monthly_budget", 0.0)
