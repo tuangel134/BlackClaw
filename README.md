@@ -129,6 +129,17 @@ touching the phone.
 - The AI manages the hub end-to-end: *"remind me to call the dentist tomorrow
   at 5"*, *"what reminders do I have?"*, *"cancel the 7am alarm"*, *"log that I
   spent 200 on food"* all read and write the native hub
+- **Important alarms with challenges:** mark an alarm as critical and it won't
+  dismiss until you solve a quick math, memory, or typing challenge — so you
+  actually wake up
+- **Shopping list, monthly budget, location reminders** (geofence, no constant
+  GPS), **home-screen widget** and a **Quick Settings tile** showing your next item
+- **Draft replies:** the assistant can draft a suggested answer to a message and
+  drop it in the hub with a one-tap copy button — you stay in control of sending
+- **Recurring bills & subscriptions:** monthly reminders a few days before a
+  charge so you're never surprised
+- **Medication reminders** (one or several daily doses) and **promise tracking**
+  (*"te llamo el lunes"* → follow-up reminder)
 
 ### Proactive assistant
 - Opt-in mode where **every incoming notification wakes the AI** for a cheap
@@ -138,6 +149,14 @@ touching the phone.
   alarm; a deadline → it adds a reminder; a charge → it logs the expense
 - You choose which autonomous actions are allowed (alarms, reminders, notes,
   calendar, finances) and which apps to watch; a log shows everything it did
+- **Daily briefings** (morning / night) summarize what's ahead and suggest
+  actions, optionally **read aloud via TTS** with a configurable voice
+- **Weekly finance summary:** a recap of the week's spending vs your budget, top
+  categories, **spending-anomaly alerts** (this week vs your 4-week average) and
+  **savings-goal** progress — all computed on-device
+- **Gating you control:** quiet hours, max actions per hour, "ask when unsure",
+  and per-app watch lists keep it from being noisy
+- **Export finances to CSV** for a backup or to open in a spreadsheet
 
 ### Messaging & remote control
 - Send messages on WhatsApp, Telegram, Discord, and more
@@ -151,9 +170,10 @@ touching the phone.
 - External automation API (Tasker / MacroDroid / ADB broadcasts)
 
 ### Models — local or cloud, your choice
-- **On-device (private):** Google Gemma E2B / E4B via LiteRT-LM, with optional
-  **uncensored** community ports (Qwen 3 0.6B/1.7B, Llama 3.2 1B, Phi-3 mini —
-  abliterated) downloadable from within the app
+- **On-device (private):** Google Gemma 4 E2B / E4B via LiteRT-LM, with optional
+  **uncensored (abliterated)** Gemma 4 community ports — same architecture, so
+  they load on the same runtime — downloadable from within the app. You can also
+  paste a custom `.litertlm` URL.
 - **Cloud (bring your own key):** OpenAI, Anthropic, Google Gemini, Groq,
   DeepSeek, Cerebras, or any OpenAI-compatible endpoint via a custom base URL
 - Switch modes anytime; chat can stay local while heavy tasks use the cloud
@@ -315,6 +335,15 @@ Grab the latest signed APK from the
 sideload it. BlackClaw is distributed as a sideload APK (not on Play Store) and
 is currently in **beta**.
 
+Two APKs are published per release:
+
+- **`BlackClaw-vX.Y.Z-arm64-v8a.apk`** — recommended for virtually every modern
+  phone (~half the size, includes the on-device LLM).
+- **`BlackClaw-vX.Y.Z-universal.apk`** — fallback that runs on any architecture
+  if the arm64 build won't install.
+
+Verify your download against `SHA256SUMS.txt` with `sha256sum -c SHA256SUMS.txt`.
+
 After installing, grant the one-time permissions the app requests
 (Accessibility, Notification access, Overlay, battery whitelist). For privileged
 control without a PC, follow the in-app **Pro mode** flow to pair over Wireless
@@ -337,6 +366,29 @@ BlackClaw is in beta and OEM behavior varies, so reports are valuable.
 
 Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup,
 PR guidelines, and conventions.
+
+---
+
+## Changelog
+
+### v1.0.0 (beta)
+
+First public beta. Highlights:
+
+- On-device or cloud LLM driving ~90 tools over the accessibility tree
+- **Native Assistant hub:** reminders, alarms (real full-screen ringing, with
+  optional wake-up challenges), notes, calendar, alerts and finances — managed
+  by the AI from chat, with a home-screen widget and Quick Settings tile
+- **Proactive assistant:** notifications wake the AI to act for you, with daily
+  briefings, a **weekly finance summary** (spending anomalies + savings-goal
+  progress), draft replies, recurring-bill reminders, medication reminders and
+  promise tracking
+- Shopping list, monthly budget, location reminders (geofence), CSV finance export
+- TTS briefings with a configurable voice
+- Self-ADB pairing (TLS 1.3 + SPAKE2) — privileged control with no PC, no root
+- On-device OCR, auto-replies with personality profiles, progressive tool
+  disclosure for cloud rate limits
+- **Per-ABI APKs** (arm64-v8a ~99 MB + universal fallback), signed release builds
 
 ---
 
