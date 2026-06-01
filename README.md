@@ -158,6 +158,27 @@ touching the phone.
   and per-app watch lists keep it from being noisy
 - **Export finances to CSV** for a backup or to open in a spreadsheet
 
+- **New Features
+Agent Core Reliability:**
+- Hardened ActionGuard with anti-prompt-injection defense
+- Guided permissions onboarding
+- Multi-step plans verified before execution
+- Implementation of TTS Voice for morning summary, evening summary.
+
+**Learning and Memory:**
+- The assistant learns from your habits and anticipates your needs
+- Learns from your corrections (when you delete actions)
+- Context memory across tasks
+- Active learning of preferences (ignored apps)
+
+**Auto-Correction:**
+- Automatically attaches what's on screen when a plan fails
+- Intelligent memory consolidation
+
+**Visual Refinement:**
+- Cleaner and clearer onboarding
+- Improved suggestion cards
+
 ### Messaging & remote control
 - Send messages on WhatsApp, Telegram, Discord, and more
 - **Drive the phone remotely** by messaging it from a Telegram / Discord / WeChat
