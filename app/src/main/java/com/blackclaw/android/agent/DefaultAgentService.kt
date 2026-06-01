@@ -258,6 +258,9 @@ class DefaultAgentService : AgentService {
             override fun onTokenUpdate(status: TokenMonitor.Status) = callback.onTokenUpdate(status)
 
             override fun onComplete(round: Int, finalAnswer: String, totalTokens: Int, modelName: String?) {
+                // Cross-task memory: remember what was asked + a short outcome so the
+                // next task can resolve back-references ("again", "same person").
+                runCatching { TaskHistoryStore.record(userPrompt, finalAnswer) }
                 terminalCallback = { callback.onComplete(round, finalAnswer, totalTokens, modelName) }
             }
 
@@ -643,6 +646,7 @@ class DefaultAgentService : AgentService {
             append(directDeviceDataGuard.buildPromptSection())
             append(buildDeviceContext())
             append(AmbientContext.asPromptSection())
+            append(TaskHistoryStore.asPromptSnippet())
             append(toolCatalogSection)
         }
 
