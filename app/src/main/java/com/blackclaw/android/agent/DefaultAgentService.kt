@@ -107,6 +107,7 @@ class DefaultAgentService : AgentService {
   - input_text → system_key("enter")
   - 3 swipes seguidos para llegar al fondo de una lista
 - Pasos máximo: 6. Si CUALQUIER paso depende de leer la pantalla, NO lo metas en el plan; haz solo lo que ya sabes y luego get_screen_info.
+- Para pasos críticos, añade verificación: "verify_text" (texto que debe aparecer en pantalla tras el paso) o "expect" (subcadena que debe traer el resultado del paso). Si falla, el paso se reintenta una vez y, si sigue fallando, el plan se aborta con el detalle. Úsalo p.ej. tras open_app: {"tool":"open_app","params":{...},"verify_text":"Chats"}.
 
 ## Rules
 - One tool call per turn. Check screen after each action.
