@@ -45,14 +45,31 @@ object TaskHistoryStore {
         val entry = Entry(cleanTask, sanitizeOutcome(outcome), System.currentTimeMillis())
         val list = all().toMutableList()
         list.add(0, entry)
-        while (list.size > MAX_ENTRIES) list.removeAt(list.size - 1)
+        val deduped = dedupe(list)
+        val capped = if (deduped.size > MAX_ENTRIES) deduped.take(MAX_ENTRIES) else deduped
         val arr = JSONArray()
-        list.forEach {
+        capped.forEach {
             arr.put(JSONObject().apply {
                 put("task", it.task); put("outcome", it.outcome); put("t", it.t)
             })
         }
         KVUtils.putString(KEY, arr.toString()); KVUtils.sync()
+    }
+
+    /**
+     * Collapse repeated tasks: if the same task text shows up more than once
+     * (case-insensitive), keep only the most recent occurrence. Keeps the recent
+     * list meaningful instead of five copies of "manda hola a Ana". Pure.
+     */
+    fun dedupe(entries: List<Entry>): List<Entry> {
+        val seen = HashSet<String>()
+        val out = ArrayList<Entry>(entries.size)
+        // entries are newest-first; first occurrence wins (most recent).
+        for (e in entries) {
+            val k = e.task.trim().lowercase()
+            if (seen.add(k)) out.add(e)
+        }
+        return out
     }
 
     @Synchronized

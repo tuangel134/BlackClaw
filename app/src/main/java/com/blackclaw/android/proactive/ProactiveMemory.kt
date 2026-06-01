@@ -161,21 +161,32 @@ object ProactiveMemory {
 
     /**
      * How strongly the assistant should hold back on a category, 0.0 (no signal)
-     * to 1.0 (frequently rejected).
+     * to 1.0 (frequently rejected). Decays over time so old corrections fade.
      */
     fun conservatismFor(category: String): Double {
         val fb = categoryFeedback(category)
-        return conservatismScore(fb.rejects, fb.quickRejects)
+        return conservatismScore(fb.rejects, fb.quickRejects, ageMs = System.currentTimeMillis() - fb.lastT)
     }
 
     /**
      * Pure scoring: quick rejects weigh double; saturates around 4 weighted
-     * rejects. Extracted so it's unit-testable without MMKV.
+     * rejects. If the last correction is old, the score decays linearly to 0
+     * over [decayWindowMs] (default 30 days) so the assistant stops being timid
+     * about something the user only disliked once, long ago. Extracted so it's
+     * unit-testable without MMKV.
      */
-    fun conservatismScore(rejects: Int, quickRejects: Int): Double {
+    fun conservatismScore(
+        rejects: Int,
+        quickRejects: Int,
+        ageMs: Long = 0L,
+        decayWindowMs: Long = 30L * 24 * 60 * 60 * 1000,
+    ): Double {
         if (rejects <= 0) return 0.0
         val weighted = rejects + quickRejects
-        return (weighted / 4.0).coerceIn(0.0, 1.0)
+        val base = (weighted / 4.0).coerceIn(0.0, 1.0)
+        if (ageMs <= 0L) return base
+        val decay = (1.0 - ageMs.toDouble() / decayWindowMs).coerceIn(0.0, 1.0)
+        return base * decay
     }
 
     /** Categories the user has pushed back on enough to warrant caution. */

@@ -48,9 +48,19 @@ object HabitTracker {
         synchronized(this) {
             val list = signals().toMutableList()
             list.add(sig)
-            while (list.size > MAX_SIGNALS) list.removeAt(0)
-            saveSignals(list)
+            val pruned = prune(list, sig.t)
+            saveSignals(pruned)
         }
+    }
+
+    /**
+     * Keep the signal buffer healthy: drop anything older than the detection
+     * window (they can never form a habit anymore) and cap the total. Pure.
+     */
+    fun prune(signals: List<Signal>, now: Long, windowMs: Long = WINDOW_MS, max: Int = MAX_SIGNALS): List<Signal> {
+        val cutoff = now - windowMs
+        val fresh = signals.filter { it.t >= cutoff }
+        return if (fresh.size > max) fresh.takeLast(max) else fresh
     }
 
     @Synchronized
