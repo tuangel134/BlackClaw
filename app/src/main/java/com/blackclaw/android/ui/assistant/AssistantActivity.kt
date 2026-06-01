@@ -343,12 +343,15 @@ private fun ItemCard(
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val isDraft = item.category == "draft"
+    val isSuggestion = item.category == "habit" || item.title.startsWith("💡")
     val checkable = item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE ||
         item.type == AssistantItemType.SHOPPING
     Surface(
-        color = colors.surface, shape = RoundedCornerShape(16.dp),
+        color = if (isSuggestion) colors.accent.copy(alpha = 0.07f) else colors.surface,
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
-        border = BorderStroke(0.5.dp, colors.aiBubbleBorder),
+        border = if (isSuggestion) BorderStroke(1.dp, colors.accent.copy(alpha = 0.4f))
+            else BorderStroke(0.5.dp, colors.aiBubbleBorder),
     ) {
         Row(
             Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,

@@ -8,6 +8,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +22,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -170,54 +175,101 @@ private fun OnboardingScreen(colors: BlackClawColors, onDone: () -> Unit) {
 
     val essentialsReady = steps.filter { it.essential }.all { it.isGranted(snap) }
     val grantedCount = steps.count { it.isGranted(snap) }
+    val progress by animateFloatAsState(
+        targetValue = grantedCount.toFloat() / steps.size,
+        animationSpec = tween(600), label = "progress")
 
     Scaffold(
         containerColor = colors.background,
-        topBar = {
-            TopAppBar(
-                title = { Text("Configuración inicial", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background),
-            )
-        },
     ) { pad ->
         Column(
             Modifier.padding(pad).fillMaxSize()
                 .background(colors.background)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
+                .verticalScroll(rememberScrollState()),
         ) {
-            Text("Permisos de BlackClaw", fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                color = colors.textPrimary, modifier = Modifier.padding(top = 8.dp))
-            Text("$grantedCount de ${steps.size} activados · toca cada uno para configurarlo",
-                fontSize = 13.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 4.dp, bottom = 16.dp))
-
-            steps.forEach { step ->
-                PermissionRow(step, step.isGranted(snap), colors)
-                Spacer(Modifier.height(10.dp))
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = onDone,
-                enabled = essentialsReady,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colors.accent, contentColor = colors.background,
-                    disabledContainerColor = colors.surface, disabledContentColor = colors.textTertiary),
+            // ── Gradient hero ──
+            Box(
+                Modifier.fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(
+                        colors.accent.copy(alpha = 0.22f),
+                        colors.accent.copy(alpha = 0.06f),
+                        colors.background,
+                    )))
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 36.dp, bottom = 22.dp),
             ) {
-                Text(if (essentialsReady) "Empezar a usar BlackClaw" else "Activa los permisos esenciales",
-                    fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Column {
+                    Box(
+                        Modifier.size(56.dp).clip(RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(
+                                colors.accent, colors.accent.copy(alpha = 0.6f)))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, null, tint = colors.background,
+                            modifier = Modifier.size(30.dp))
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("Pon a punto BlackClaw", fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary)
+                    Text("Unos permisos rápidos y tu asistente queda listo para trabajar por ti.",
+                        fontSize = 14.sp, color = colors.textSecondary, lineHeight = 19.sp,
+                        modifier = Modifier.padding(top = 6.dp))
+
+                    Spacer(Modifier.height(18.dp))
+                    // Animated progress bar + count.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(50))
+                                .background(colors.textTertiary.copy(alpha = 0.3f)),
+                        ) {
+                            Box(
+                                Modifier.fillMaxWidth(progress).fillMaxHeight()
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Brush.horizontalGradient(listOf(
+                                        colors.accent, colors.accent.copy(alpha = 0.7f)))),
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text("$grantedCount/${steps.size}", fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold, color = colors.accent)
+                    }
+                }
             }
-            if (!essentialsReady) {
-                Text("Los pasos marcados como esenciales (Accesibilidad y notificaciones) son necesarios para empezar.",
-                    fontSize = 11.sp, color = colors.textTertiary,
-                    modifier = Modifier.padding(top = 8.dp))
+
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Spacer(Modifier.height(6.dp))
+                steps.forEach { step ->
+                    PermissionRow(step, step.isGranted(snap), colors)
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onDone,
+                    enabled = essentialsReady,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accent, contentColor = colors.background,
+                        disabledContainerColor = colors.surface, disabledContentColor = colors.textTertiary),
+                ) {
+                    if (essentialsReady) {
+                        Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (essentialsReady) "Empezar a usar BlackClaw" else "Activa los permisos esenciales",
+                        fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+                if (!essentialsReady) {
+                    Text("Los pasos marcados como esenciales (Accesibilidad y notificaciones) son necesarios para empezar.",
+                        fontSize = 11.sp, color = colors.textTertiary,
+                        modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
+                }
+                TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp)) {
+                    Text("Omitir por ahora", color = colors.textSecondary, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(20.dp))
             }
-            TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text("Omitir por ahora", color = colors.textSecondary, fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -225,15 +277,26 @@ private fun OnboardingScreen(colors: BlackClawColors, onDone: () -> Unit) {
 @Composable
 private fun PermissionRow(step: PermStep, granted: Boolean, colors: BlackClawColors) {
     val ctx = LocalContext.current
+    val green = Color(0xFF22C55E)
     Surface(
-        color = colors.surface, shape = RoundedCornerShape(14.dp),
+        color = if (granted) green.copy(alpha = 0.08f) else colors.surface,
+        shape = RoundedCornerShape(16.dp),
+        border = if (granted) BorderStroke(1.dp, green.copy(alpha = 0.35f))
+            else BorderStroke(1.dp, colors.divider.copy(alpha = 0.6f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(step.icon, null, tint = if (granted) Color(0xFF22C55E) else colors.accent,
-                modifier = Modifier.size(26.dp))
+            // Rounded tinted icon tile.
+            Box(
+                Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (granted) green.copy(alpha = 0.18f) else colors.accent.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(step.icon, null, tint = if (granted) green else colors.accent,
+                    modifier = Modifier.size(22.dp))
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,13 +315,17 @@ private fun PermissionRow(step: PermStep, granted: Boolean, colors: BlackClawCol
             }
             Spacer(Modifier.width(10.dp))
             if (granted) {
-                Icon(Icons.Default.CheckCircle, "Activado", tint = Color(0xFF22C55E),
-                    modifier = Modifier.size(26.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, "Activado", tint = green,
+                        modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Listo", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = green)
+                }
             } else {
                 Button(
                     onClick = { step.onActivate(ctx) },
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 7.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colors.accent, contentColor = colors.background),
                 ) {
