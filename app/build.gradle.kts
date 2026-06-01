@@ -89,6 +89,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            // android.util.Log and other framework stubs return defaults instead
+            // of throwing "Method ... not mocked", so pure-logic classes that
+            // happen to log (XLog) can be unit-tested on the JVM.
+            isReturnDefaultValues = true
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         compose = true
