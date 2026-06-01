@@ -173,6 +173,7 @@ fun ChatScreen(
     // Skill dialog and activation states
     var showMonitorSheet by remember { mutableStateOf(false) }
     var showSendSheet by remember { mutableStateOf(false) }
+    var showChatsSheet by remember { mutableStateOf(false) }
     var activatingSkill by remember { mutableStateOf<String?>(null) }
 
     // Chat mode is always the default — user can switch to Task manually
@@ -195,18 +196,11 @@ fun ChatScreen(
             ModalDrawerSheet(
                 drawerContainerColor = colors.surface,
             ) {
-                SidebarContent(
-                    conversations = conversations,
-                    onNewChat = {
+                AssistantPanel(
+                    onOpenHub = {
                         scope.launch { drawerState.close() }
-                        onNewChat()
+                        onOpenAssistant()
                     },
-                    onSelectConversation = {
-                        scope.launch { drawerState.close() }
-                        onSelectConversation(it)
-                    },
-                    onDeleteConversation = onDeleteConversation,
-                    onRenameConversation = onRenameConversation,
                     onSettings = {
                         scope.launch { drawerState.close() }
                         onOpenSettings()
@@ -218,10 +212,6 @@ fun ChatScreen(
                     onAutoReplies = {
                         scope.launch { drawerState.close() }
                         onOpenAutoReplies()
-                    },
-                    onAssistant = {
-                        scope.launch { drawerState.close() }
-                        onOpenAssistant()
                     },
                     colors = colors,
                 )
@@ -274,6 +264,7 @@ fun ChatScreen(
                         onMenuClick = { scope.launch { drawerState.open() } },
                         onSettings = onOpenSettings,
                         onModelSwitch = onModelSwitch,
+                        onChats = { showChatsSheet = true },
                         colors = colors,
                     )
                     if (activeTasks.isNotEmpty()) {
@@ -401,6 +392,27 @@ fun ChatScreen(
             colors = colors,
         )
     }
+
+    // Chats list sheet — conversation list moved here from the drawer.
+    if (showChatsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showChatsSheet = false },
+            containerColor = colors.surface,
+        ) {
+            SidebarContent(
+                conversations = conversations,
+                onNewChat = { showChatsSheet = false; onNewChat() },
+                onSelectConversation = { showChatsSheet = false; onSelectConversation(it) },
+                onDeleteConversation = onDeleteConversation,
+                onRenameConversation = onRenameConversation,
+                onSettings = { showChatsSheet = false; onOpenSettings() },
+                onModels = { showChatsSheet = false; onOpenModels() },
+                onAutoReplies = { showChatsSheet = false; onOpenAutoReplies() },
+                onAssistant = { showChatsSheet = false; onOpenAssistant() },
+                colors = colors,
+            )
+        }
+    }
 }
 
 // ======================== TOP BAR ========================
@@ -417,6 +429,7 @@ private fun ChatTopBar(
     onMenuClick: () -> Unit,
     onSettings: () -> Unit,
     onModelSwitch: (modelId: String, displayName: String) -> Unit = { _, _ -> },
+    onChats: () -> Unit = {},
     colors: BlackClawColors,
 ) {
     // Token count color: grey → blue → amber → red
@@ -461,6 +474,20 @@ private fun ChatTopBar(
                 }
             },
             actions = {
+                // Chats selector — opens the conversation list sheet.
+                Surface(
+                    onClick = onChats,
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.Transparent,
+                ) {
+                    Text(
+                        "Chats",
+                        fontSize = 12.sp,
+                        color = colors.textTertiary,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
                 // Local/Cloud toggle — two plain buttons, no container
                 Surface(
                     onClick = { onTabChange("local") },
@@ -1678,6 +1705,99 @@ private fun QuickTasksPanel(
                 Spacer(Modifier.height(6.dp))
             } // end Background Column
         }
+    }
+}
+
+// ======================== ASSISTANT DRAWER PANEL ========================
+
+/**
+ * Drawer content shown when swiping in from the left edge. Surfaces the
+ * Assistant hub (the app's standout feature) instead of the chat list — chats
+ * moved to a top-bar pill. Shows live per-category counts and quick nav.
+ */
+@Composable
+private fun AssistantPanel(
+    onOpenHub: () -> Unit,
+    onSettings: () -> Unit,
+    onModels: () -> Unit,
+    onAutoReplies: () -> Unit,
+    colors: BlackClawColors,
+) {
+    data class Cat(val type: com.blackclaw.android.assistant.AssistantItemType,
+                   val label: String, val emoji: String, val tint: Color)
+    val cats = listOf(
+        Cat(com.blackclaw.android.assistant.AssistantItemType.REMINDER, "Recordatorios", "🔔", Color(0xFF8B5CF6)),
+        Cat(com.blackclaw.android.assistant.AssistantItemType.ALARM, "Alarmas", "⏰", Color(0xFFF59E0B)),
+        Cat(com.blackclaw.android.assistant.AssistantItemType.NOTE, "Notas", "📝", Color(0xFF38BDF8)),
+        Cat(com.blackclaw.android.assistant.AssistantItemType.EVENT, "Calendario", "📅", Color(0xFFEC4899)),
+        Cat(com.blackclaw.android.assistant.AssistantItemType.FINANCE, "Finanzas", "💰", Color(0xFF22C55E)),
+    )
+    Column(
+        Modifier.fillMaxSize().padding(top = 48.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.AutoAwesome, null, tint = colors.accent, modifier = Modifier.size(26.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Asistente", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+        }
+        Text("Tu centro de recordatorios, alarmas y más",
+            fontSize = 12.sp, color = colors.textSecondary)
+        Spacer(Modifier.height(18.dp))
+
+        cats.forEach { c ->
+            val count = remember { com.blackclaw.android.assistant.AssistantStore.countPending(c.type) }
+            Surface(
+                color = colors.aiBubble, shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenHub() },
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(38.dp).clip(RoundedCornerShape(11.dp))
+                            .background(c.tint.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(c.emoji, fontSize = 18.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Text(c.label, fontSize = 15.sp, color = colors.textPrimary,
+                        fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    if (count > 0) {
+                        Box(
+                            Modifier.clip(CircleShape).background(c.tint.copy(alpha = 0.2f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                        ) { Text("$count", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.tint) }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Button(
+            onClick = onOpenHub,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colors.accent, contentColor = colors.background),
+        ) { Text("Abrir Asistente", fontWeight = FontWeight.SemiBold) }
+
+        Spacer(Modifier.weight(1f))
+        HorizontalDivider(color = colors.divider)
+        DrawerNavItem(Icons.Outlined.Forum, "Auto-respuestas", colors, onAutoReplies)
+        DrawerNavItem(Icons.Outlined.SmartToy, "Modelos", colors, onModels)
+        DrawerNavItem(Icons.Outlined.Settings, "Ajustes", colors, onSettings)
+    }
+}
+
+@Composable
+private fun DrawerNavItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String, colors: BlackClawColors, onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = colors.textSecondary, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = colors.textSecondary, fontSize = 14.sp)
     }
 }
 

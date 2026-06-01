@@ -366,9 +366,11 @@ private fun AddItemDialog(
     var body by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("none") }
+    var challenge by remember { mutableStateOf("none") }
     val needsTime = type == AssistantItemType.REMINDER || type == AssistantItemType.ALARM ||
         type == AssistantItemType.EVENT
     val canRepeat = type == AssistantItemType.ALARM || type == AssistantItemType.REMINDER
+    val isAlarm = type == AssistantItemType.ALARM
     val isFinance = type == AssistantItemType.FINANCE
 
     // Time state
@@ -457,6 +459,29 @@ private fun AddItemDialog(
                     }
                 }
 
+                if (isAlarm) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("RETO PARA APAGAR (ALARMA IMPORTANTE)", fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, color = colors.textTertiary, letterSpacing = 0.8.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("none" to "Sin reto", "math" to "🔢 Mate",
+                               "memory" to "🧠 Memoria", "type" to "⌨️ Frase")
+                            .forEach { (value, lbl) ->
+                                val sel = challenge == value
+                                Surface(
+                                    color = if (sel) colors.accent else colors.aiBubble,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.clickable { challenge = value },
+                                ) {
+                                    Text(lbl, fontSize = 12.sp,
+                                        color = if (sel) colors.background else colors.textSecondary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                                }
+                            }
+                    }
+                }
+
                 if (isFinance) {
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
@@ -488,7 +513,8 @@ private fun AddItemDialog(
                             val amt = if (isFinance) amount.toDoubleOrNull() ?: 0.0 else 0.0
                             val item = AssistantStore.create(
                                 type = type, title = title.trim(), body = body.trim(),
-                                triggerAtMs = ts, repeat = repeat, amount = amt, source = "user",
+                                triggerAtMs = ts, repeat = repeat, amount = amt,
+                                challenge = if (isAlarm) challenge else "none", source = "user",
                             )
                             if (ts > 0) AssistantScheduler.arm(ctx, item)
                             onSave()

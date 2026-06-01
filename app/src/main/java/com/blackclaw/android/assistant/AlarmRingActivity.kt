@@ -50,6 +50,15 @@ class AlarmRingActivity : BaseActivity() {
 
     private var player: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var lockDismiss = false
+
+    @Deprecated("Back must not bypass a challenge alarm")
+    override fun onBackPressed() {
+        // If this is a challenge ("important") alarm, ignore Back so the user
+        // can't escape without solving it. Normal alarms allow back = dismiss.
+        if (lockDismiss) return
+        super.onBackPressed()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,12 +80,15 @@ class AlarmRingActivity : BaseActivity() {
 
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Alarma"
         val itemId = intent.getStringExtra(EXTRA_ITEM_ID)
+        val challengeKind = itemId?.let { AssistantStore.find(it)?.challenge } ?: "none"
+        lockDismiss = challengeKind.isNotBlank() && challengeKind != "none"
 
         startRinging()
 
         setContent {
             AlarmRingScreen(
                 title = title,
+                challengeKind = challengeKind,
                 onDismiss = { stopAndFinish() },
                 onSnooze = {
                     snooze(itemId, title)
@@ -148,8 +160,19 @@ class AlarmRingActivity : BaseActivity() {
 }
 
 @Composable
-private fun AlarmRingScreen(title: String, onDismiss: () -> Unit, onSnooze: () -> Unit) {
+private fun AlarmRingScreen(
+    title: String,
+    challengeKind: String,
+    onDismiss: () -> Unit,
+    onSnooze: () -> Unit,
+) {
     val now = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
+    val hasChallenge = challengeKind.isNotBlank() && challengeKind != "none"
+    var solving by remember { mutableStateOf(false) }
+    val challenge = remember { if (hasChallenge) AlarmChallenge.create(challengeKind) else null }
+    var answer by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+
     Box(
         Modifier.fillMaxSize().background(
             Brush.verticalGradient(listOf(Color(0xFF0B0B12), Color(0xFF1A0E2E), Color(0xFF0B0B12)))
@@ -161,32 +184,79 @@ private fun AlarmRingScreen(title: String, onDismiss: () -> Unit, onSnooze: () -
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Spacer(Modifier.height(60.dp))
+            Spacer(Modifier.height(56.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("⏰", fontSize = 72.sp)
-                Spacer(Modifier.height(16.dp))
-                Text(now, fontSize = 64.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(if (hasChallenge) "🔒⏰" else "⏰", fontSize = 64.sp)
+                Spacer(Modifier.height(14.dp))
+                Text(now, fontSize = 60.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 Spacer(Modifier.height(8.dp))
                 Text(title, fontSize = 20.sp, color = Color(0xFFB9A7E0),
                     fontWeight = FontWeight.Medium)
+                if (hasChallenge && !solving) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Alarma importante · resuelve un reto para apagarla",
+                        fontSize = 13.sp, color = Color(0xFF8B7BB0))
+                }
             }
 
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
-                    shape = RoundedCornerShape(30.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF7C3AED), contentColor = Color.White),
-                ) { Text("Descartar", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
-                Spacer(Modifier.height(14.dp))
-                OutlinedButton(
-                    onClick = onSnooze,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                    shape = RoundedCornerShape(27.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7C3AED)),
-                ) { Text("Posponer 5 min", fontSize = 16.sp, color = Color(0xFFB9A7E0)) }
-                Spacer(Modifier.height(40.dp))
+                if (hasChallenge && solving && challenge != null) {
+                    // Challenge gate
+                    Text(challenge.prompt, fontSize = 18.sp, color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = answer,
+                        onValueChange = { answer = it; error = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = error,
+                        singleLine = true,
+                        placeholder = { Text("Tu respuesta", color = Color(0xFF6B5B90)) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF7C3AED),
+                            unfocusedBorderColor = Color(0xFF3A2E55),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = Color(0xFF7C3AED),
+                            errorBorderColor = Color(0xFFEF4444),
+                        ),
+                    )
+                    if (error) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("Incorrecto, vuelve a intentarlo", fontSize = 13.sp, color = Color(0xFFEF4444))
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            if (challenge.check(answer)) onDismiss() else { error = true; answer = "" }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(58.dp),
+                        shape = RoundedCornerShape(29.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF7C3AED), contentColor = Color.White),
+                    ) { Text("Comprobar", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+                    Spacer(Modifier.height(40.dp))
+                } else {
+                    Button(
+                        onClick = { if (hasChallenge) solving = true else onDismiss() },
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
+                        shape = RoundedCornerShape(30.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF7C3AED), contentColor = Color.White),
+                    ) {
+                        Text(if (hasChallenge) "Resolver para apagar" else "Descartar",
+                            fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    OutlinedButton(
+                        onClick = onSnooze,
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape = RoundedCornerShape(27.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7C3AED)),
+                    ) { Text("Posponer 5 min", fontSize = 16.sp, color = Color(0xFFB9A7E0)) }
+                    Spacer(Modifier.height(40.dp))
+                }
             }
         }
     }

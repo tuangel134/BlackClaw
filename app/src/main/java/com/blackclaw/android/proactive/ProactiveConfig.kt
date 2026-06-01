@@ -41,6 +41,7 @@ object ProactiveConfig {
     private const val KEY_NIGHT_ENABLED = "proactive_night_enabled"
     private const val KEY_NIGHT_HOUR = "proactive_night_hour"
     private const val KEY_NIGHT_MIN = "proactive_night_min"
+    private const val KEY_SPEAK_BRIEFINGS = "proactive_speak_briefings"
 
     /** Default guidance the user can edit — sets the assistant's judgment. */
     const val DEFAULT_INSTRUCTIONS =
@@ -154,4 +155,9 @@ object ProactiveConfig {
     var nightMinute: Int
         get() = KVUtils.getInt(KEY_NIGHT_MIN, 0)
         set(v) { KVUtils.putInt(KEY_NIGHT_MIN, v.coerceIn(0, 59)); KVUtils.sync() }
+
+    /** Read the briefing aloud via TTS when it fires. */
+    var speakBriefings: Boolean
+        get() = KVUtils.getBoolean(KEY_SPEAK_BRIEFINGS, false)
+        set(v) { KVUtils.putBoolean(KEY_SPEAK_BRIEFINGS, v); KVUtils.sync() }
 }

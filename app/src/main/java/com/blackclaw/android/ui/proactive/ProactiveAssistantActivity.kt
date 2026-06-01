@@ -61,6 +61,7 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var nightOn by remember { mutableStateOf(ProactiveConfig.nightBriefingEnabled) }
     var askUnsure by remember { mutableStateOf(ProactiveConfig.askWhenUnsure) }
     var deepRead by remember { mutableStateOf(ProactiveConfig.deepRead) }
+    var speakBriefings by remember { mutableStateOf(ProactiveConfig.speakBriefings) }
     var log by remember { mutableStateOf(ProactiveAssistantManager.recentLog()) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
@@ -227,6 +228,9 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
                             com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
                                 com.blackclaw.android.proactive.ProactiveBriefing.Kind.NIGHT) },
                     )
+                    DividerLine(colors)
+                    ToggleRow("🔊 Leer en voz alta", "Lee el resumen con voz (TTS) al dispararse",
+                        speakBriefings, colors) { speakBriefings = it; ProactiveConfig.speakBriefings = it }
                 }
             }
 

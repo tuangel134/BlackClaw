@@ -55,25 +55,31 @@ class AssistantAlarmTool : BaseTool() {
     override fun getDescriptionEN() =
         "Set a native in-app alarm that fires a high-priority BlackClaw notification at a clock time. " +
         "Time: 'HH:MM' (next occurrence), 'tomorrow 07:00', or 'YYYY-MM-DD HH:MM'. " +
-        "Optional repeat: none|daily|weekly. Use for wake-ups and 'be somewhere at X'."
+        "Optional repeat: none|daily|weekly. Optional challenge to force the user awake: " +
+        "none|math|memory|type (math problem / memory sequence / type a phrase). " +
+        "Use for wake-ups and 'be somewhere at X'."
     override fun getDescriptionCN() = getDescriptionEN()
-    override fun getBrief() = "pone una alarma nativa (notificación de alta prioridad)"
+    override fun getBrief() = "pone una alarma nativa (notificación de alta prioridad, con reto opcional)"
     override fun getParameters() = listOf(
         ToolParameter("when", "string", "Clock time, e.g. '07:30', 'tomorrow 07:00'.", true),
         ToolParameter("label", "string", "Optional alarm label.", false),
         ToolParameter("repeat", "string", "none | daily | weekly (default none).", false),
+        ToolParameter("challenge", "string",
+            "none | math | memory | type — a wake-up challenge required to dismiss. Default none.", false),
     )
     override fun execute(params: Map<String, Any>): ToolResult {
         val ts = AssistantTime.parse(requireString(params, "when"))
         if (ts <= 0) return ToolResult.error("No pude entender la hora '${params["when"]}'.")
         val label = optionalString(params, "label", "Alarma")
+        val challenge = optionalString(params, "challenge", "none").lowercase()
         val item = AssistantStore.create(
             type = AssistantItemType.ALARM, title = label,
             triggerAtMs = ts, repeat = optionalString(params, "repeat", "none").lowercase(),
-            source = "ai",
+            challenge = challenge, source = "ai",
         )
         AssistantScheduler.arm(ClawApplication.instance, item)
-        return ToolResult.success("Alarma puesta: '$label' a las ${AssistantTime.format(ts)}")
+        val extra = if (challenge != "none") " (reto: $challenge)" else ""
+        return ToolResult.success("Alarma puesta: '$label' a las ${AssistantTime.format(ts)}$extra")
     }
 }
 

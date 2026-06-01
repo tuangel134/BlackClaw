@@ -5,6 +5,7 @@ import com.blackclaw.android.assistant.AssistantItemType
 import com.blackclaw.android.assistant.AssistantReceiver
 import com.blackclaw.android.assistant.AssistantStore
 import com.blackclaw.android.assistant.AssistantTime
+import com.blackclaw.android.assistant.Speaker
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.utils.XLog
@@ -44,6 +45,9 @@ object ProactiveBriefing {
                 type = AssistantItemType.ALERT, title = title, body = text, source = "ai",
             )
             AssistantReceiver.postNotification(ClawApplication.instance, title, text, highPriority = false)
+            if (ProactiveConfig.speakBriefings) {
+                Speaker.speak("$title. $text")
+            }
             XLog.i(TAG, "$kind briefing delivered")
         } catch (e: Throwable) {
             XLog.w(TAG, "Briefing failed: ${e.message}")

@@ -33,6 +33,8 @@ data class AssistantItem(
     val amount: Double = 0.0,
     /** Finance: category / note label. */
     val category: String = "",
+    /** Alarm challenge to dismiss: none|math|memory|type. Empty = normal alarm. */
+    val challenge: String = "none",
     val createdAtMs: Long = System.currentTimeMillis(),
     /** Source that created it, e.g. "ai" or "user" or a notification package. */
     val source: String = "user",
@@ -47,6 +49,7 @@ data class AssistantItem(
         put("done", done)
         put("amount", amount)
         put("category", category)
+        put("challenge", challenge)
         put("createdAtMs", createdAtMs)
         put("source", source)
     }
@@ -63,6 +66,7 @@ data class AssistantItem(
             done = o.optBoolean("done", false),
             amount = o.optDouble("amount", 0.0),
             category = o.optString("category", ""),
+            challenge = o.optString("challenge", "none"),
             createdAtMs = o.optLong("createdAtMs", System.currentTimeMillis()),
             source = o.optString("source", "user"),
         )
@@ -121,13 +125,14 @@ object AssistantStore {
         repeat: String = "none",
         amount: Double = 0.0,
         category: String = "",
+        challenge: String = "none",
         source: String = "user",
     ): AssistantItem {
         val item = AssistantItem(
             id = UUID.randomUUID().toString().take(8),
             type = type, title = title, body = body,
             triggerAtMs = triggerAtMs, repeat = repeat,
-            amount = amount, category = category, source = source,
+            amount = amount, category = category, challenge = challenge, source = source,
         )
         upsert(item)
         return item
