@@ -21,8 +21,14 @@ object ProactiveMemory {
     private const val KEY_RECENT = "proactive_recent_events"     // JSON array of {t,pkg,title,text,action}
     private const val KEY_ACTION_TIMES = "proactive_action_times" // JSON array of epoch ms
     private const val KEY_CORRECTIONS = "proactive_corrections"  // JSON obj: category -> {rejects, quickRejects, lastT}
+    private const val KEY_PKG_STATS = "proactive_pkg_stats"      // JSON obj: pkg -> {total, ignores}
+    private const val KEY_PKG_PROPOSED = "proactive_pkg_proposed" // JSON array of pkgs already proposed to mute
     private const val MAX_PREFS = 25
     private const val MAX_RECENT = 8
+
+    /** Mute proposal triggers once a package has this many notifications, mostly ignored. */
+    const val MUTE_MIN_TOTAL = 5
+    const val MUTE_IGNORE_RATIO = 0.85
 
     /** A deletion within this window of creation counts as a "quick reject" (stronger signal). */
     const val QUICK_REJECT_MS = 10 * 60 * 1000L
@@ -86,6 +92,8 @@ object ProactiveMemory {
             })
         }
         KVUtils.putString(KEY_RECENT, arr.toString()); KVUtils.sync()
+        // Per-package tally (persistent) for preference learning.
+        if (pkg.isNotBlank()) recordPkgStat(pkg, action == "ignore")
     }
 
     fun recentSnippet(): String {
@@ -217,6 +225,79 @@ object ProactiveMemory {
 
     private fun correctionsObj(): JSONObject {
         val raw = KVUtils.getString(KEY_CORRECTIONS, "")
+        if (raw.isBlank()) return JSONObject()
+        return runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+    }
+
+    // ── Per-package preference learning ──
+    // We tally, per notifying app, how many of its notifications the assistant
+    // ended up ignoring. When an app is almost always ignored, that's a strong
+    // hint the user doesn't care about it — so the assistant can PROPOSE (once)
+    // to stop watching it, instead of waking the LLM on every one of its pings.
+
+    data class PkgStat(val total: Int, val ignores: Int) {
+        val ignoreRatio: Double get() = if (total == 0) 0.0 else ignores.toDouble() / total
+    }
+
+    @Synchronized
+    fun recordPkgStat(pkg: String, ignored: Boolean) {
+        val obj = pkgStatsObj()
+        val existing = obj.optJSONObject(pkg)
+        val total = (existing?.optInt("total") ?: 0) + 1
+        val ignores = (existing?.optInt("ignores") ?: 0) + (if (ignored) 1 else 0)
+        obj.put(pkg, JSONObject().apply { put("total", total); put("ignores", ignores) })
+        KVUtils.putString(KEY_PKG_STATS, obj.toString()); KVUtils.sync()
+    }
+
+    @Synchronized
+    fun pkgStat(pkg: String): PkgStat {
+        val o = pkgStatsObj().optJSONObject(pkg) ?: return PkgStat(0, 0)
+        return PkgStat(o.optInt("total"), o.optInt("ignores"))
+    }
+
+    /**
+     * Pure: should we propose muting this app? True when it has enough history
+     * and is ignored most of the time. Extracted for unit testing.
+     */
+    fun shouldProposeMute(
+        stat: PkgStat,
+        minTotal: Int = MUTE_MIN_TOTAL,
+        ignoreRatio: Double = MUTE_IGNORE_RATIO,
+    ): Boolean = stat.total >= minTotal && stat.ignoreRatio >= ignoreRatio
+
+    /**
+     * The first watched package that's a good mute candidate and hasn't been
+     * proposed yet. Returns null if none. Side-effect-free except for reading.
+     */
+    @Synchronized
+    fun nextMuteCandidate(): String? {
+        val obj = pkgStatsObj()
+        val proposed = proposedMutes()
+        for (pkg in obj.keys()) {
+            if (pkg in proposed) continue
+            if (shouldProposeMute(pkgStat(pkg))) return pkg
+        }
+        return null
+    }
+
+    @Synchronized
+    fun markMuteProposed(pkg: String) {
+        val set = proposedMutes().toMutableSet()
+        set.add(pkg)
+        val arr = JSONArray(); set.forEach { arr.put(it) }
+        KVUtils.putString(KEY_PKG_PROPOSED, arr.toString()); KVUtils.sync()
+    }
+
+    private fun proposedMutes(): Set<String> {
+        val raw = KVUtils.getString(KEY_PKG_PROPOSED, "")
+        if (raw.isBlank()) return emptySet()
+        return runCatching {
+            val a = JSONArray(raw); (0 until a.length()).map { a.getString(it) }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    private fun pkgStatsObj(): JSONObject {
+        val raw = KVUtils.getString(KEY_PKG_STATS, "")
         if (raw.isBlank()) return JSONObject()
         return runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
     }

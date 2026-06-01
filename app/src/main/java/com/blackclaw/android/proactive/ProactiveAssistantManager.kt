@@ -1,5 +1,6 @@
 package com.blackclaw.android.proactive
 
+import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.agent.llm.LlmSessionManager
 import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.utils.KVUtils
@@ -94,6 +95,9 @@ object ProactiveAssistantManager {
         ProactiveMemory.recordEvent(pkg, t, x, if (actionCount == 0) "ignore" else firstAction)
         if (actionCount == 0) {
             XLog.d(TAG, "Proactive: nothing actionable from $pkg")
+            // Active preference learning: if an app is almost always ignored,
+            // propose (once) to stop watching it.
+            maybeProposeMute()
             return
         }
 
@@ -170,6 +174,28 @@ object ProactiveAssistantManager {
         ))
         logAction("❓ Sugerencia (sin certeza) — $label", true)
     }
+
+    /**
+     * Active preference learning: if an app's notifications are almost always
+     * ignored, propose (once) to stop watching it. We just surface the
+     * suggestion — the user decides in Proactivo → apps vigiladas.
+     */
+    private fun maybeProposeMute() {
+        val pkg = ProactiveMemory.nextMuteCandidate() ?: return
+        val label = appLabel(pkg)
+        ProactiveMemory.markMuteProposed(pkg)
+        ToolRegistry.getInstance().executeTool("assistant_alert", mapOf(
+            "title" to "💡 ¿Dejo de vigilar $label?",
+            "body" to "Casi siempre ignoro las notificaciones de $label. Si quieres, quítala de las apps " +
+                "vigiladas en Proactivo para ahorrar batería y ruido.",
+        ))
+        logAction("💡 Propuse dejar de vigilar $label (casi siempre ignorada)", true)
+    }
+
+    private fun appLabel(pkg: String): String = runCatching {
+        val pm = ClawApplication.instance.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    }.getOrDefault(pkg)
 
     private fun isRedacted(title: String, text: String): Boolean {
         val s = (title + " " + text).lowercase()
