@@ -80,6 +80,8 @@ object ToolRegistry {
         register(AssistantLeaveReminderTool())
         register(AssistantDraftReplyTool())
         register(AssistantRecurringBillTool())
+        register(AssistantSavingsGoalTool())
+        register(AssistantExportFinanceTool())
 
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())

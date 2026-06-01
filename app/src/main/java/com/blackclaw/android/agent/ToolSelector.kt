@@ -173,6 +173,11 @@ object ToolSelector {
             tools = listOf("assistant_finance", "assistant_set_budget", "assistant_list"),
         ),
         Category(
+            triggers = listOf("ahorro", "ahorrar", "meta", "meta de ahorro", "savings", "goal",
+                "exporta", "exportar", "csv", "respaldo", "backup", "hoja de calculo", "hoja de cálculo"),
+            tools = listOf("assistant_savings_goal", "assistant_export_finance", "assistant_list"),
+        ),
+        Category(
             triggers = listOf("compra", "compras", "lista de compra", "supermercado", "mercado",
                 "shopping", "comprar", "carrito", "despensa"),
             tools = listOf("assistant_shopping_add", "assistant_list"),

@@ -500,3 +500,60 @@ class AssistantRecurringBillTool : BaseTool() {
             "Factura '$name' registrada: aviso el ${com.blackclaw.android.assistant.AssistantTime.format(cal.timeInMillis)} y cada mes.")
     }
 }
+
+
+/** Savings goal: set a target the weekly summary tracks against. */
+class AssistantSavingsGoalTool : BaseTool() {
+    override fun getName() = "assistant_savings_goal"
+    override fun getDisplayName() = "Meta de ahorro"
+    override fun getDescriptionEN() =
+        "Set or clear the user's savings goal (a target amount, optionally named, e.g. 'vacaciones'). " +
+        "The weekly finance summary will report progress toward it. amount=0 clears the goal."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "fija una meta de ahorro (la app reporta el avance)"
+    override fun getParameters() = listOf(
+        ToolParameter("amount", "number", "Target amount to save (0 to clear).", true),
+        ToolParameter("name", "string", "Optional label for the goal (e.g. vacaciones).", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val amount = (params["amount"] as? Number)?.toDouble()
+            ?: params["amount"]?.toString()?.toDoubleOrNull()
+            ?: return ToolResult.error("amount inválido")
+        AssistantStore.savingsGoal = amount.coerceAtLeast(0.0)
+        AssistantStore.savingsGoalName = optionalString(params, "name", "").trim()
+        if (amount <= 0) return ToolResult.success("Meta de ahorro eliminada.")
+        val label = AssistantStore.savingsGoalName.ifBlank { "ahorro" }
+        val bal = AssistantStore.financeBalance()
+        return ToolResult.success(
+            "Meta de $label: ${"%.2f".format(amount)}. Balance actual: ${"%.2f".format(bal)}.")
+    }
+}
+
+/** Export all finance entries to a CSV file the user can open/share. */
+class AssistantExportFinanceTool : BaseTool() {
+    override fun getName() = "assistant_export_finance"
+    override fun getDisplayName() = "Exportar finanzas (CSV)"
+    override fun getDescriptionEN() =
+        "Export all recorded finance entries (income & expenses) to a CSV file saved in the app's " +
+        "external files (Documents/BlackClaw). Use when the user wants a backup or to open their " +
+        "data in a spreadsheet. Returns the file path."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "exporta las finanzas a un archivo CSV"
+    override fun getParameters() = emptyList<ToolParameter>()
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val csv = AssistantStore.financeCsv()
+        if (csv.lines().size <= 1) return ToolResult.error("No hay movimientos de finanzas para exportar.")
+        return try {
+            val ctx = ClawApplication.instance
+            val dir = java.io.File(ctx.getExternalFilesDir(null), "exports").apply { mkdirs() }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                .format(java.util.Date())
+            val file = java.io.File(dir, "blackclaw_finanzas_$stamp.csv")
+            file.writeText(csv)
+            val rows = csv.lines().size - 1
+            ToolResult.success("Exporté $rows movimientos a ${file.absolutePath}")
+        } catch (e: Exception) {
+            ToolResult.error("No pude escribir el CSV: ${e.message}")
+        }
+    }
+}

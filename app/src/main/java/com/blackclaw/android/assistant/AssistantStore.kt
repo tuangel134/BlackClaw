@@ -215,6 +215,51 @@ object AssistantStore {
         get() = KVUtils.getDouble("assistant_monthly_budget", 0.0)
         set(v) { KVUtils.putDouble("assistant_monthly_budget", v); KVUtils.sync() }
 
+    /** User's savings goal target (0 = not set). */
+    var savingsGoal: Double
+        get() = KVUtils.getDouble("assistant_savings_goal", 0.0)
+        set(v) { KVUtils.putDouble("assistant_savings_goal", v); KVUtils.sync() }
+
+    /** Label for the savings goal (e.g. "vacaciones"). */
+    var savingsGoalName: String
+        get() = KVUtils.getString("assistant_savings_goal_name", "")
+        set(v) { KVUtils.putString("assistant_savings_goal_name", v); KVUtils.sync() }
+
+    /**
+     * Average weekly expenses over the [weeks] full weeks BEFORE the current one.
+     * Used to spot when this week's spending is anomalously high. Returns 0 if
+     * there isn't enough history.
+     */
+    fun avgWeeklyExpenses(weeks: Int = 4): Double {
+        val now = System.currentTimeMillis()
+        val week = 7L * 24 * 60 * 60 * 1000
+        val thisWeekStart = now - week
+        val windowStart = now - (weeks + 1) * week
+        val past = byType(AssistantItemType.FINANCE)
+            .filter { it.amount < 0 && it.createdAtMs in windowStart until thisWeekStart }
+        if (past.isEmpty()) return 0.0
+        val total = past.sumOf { -it.amount }
+        return total / weeks
+    }
+
+    /** All finance entries as CSV (date,type,description,category,amount). */
+    fun financeCsv(): String {
+        val df = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+        val sb = StringBuilder("date,type,description,category,amount\n")
+        byType(AssistantItemType.FINANCE)
+            .sortedBy { it.createdAtMs }
+            .forEach { i ->
+                val type = if (i.amount >= 0) "income" else "expense"
+                fun esc(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
+                sb.append(df.format(java.util.Date(i.createdAtMs))).append(',')
+                    .append(type).append(',')
+                    .append(esc(i.title)).append(',')
+                    .append(esc(i.category)).append(',')
+                    .append("%.2f".format(i.amount)).append('\n')
+            }
+        return sb.toString()
+    }
+
     fun countPending(type: AssistantItemType): Int =
         byType(type).count { !it.done }
 }

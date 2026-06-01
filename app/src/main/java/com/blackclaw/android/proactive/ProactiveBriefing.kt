@@ -67,6 +67,10 @@ object ProactiveBriefing {
         val byCat = AssistantStore.expensesByCategorySince(weekAgo)
         val budget = AssistantStore.monthlyBudget
         val monthSpent = AssistantStore.monthExpenses()
+        val avgWeek = AssistantStore.avgWeeklyExpenses(4)
+        val goal = AssistantStore.savingsGoal
+        val goalName = AssistantStore.savingsGoalName
+        val balance = AssistantStore.financeBalance()
 
         // Build a compact data block.
         val data = buildString {
@@ -78,16 +82,26 @@ object ProactiveBriefing {
                 appendLine("Gastos por categoría:")
                 byCat.take(6).forEach { (cat, amt) -> appendLine("- $cat: ${"%.2f".format(amt)}") }
             }
+            // Anomaly: this week vs the 4-week average.
+            if (avgWeek > 0) {
+                val deltaPct = ((spent - avgWeek) / avgWeek * 100).toInt()
+                appendLine("Promedio semanal previo: ${"%.2f".format(avgWeek)} (esta semana ${if (deltaPct >= 0) "+" else ""}$deltaPct%)")
+            }
             if (budget > 0) {
                 val pct = (monthSpent / budget * 100).toInt()
                 appendLine("Presupuesto del mes: ${"%.0f".format(monthSpent)} de ${"%.0f".format(budget)} ($pct%)")
-                val remaining = budget - monthSpent
-                appendLine("Disponible este mes: ${"%.0f".format(remaining)}")
+                appendLine("Disponible este mes: ${"%.0f".format(budget - monthSpent)}")
+            }
+            if (goal > 0) {
+                val pct = if (goal > 0) (balance / goal * 100).toInt().coerceAtLeast(0) else 0
+                appendLine("Meta de ahorro${if (goalName.isNotBlank()) " ($goalName)" else ""}: " +
+                    "${"%.0f".format(balance.coerceAtLeast(0.0))} de ${"%.0f".format(goal)} ($pct%)")
             }
         }.trim()
 
         val title = "📊 Resumen financiero semanal"
-        val text = summarizeWeekly(data, spent, income, budget, monthSpent) ?: weeklyFallback(spent, income, byCat, budget, monthSpent)
+        val text = summarizeWeekly(data, spent, income, budget, monthSpent)
+            ?: weeklyFallback(spent, income, byCat, budget, monthSpent, avgWeek, goal, goalName, balance)
         AssistantStore.create(type = AssistantItemType.ALERT, title = title, body = text, source = "ai")
         AssistantReceiver.postNotification(ClawApplication.instance, title, text, highPriority = false)
         if (ProactiveConfig.speakBriefings) Speaker.speak("$title. $text")
@@ -117,6 +131,7 @@ object ProactiveBriefing {
     private fun weeklyFallback(
         spent: Double, income: Double, byCat: List<Pair<String, Double>>,
         budget: Double, monthSpent: Double,
+        avgWeek: Double = 0.0, goal: Double = 0.0, goalName: String = "", balance: Double = 0.0,
     ): String {
         if (spent == 0.0 && income == 0.0 && monthSpent == 0.0)
             return "Esta semana no registré movimientos de dinero. Si quieres, ve anotando tus gastos y te haré el resumen."
@@ -127,10 +142,22 @@ object ProactiveBriefing {
         byCat.firstOrNull()?.let { (cat, amt) ->
             sb.append(" Donde más gastaste: $cat (${"%.2f".format(amt)}).")
         }
+        // Anomaly callout.
+        if (avgWeek > 0) {
+            val deltaPct = ((spent - avgWeek) / avgWeek * 100).toInt()
+            when {
+                deltaPct >= 25 -> sb.append(" Ojo: gastaste $deltaPct% más que tu promedio; cuida el resto del mes.")
+                deltaPct <= -20 -> sb.append(" Bien: gastaste ${-deltaPct}% menos que tu promedio.")
+            }
+        }
         if (budget > 0) {
             val remaining = budget - monthSpent
             val pct = (monthSpent / budget * 100).toInt()
             sb.append(" Llevas $pct% del presupuesto del mes; te quedan ${"%.0f".format(remaining)}.")
+        }
+        if (goal > 0) {
+            val pct = (balance / goal * 100).toInt().coerceAtLeast(0)
+            sb.append(" Meta${if (goalName.isNotBlank()) " ($goalName)" else ""}: $pct% (${"%.0f".format(balance.coerceAtLeast(0.0))}/${"%.0f".format(goal)}).")
         }
         return sb.toString()
     }
