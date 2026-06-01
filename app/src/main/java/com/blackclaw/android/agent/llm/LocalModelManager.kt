@@ -89,41 +89,34 @@ object LocalModelManager {
             sizeBytes = 3_650_000_000L,
             minRamGb = 10
         ),
-        // ── Modelos pequeños sin censura (community LiteRT-LM ports) ────────
-        // Las URLs usan los repos públicos de HuggingFace de la comunidad LiteRT.
+        // ── Modelos sin censura (abliterated) — misma arquitectura Gemma 4 ──
+        // que los modelos por defecto, así que cargan con el mismo runtime
+        // LiteRT-LM. Son ports de la comunidad en HuggingFace (URLs verificadas).
         // Si una URL deja de existir el descargador devuelve un error claro y la
         // app no se rompe — el usuario puede pegar una URL custom desde Ajustes.
         ModelInfo(
-            id = "qwen3-0_6b-uncensored",
-            displayName = "Qwen 3 0.6B abliterated — 0.5 GB · sin censura",
-            url = "https://huggingface.co/litert-community/Qwen3-0.6B-abliterated-litert-lm/resolve/main/Qwen3-0.6B-abliterated.litertlm",
-            fileName = "qwen3-0.6b-abliterated.litertlm",
-            sizeBytes = 540_000_000L,
-            minRamGb = 4
+            id = "gemma4-e2b-uncensored",
+            displayName = "Gemma 4 E2B abliterated — 2.6 GB · sin censura",
+            url = "https://huggingface.co/DuoNeural/Gemma-4-Abliterated-LiteRT/resolve/main/Gemma-4-E2B-Abliterated.litertlm",
+            fileName = "gemma-4-E2B-abliterated.litertlm",
+            sizeBytes = 2_556_215_296L,
+            minRamGb = 8
         ),
         ModelInfo(
-            id = "qwen3-1_7b-uncensored",
-            displayName = "Qwen 3 1.7B abliterated — 1.2 GB · sin censura",
-            url = "https://huggingface.co/litert-community/Qwen3-1.7B-abliterated-litert-lm/resolve/main/Qwen3-1.7B-abliterated.litertlm",
-            fileName = "qwen3-1.7b-abliterated.litertlm",
-            sizeBytes = 1_200_000_000L,
-            minRamGb = 6
+            id = "gemma4-e2b-uncensored-max",
+            displayName = "Gemma 4 E2B Uncensored MAX — 2.6 GB · sin censura",
+            url = "https://huggingface.co/PeppX/gemma-4-e2b-uncensored-litertlm/resolve/main/gemma-4-E2B-it-Uncensored-MAX.litertlm",
+            fileName = "gemma-4-E2B-uncensored-max.litertlm",
+            sizeBytes = 2_550_041_824L,
+            minRamGb = 8
         ),
         ModelInfo(
-            id = "llama3_2-1b-uncensored",
-            displayName = "Llama 3.2 1B abliterated — 1.0 GB · sin censura",
-            url = "https://huggingface.co/litert-community/Llama-3.2-1B-Instruct-abliterated-litert-lm/resolve/main/Llama-3.2-1B-Instruct-abliterated.litertlm",
-            fileName = "llama-3.2-1b-instruct-abliterated.litertlm",
-            sizeBytes = 1_000_000_000L,
-            minRamGb = 4
-        ),
-        ModelInfo(
-            id = "phi3-mini-uncensored",
-            displayName = "Phi-3 mini abliterated — 2.0 GB · sin censura",
-            url = "https://huggingface.co/litert-community/Phi-3-mini-4k-instruct-abliterated-litert-lm/resolve/main/Phi-3-mini-4k-abliterated.litertlm",
-            fileName = "phi-3-mini-4k-abliterated.litertlm",
-            sizeBytes = 2_000_000_000L,
-            minRamGb = 6
+            id = "gemma4-e4b-uncensored",
+            displayName = "Gemma 4 E4B abliterated — 4.1 GB · sin censura, potente",
+            url = "https://huggingface.co/DuoNeural/Gemma-4-Abliterated-LiteRT/resolve/main/Gemma-4-E4B-Abliterated.litertlm",
+            fileName = "gemma-4-E4B-abliterated.litertlm",
+            sizeBytes = 4_120_150_016L,
+            minRamGb = 10
         ),
     )
 

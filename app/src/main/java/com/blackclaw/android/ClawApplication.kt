@@ -43,6 +43,7 @@ class ClawApplication : BaseApp() {
         appViewModelInstance = getAppViewModelProvider()[AppViewModel::class.java]
         KVUtils.init(this)
         com.blackclaw.android.adb.AdbController.init(this)
+        runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
         LocalBackendHealth.recoverPendingGpuCrashIfNeeded()
         ToolRegistry.getInstance().registerAllTools(ToolRegistry.DeviceType.MOBILE)
         com.blackclaw.android.agent.skill.SkillRegistry.loadBuiltInSkills()

@@ -62,22 +62,88 @@ object ProactiveAssistantManager {
     }
 
     private fun process(pkg: String, title: String, text: String) {
-        // Some OEMs / apps redact notification content ("Contenido oculto",
-        // "Datos confidenciales ocultos", "1 mensaje nuevo"). We can't classify
-        // what we can't read — skip quietly but leave a breadcrumb in the log so
-        // the user understands why nothing happened.
-        if (isRedacted(title, text)) {
-            XLog.d(TAG, "Proactive: notification content hidden by OS/app for $pkg")
+        var t = title
+        var x = text
+
+        // Redacted content: optionally deep-read the chat via accessibility.
+        if (isRedacted(t, x)) {
+            if (ProactiveConfig.deepRead) {
+                val deep = tryDeepRead(pkg)
+                if (deep != null) { x = deep } else {
+                    XLog.d(TAG, "Proactive: content hidden, deep-read empty for $pkg"); return
+                }
+            } else {
+                XLog.d(TAG, "Proactive: content hidden by OS/app for $pkg (deep-read off)")
+                return
+            }
+        }
+
+        val decision = classify(pkg, t, x) ?: return
+        val actions = decision.optJSONArray("actions")
+        val actionCount = actions?.length() ?: 0
+        val firstAction = if (actionCount > 0) actions!!.getJSONObject(0).optString("action", "ignore") else "ignore"
+        ProactiveMemory.recordEvent(pkg, t, x, if (actionCount == 0) "ignore" else firstAction)
+        if (actionCount == 0) {
+            XLog.d(TAG, "Proactive: nothing actionable from $pkg")
             return
         }
-        val decision = classify(pkg, title, text) ?: return
-        val action = decision.optString("action", "ignore").lowercase()
-        if (action == "ignore") {
-            XLog.d(TAG, "Proactive: ignored notification from $pkg")
+
+        // Gating: rolling rate limit.
+        if (!ProactiveMemory.canAct(ProactiveConfig.maxActionsPerHour)) {
+            XLog.w(TAG, "Proactive: hourly action limit reached, skipping")
+            logAction("⏸️ Límite por hora alcanzado — omití una acción", false)
             return
         }
-        XLog.i(TAG, "Proactive decision for $pkg: $action — ${decision.optString("reason")}")
-        executeDecision(pkg, title, text, action, decision)
+
+        // Confidence gating: if the model isn't confident and the user wants to
+        // be asked, surface a suggestion instead of acting.
+        val confidence = decision.optDouble("confidence", 1.0)
+        if (ProactiveConfig.askWhenUnsure && confidence < 0.55) {
+            askUser(decision, t, x)
+            return
+        }
+
+        XLog.i(TAG, "Proactive: $actionCount action(s) for $pkg — ${decision.optString("reason")}")
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val quiet = ProactiveConfig.inQuietHours(hour)
+        var executed = 0
+        for (i in 0 until actionCount) {
+            val a = actions!!.getJSONObject(i)
+            val type = a.optString("action", "ignore").lowercase()
+            // In quiet hours, suppress purely-noisy notify/alert actions but
+            // still create timed items (they fire later, not now).
+            if (quiet && (type == "notify" || type == "alert")) {
+                XLog.i(TAG, "Proactive: quiet hours, skipping $type")
+                continue
+            }
+            executeAction(pkg, t, x, type, a)
+            executed++
+        }
+        if (executed > 0) ProactiveMemory.recordAction()
+    }
+
+    /** Open the source chat and scrape visible text to recover a redacted msg. */
+    private fun tryDeepRead(pkg: String): String? {
+        return runCatching {
+            val svc = com.blackclaw.android.service.ClawAccessibilityService
+                .getConnectedInstance(2_000L) ?: return null
+            svc.openApp(pkg)
+            Thread.sleep(1800)
+            val tree = svc.getScreenTree() ?: return null
+            // Keep it small: the last chunk of on-screen text.
+            tree.take(1500)
+        }.getOrNull()
+    }
+
+    /** Ask the user (suggestion notification) instead of acting autonomously. */
+    private fun askUser(decision: JSONObject, title: String, text: String) {
+        val label = decision.optString("label").ifBlank { title }
+        val reason = decision.optString("reason").ifBlank { text.take(60) }
+        ToolRegistry.getInstance().executeTool("assistant_alert", mapOf(
+            "title" to "¿Quieres que actúe?",
+            "body" to "$label — $reason. Ábreme para confirmarlo.",
+        ))
+        logAction("❓ Sugerencia (sin certeza) — $label", true)
     }
 
     private fun isRedacted(title: String, text: String): Boolean {
@@ -87,8 +153,6 @@ object ProactiveAssistantManager {
             "content hidden", "nuevo mensaje", "new message", "mensajes nuevos",
             "messages", "te ha enviado un mensaje", "sent you a message",
         )
-        // Treat as redacted only when the text is essentially just a marker
-        // (very short and matching), not when it merely contains the word.
         return text.length < 40 && markers.any { s.contains(it) }
     }
 
@@ -115,38 +179,53 @@ object ProactiveAssistantManager {
 
         val prompt = buildString {
             appendLine("You are the proactive assistant inside BlackClaw on the user's phone.")
-            appendLine("A new notification arrived. Decide if it needs a time-sensitive action.")
+            appendLine("A new notification arrived. Decide if it needs time-sensitive action(s).")
             appendLine()
             appendLine("Current date/time: $nowStr")
             appendLine()
             appendLine("## User's instructions")
             appendLine(ProactiveConfig.instructions.trim())
             appendLine()
-            appendLine("## Notification")
+            ProactiveMemory.preferencesSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
+            ProactiveMemory.recentSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
+            // Cross-check: what's already in the hub so we don't duplicate.
+            existingHubSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
+            appendLine("## New notification")
             appendLine("App package: $pkg")
             appendLine("Title: $title")
             appendLine("Text: $text")
             appendLine()
-            appendLine("## Allowed actions: ${allowed.joinToString(", ")}")
-            appendLine("- alarm: a clock alarm (the user must be awake/somewhere at a time).")
+            appendLine("## Allowed action types: ${allowed.joinToString(", ")}")
+            appendLine("- alarm: a clock alarm (must be awake/somewhere at a time).")
             appendLine("- reminder: a scheduled reminder notification at a future time.")
-            appendLine("- note: save a short note/todo for later.")
+            appendLine("- note: save a short note/todo.")
             appendLine("- calendar: create a calendar event.")
-            appendLine("- finance: record a payment/charge/income (include amount, negative=expense).")
-            appendLine("- notify: just surface a heads-up to the user now (important info).")
+            appendLine("- finance: record a payment/charge/income (amount, negative=expense).")
+            appendLine("- notify: surface a heads-up to the user now.")
             appendLine("- ignore: do nothing (promotions, spam, social, casual chat).")
+            appendLine()
+            appendLine("IMPORTANT:")
+            appendLine("- A single notification may justify SEVERAL actions. Example: a 6am flight →")
+            appendLine("  alarm 04:00 + calendar event + note 'bring passport'. Return all of them.")
+            appendLine("- Do NOT duplicate something already in the hub above (check times/titles).")
+            appendLine("- If a recent event relates (a time changed), prefer ignore or a single note;")
+            appendLine("  do not stack near-duplicate reminders.")
             appendLine()
             appendLine("## Respond with ONE strict JSON object, no prose, no markdown:")
             appendLine("{")
-            appendLine("  \"action\": \"alarm|reminder|note|calendar|finance|notify|ignore\",")
+            appendLine("  \"confidence\": 0.0-1.0,   // how sure you are this needs action")
             appendLine("  \"reason\": \"<one short sentence>\",")
-            appendLine("  \"datetime\": \"YYYY-MM-DD HH:MM\",  // for alarm/reminder/calendar; omit otherwise")
-            appendLine("  \"label\": \"<short label/title>\",")
-            appendLine("  \"message\": \"<text for note/notify>\",")
-            appendLine("  \"amount\": 0,        // for finance: negative=expense, positive=income")
-            appendLine("  \"category\": \"\"     // for finance: optional category")
+            appendLine("  \"actions\": [             // empty array = ignore")
+            appendLine("    {")
+            appendLine("      \"action\": \"alarm|reminder|note|calendar|finance|notify\",")
+            appendLine("      \"datetime\": \"YYYY-MM-DD HH:MM\",  // for alarm/reminder/calendar")
+            appendLine("      \"label\": \"<short title>\",")
+            appendLine("      \"message\": \"<text for note/notify>\",")
+            appendLine("      \"amount\": 0, \"category\": \"\"   // finance only")
+            appendLine("    }")
+            appendLine("  ]")
             appendLine("}")
-            appendLine("If unsure, use \"ignore\". Only act when clearly justified by the instructions.")
+            appendLine("If nothing is justified, return {\"confidence\":0,\"reason\":\"...\",\"actions\":[]}.")
         }
 
         val raw = LlmSessionManager.singleShot(prompt, 0.2) ?: run {
@@ -154,6 +233,24 @@ object ProactiveAssistantManager {
             return null
         }
         return parseJson(raw)
+    }
+
+    /** Compact view of upcoming hub items so the model avoids duplicates. */
+    private fun existingHubSnippet(): String {
+        val now = System.currentTimeMillis()
+        val upcoming = com.blackclaw.android.assistant.AssistantStore.all()
+            .filter { (it.triggerAtMs > now || it.triggerAtMs == 0L) && !it.done }
+            .sortedBy { it.triggerAtMs }
+            .take(10)
+        if (upcoming.isEmpty()) return ""
+        val sb = StringBuilder("## Already in the assistant hub (do NOT duplicate)\n")
+        upcoming.forEach {
+            sb.append("- ${it.type.name.lowercase()}: ${it.title}")
+            if (it.triggerAtMs > 0)
+                sb.append(" @ ${com.blackclaw.android.assistant.AssistantTime.format(it.triggerAtMs)}")
+            sb.append('\n')
+        }
+        return sb.toString().trim()
     }
 
     private fun parseJson(raw: String): JSONObject? {
@@ -172,7 +269,7 @@ object ProactiveAssistantManager {
         }
     }
 
-    private fun executeDecision(
+    private fun executeAction(
         pkg: String, title: String, text: String,
         action: String, decision: JSONObject,
     ) {
@@ -233,14 +330,6 @@ object ProactiveAssistantManager {
                 logAction("📢 Aviso — $label: $message", r.isSuccess)
             }
             else -> XLog.d(TAG, "Proactive: unknown action '$action'")
-        }
-    }
-
-    private fun notifyUser(title: String, body: String) {
-        runCatching {
-            ToolRegistry.getInstance().executeTool("assistant_alert", mapOf(
-                "title" to title, "body" to body,
-            ))
         }
     }
 

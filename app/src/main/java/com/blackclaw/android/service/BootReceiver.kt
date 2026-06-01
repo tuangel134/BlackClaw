@@ -30,6 +30,11 @@ class BootReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 XLog.e(TAG, "Failed to re-arm assistant alarms", e)
             }
+            try {
+                com.blackclaw.android.proactive.BriefingScheduler.syncAll(context.applicationContext)
+            } catch (e: Exception) {
+                XLog.e(TAG, "Failed to re-arm briefings", e)
+            }
         }
     }
 }

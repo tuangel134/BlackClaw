@@ -282,6 +282,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Proactive daily briefings (morning/night) fired by AlarmManager -->
+        <receiver
+            android:name=".proactive.BriefingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.blackclaw.android.BRIEFING_FIRE" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

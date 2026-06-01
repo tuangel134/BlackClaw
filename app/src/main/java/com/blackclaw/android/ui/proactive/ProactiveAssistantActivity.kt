@@ -57,7 +57,12 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var allowCalendar by remember { mutableStateOf(ProactiveConfig.allowCalendar) }
     var allowFinance by remember { mutableStateOf(ProactiveConfig.allowFinance) }
     var watchAll by remember { mutableStateOf(ProactiveConfig.watchAllApps) }
+    var morningOn by remember { mutableStateOf(ProactiveConfig.morningBriefingEnabled) }
+    var nightOn by remember { mutableStateOf(ProactiveConfig.nightBriefingEnabled) }
+    var askUnsure by remember { mutableStateOf(ProactiveConfig.askWhenUnsure) }
+    var deepRead by remember { mutableStateOf(ProactiveConfig.deepRead) }
     var log by remember { mutableStateOf(ProactiveAssistantManager.recentLog()) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         containerColor = colors.background,
@@ -192,6 +197,62 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
 
             Spacer(Modifier.height(18.dp))
 
+            // ── Briefings ──
+            Text("RESÚMENES DEL DÍA", fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, color = colors.textTertiary, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(8.dp))
+            Surface(color = colors.surface, shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    BriefingRow(
+                        emoji = "☀️", title = "Resumen matutino",
+                        hour = ProactiveConfig.morningHour, minute = ProactiveConfig.morningMinute,
+                        enabled = morningOn, colors = colors,
+                        onToggle = { morningOn = it; ProactiveConfig.morningBriefingEnabled = it
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.MORNING) },
+                        onTime = { h, m -> ProactiveConfig.morningHour = h; ProactiveConfig.morningMinute = m
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.MORNING) },
+                    )
+                    DividerLine(colors)
+                    BriefingRow(
+                        emoji = "🌙", title = "Resumen nocturno",
+                        hour = ProactiveConfig.nightHour, minute = ProactiveConfig.nightMinute,
+                        enabled = nightOn, colors = colors,
+                        onToggle = { nightOn = it; ProactiveConfig.nightBriefingEnabled = it
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.NIGHT) },
+                        onTime = { h, m -> ProactiveConfig.nightHour = h; ProactiveConfig.nightMinute = m
+                            com.blackclaw.android.proactive.BriefingScheduler.sync(ctx,
+                                com.blackclaw.android.proactive.ProactiveBriefing.Kind.NIGHT) },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            // ── Behaviour / gating ──
+            Text("COMPORTAMIENTO", fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, color = colors.textTertiary, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(8.dp))
+            Surface(color = colors.surface, shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    ToggleRow("🤔 Preguntar si no está seguro",
+                        "Cuando dude, te sugiere en vez de actuar solo",
+                        askUnsure, colors) { askUnsure = it; ProactiveConfig.askWhenUnsure = it }
+                    DividerLine(colors)
+                    ToggleRow("🔍 Leer mensajes ocultos",
+                        "Abre el chat para leer el contenido si la notificación está censurada",
+                        deepRead, colors) { deepRead = it; ProactiveConfig.deepRead = it }
+                    DividerLine(colors)
+                    QuietHoursRow(colors, ctx)
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
             // Activity log
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.NotificationsActive, null, tint = colors.textTertiary,
@@ -253,4 +314,99 @@ private fun ToggleRow(
 @Composable
 private fun DividerLine(colors: BlackClawColors) {
     Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.aiBubbleBorder))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BriefingRow(
+    emoji: String, title: String, hour: Int, minute: Int,
+    enabled: Boolean, colors: BlackClawColors,
+    onToggle: (Boolean) -> Unit, onTime: (Int, Int) -> Unit,
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    var h by remember { mutableStateOf(hour) }
+    var m by remember { mutableStateOf(minute) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("$emoji $title", fontSize = 14.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium)
+            Text(if (enabled) "Cada día a las %02d:%02d".format(h, m) else "Desactivado",
+                fontSize = 11.sp, color = if (enabled) colors.accent else colors.textSecondary,
+                modifier = Modifier.clickable(enabled = enabled) { showPicker = true })
+        }
+        Spacer(Modifier.width(10.dp))
+        Switch(checked = enabled, onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = colors.background, checkedTrackColor = colors.accent))
+    }
+    if (showPicker) {
+        val state = rememberTimePickerState(initialHour = h, initialMinute = m, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            containerColor = colors.surface,
+            confirmButton = {
+                TextButton(onClick = { h = state.hour; m = state.minute; onTime(h, m); showPicker = false }) {
+                    Text("OK", color = colors.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPicker = false }) { Text("Cancelar", color = colors.textSecondary) }
+            },
+            text = {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    TimePicker(state = state)
+                }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QuietHoursRow(colors: BlackClawColors, ctx: android.content.Context) {
+    var start by remember { mutableStateOf(ProactiveConfig.quietStartHour) }
+    var end by remember { mutableStateOf(ProactiveConfig.quietEndHour) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("🌙 Horas de silencio", fontSize = 14.sp,
+                color = colors.textPrimary, fontWeight = FontWeight.Medium)
+            Text("No te avisa de %02d:00 a %02d:00 (las alarmas siguen sonando)".format(start, end),
+                fontSize = 11.sp, color = colors.textSecondary, lineHeight = 15.sp)
+        }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HourStepper("Desde", start, colors, Modifier.weight(1f)) { start = it; ProactiveConfig.quietStartHour = it }
+        HourStepper("Hasta", end, colors, Modifier.weight(1f)) { end = it; ProactiveConfig.quietEndHour = it }
+    }
+}
+
+@Composable
+private fun HourStepper(label: String, value: Int, colors: BlackClawColors, modifier: Modifier = Modifier, onChange: (Int) -> Unit) {
+    Surface(color = colors.aiBubble, shape = RoundedCornerShape(10.dp), modifier = modifier) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(label, fontSize = 12.sp, color = colors.textSecondary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("−", fontSize = 18.sp, color = colors.accent,
+                    modifier = Modifier.clickable { onChange(((value - 1) + 24) % 24) }
+                        .padding(horizontal = 8.dp))
+                Text("%02d:00".format(value), fontSize = 13.sp, color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold)
+                Text("+", fontSize = 18.sp, color = colors.accent,
+                    modifier = Modifier.clickable { onChange((value + 1) % 24) }
+                        .padding(horizontal = 8.dp))
+            }
+        }
+    }
 }
