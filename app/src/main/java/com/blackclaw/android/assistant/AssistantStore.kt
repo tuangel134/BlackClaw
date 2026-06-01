@@ -173,9 +173,20 @@ object AssistantStore {
     @Synchronized
     fun delete(id: String): Boolean {
         val before = all()
+        val deleted = before.firstOrNull { it.id == id }
         val after = before.filterNot { it.id == id }
         if (after.size == before.size) return false
         saveAll(after)
+        // Correction learning: if the user deletes something the assistant
+        // created, that's negative feedback. Record it so the proactive
+        // classifier becomes more conservative about that category.
+        if (deleted != null && deleted.source == "ai") {
+            runCatching {
+                val cat = deleted.category.ifBlank { deleted.type.name.lowercase() }
+                val age = System.currentTimeMillis() - deleted.createdAtMs
+                com.blackclaw.android.proactive.ProactiveMemory.recordCorrection(cat, age)
+            }
+        }
         return true
     }
 

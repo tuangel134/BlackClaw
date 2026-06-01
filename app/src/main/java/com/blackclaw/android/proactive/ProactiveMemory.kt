@@ -20,8 +20,12 @@ object ProactiveMemory {
     private const val KEY_PREFS = "proactive_learned_prefs"      // JSON array of strings
     private const val KEY_RECENT = "proactive_recent_events"     // JSON array of {t,pkg,title,text,action}
     private const val KEY_ACTION_TIMES = "proactive_action_times" // JSON array of epoch ms
+    private const val KEY_CORRECTIONS = "proactive_corrections"  // JSON obj: category -> {rejects, quickRejects, lastT}
     private const val MAX_PREFS = 25
     private const val MAX_RECENT = 8
+
+    /** A deletion within this window of creation counts as a "quick reject" (stronger signal). */
+    const val QUICK_REJECT_MS = 10 * 60 * 1000L
 
     // ── Learned preferences ──
     @Synchronized
@@ -119,6 +123,91 @@ object ProactiveMemory {
         return runCatching {
             val a = JSONArray(raw); (0 until a.length()).map { a.getLong(it) }
         }.getOrDefault(emptyList())
+    }
+
+    // ── Correction learning ──
+    // When the user deletes something the assistant created, that's negative
+    // feedback. We tally rejects per "category" (the item type, e.g. reminder /
+    // alarm / finance / draft). Repeated/quick rejects make the assistant more
+    // conservative about that category via [correctionGuidanceSnippet], which is
+    // fed back into the proactive classifier prompt.
+
+    data class CategoryFeedback(val rejects: Int, val quickRejects: Int, val lastT: Long)
+
+    /**
+     * Record that an AI-created item was deleted. [ageMs] is how long the item
+     * existed before deletion; a short age is a stronger "no, don't do this".
+     * Returns the running reject count for the category.
+     */
+    @Synchronized
+    fun recordCorrection(category: String, ageMs: Long): Int {
+        val cat = category.lowercase().trim().ifBlank { "other" }
+        val obj = correctionsObj()
+        val existing = obj.optJSONObject(cat)
+        val rejects = (existing?.optInt("rejects") ?: 0) + 1
+        val quick = (existing?.optInt("quickRejects") ?: 0) + (if (ageMs in 0 until QUICK_REJECT_MS) 1 else 0)
+        obj.put(cat, JSONObject().apply {
+            put("rejects", rejects); put("quickRejects", quick); put("lastT", System.currentTimeMillis())
+        })
+        KVUtils.putString(KEY_CORRECTIONS, obj.toString()); KVUtils.sync()
+        return rejects
+    }
+
+    @Synchronized
+    fun categoryFeedback(category: String): CategoryFeedback {
+        val o = correctionsObj().optJSONObject(category.lowercase().trim()) ?: return CategoryFeedback(0, 0, 0)
+        return CategoryFeedback(o.optInt("rejects"), o.optInt("quickRejects"), o.optLong("lastT"))
+    }
+
+    /**
+     * How strongly the assistant should hold back on a category, 0.0 (no signal)
+     * to 1.0 (frequently rejected).
+     */
+    fun conservatismFor(category: String): Double {
+        val fb = categoryFeedback(category)
+        return conservatismScore(fb.rejects, fb.quickRejects)
+    }
+
+    /**
+     * Pure scoring: quick rejects weigh double; saturates around 4 weighted
+     * rejects. Extracted so it's unit-testable without MMKV.
+     */
+    fun conservatismScore(rejects: Int, quickRejects: Int): Double {
+        if (rejects <= 0) return 0.0
+        val weighted = rejects + quickRejects
+        return (weighted / 4.0).coerceIn(0.0, 1.0)
+    }
+
+    /** Categories the user has pushed back on enough to warrant caution. */
+    private fun correctedCategories(): List<Pair<String, Double>> {
+        val obj = correctionsObj()
+        return obj.keys().asSequence()
+            .map { it to conservatismFor(it) }
+            .filter { it.second >= 0.5 }
+            .sortedByDescending { it.second }
+            .toList()
+    }
+
+    /** Guidance line fed into the classifier so it backs off on rejected categories. */
+    fun correctionGuidanceSnippet(): String {
+        val cats = correctedCategories()
+        if (cats.isEmpty()) return ""
+        val esName = mapOf(
+            "reminder" to "recordatorios", "alarm" to "alarmas", "finance" to "registros de finanzas",
+            "note" to "notas", "event" to "eventos", "alert" to "avisos", "draft" to "borradores",
+            "shopping" to "items de compras",
+        )
+        return "## Correcciones del usuario (sé más prudente)\n" +
+            cats.joinToString("\n") { (cat, _) ->
+                "- El usuario suele borrar los ${esName[cat] ?: cat} que creo solo/a. " +
+                    "Crea ${esName[cat] ?: cat} únicamente si es claramente necesario; si dudas, ignora o pregunta."
+            }
+    }
+
+    private fun correctionsObj(): JSONObject {
+        val raw = KVUtils.getString(KEY_CORRECTIONS, "")
+        if (raw.isBlank()) return JSONObject()
+        return runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
     }
 
     private fun save(key: String, list: List<String>) {

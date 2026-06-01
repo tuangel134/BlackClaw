@@ -105,9 +105,13 @@ object ProactiveAssistantManager {
         }
 
         // Confidence gating: if the model isn't confident and the user wants to
-        // be asked, surface a suggestion instead of acting.
+        // be asked, surface a suggestion instead of acting. The threshold rises
+        // for categories the user has been correcting (deleting), so the
+        // assistant learns to hold back where it's been wrong before.
         val confidence = decision.optDouble("confidence", 1.0)
-        if (ProactiveConfig.askWhenUnsure && confidence < 0.55) {
+        val conservatism = ProactiveMemory.conservatismFor(firstAction)
+        val threshold = (0.55 + conservatism * 0.35).coerceAtMost(0.92)
+        if (ProactiveConfig.askWhenUnsure && confidence < threshold) {
             askUser(decision, t, x)
             return
         }
@@ -208,6 +212,7 @@ object ProactiveAssistantManager {
             appendLine(ProactiveConfig.instructions.trim())
             appendLine()
             ProactiveMemory.preferencesSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
+            ProactiveMemory.correctionGuidanceSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
             ProactiveMemory.recentSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
             // Cross-check: what's already in the hub so we don't duplicate.
             existingHubSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
