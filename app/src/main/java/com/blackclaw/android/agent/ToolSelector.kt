@@ -182,6 +182,16 @@ object ToolSelector {
             tools = listOf("run_skill"),
         ),
         Category(
+            triggers = listOf("borrador", "responde por mi", "respuesta sugerida", "draft", "redacta",
+                "escribe una respuesta", "que le contesto", "qué le contesto"),
+            tools = listOf("assistant_draft_reply"),
+        ),
+        Category(
+            triggers = listOf("factura", "facturas", "suscripcion", "suscripción", "subscription",
+                "netflix", "spotify", "recibo", "cobro mensual", "mensualidad", "bill", "recurrente"),
+            tools = listOf("assistant_recurring_bill", "assistant_finance", "assistant_list"),
+        ),
+        Category(
             triggers = listOf("medicina", "medicación", "medicacion", "pastilla", "pastillas", "medicamento",
                 "tomar", "dosis", "pill", "medication", "remedio"),
             tools = listOf("assistant_medication", "assistant_list"),

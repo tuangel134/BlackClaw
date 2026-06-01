@@ -430,3 +430,73 @@ class AssistantLeaveReminderTool : BaseTool() {
         return ToolResult.success("Te avisaré salir a las ${com.blackclaw.android.assistant.AssistantTime.format(triggerAt)} para '$what'.")
     }
 }
+
+/** Draft reply: store a suggested reply the user can review/copy/send. */
+class AssistantDraftReplyTool : BaseTool() {
+    override fun getName() = "assistant_draft_reply"
+    override fun getDisplayName() = "Borrador de respuesta"
+    override fun getDescriptionEN() =
+        "Save a suggested reply draft for a message the user received, so they can review and " +
+        "send it later. Provide who it's for and the drafted text. Shows up in the assistant hub " +
+        "as a draft the user can copy."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "guarda un borrador de respuesta sugerido para revisar/enviar"
+    override fun getParameters() = listOf(
+        ToolParameter("to", "string", "Who the reply is for (contact / app).", true),
+        ToolParameter("draft", "string", "The drafted reply text.", true),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val to = requireString(params, "to").trim()
+        val draft = requireString(params, "draft").trim()
+        if (draft.isEmpty()) return ToolResult.error("draft vacío")
+        com.blackclaw.android.assistant.AssistantStore.create(
+            type = com.blackclaw.android.assistant.AssistantItemType.ALERT,
+            title = "✍️ Borrador para $to",
+            body = draft, category = "draft", source = "ai")
+        return ToolResult.success("Borrador guardado para $to.")
+    }
+}
+
+/** Recurring bill: a monthly reminder a few days before a charge. */
+class AssistantRecurringBillTool : BaseTool() {
+    override fun getName() = "assistant_recurring_bill"
+    override fun getDisplayName() = "Factura recurrente"
+    override fun getDescriptionEN() =
+        "Track a recurring bill/subscription. Creates a monthly reminder a few days before it's " +
+        "charged so the user is never surprised. Optionally records the amount."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "recordatorio mensual antes de un cobro recurrente (suscripción/factura)"
+    override fun getParameters() = listOf(
+        ToolParameter("name", "string", "Bill/subscription name (e.g. Netflix).", true),
+        ToolParameter("day_of_month", "integer", "Day it charges (1-28).", true),
+        ToolParameter("amount", "number", "Optional amount.", false),
+        ToolParameter("days_before", "integer", "Days before to remind (default 2).", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val name = requireString(params, "name").trim()
+        val day = requireInt(params, "day_of_month").coerceIn(1, 28)
+        val daysBefore = optionalInt(params, "days_before", 2).coerceIn(0, 10)
+        val amount = (params["amount"] as? Number)?.toDouble()
+            ?: params["amount"]?.toString()?.toDoubleOrNull() ?: 0.0
+
+        // Compute the next reminder date: (charge day - daysBefore) this or next month.
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.DAY_OF_MONTH, day)
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 10); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.add(java.util.Calendar.DAY_OF_MONTH, -daysBefore)
+        if (cal.timeInMillis <= System.currentTimeMillis()) cal.add(java.util.Calendar.MONTH, 1)
+
+        val amtStr = if (amount != 0.0) " (~${"%.2f".format(kotlin.math.abs(amount))})" else ""
+        val item = com.blackclaw.android.assistant.AssistantStore.create(
+            type = com.blackclaw.android.assistant.AssistantItemType.REMINDER,
+            title = "💳 Cobro próximo: $name$amtStr",
+            body = "Se cobra el día $day de cada mes.",
+            triggerAtMs = cal.timeInMillis, repeat = "monthly",
+            amount = if (amount != 0.0) -kotlin.math.abs(amount) else 0.0,
+            category = "bill", source = "ai")
+        com.blackclaw.android.assistant.AssistantScheduler.arm(ClawApplication.instance, item)
+        return ToolResult.success(
+            "Factura '$name' registrada: aviso el ${com.blackclaw.android.assistant.AssistantTime.format(cal.timeInMillis)} y cada mes.")
+    }
+}

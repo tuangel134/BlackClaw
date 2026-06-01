@@ -78,6 +78,8 @@ object ToolRegistry {
         register(AssistantMedicationTool())
         register(AssistantTrackPromiseTool())
         register(AssistantLeaveReminderTool())
+        register(AssistantDraftReplyTool())
+        register(AssistantRecurringBillTool())
 
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())

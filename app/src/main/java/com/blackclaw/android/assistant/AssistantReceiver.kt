@@ -170,6 +170,7 @@ class AssistantReceiver : BroadcastReceiver() {
         when (item.repeat.lowercase()) {
             "daily" -> cal.add(Calendar.DAY_OF_YEAR, 1)
             "weekly" -> cal.add(Calendar.WEEK_OF_YEAR, 1)
+            "monthly" -> cal.add(Calendar.MONTH, 1)
             else -> return null
         }
         // Skip past slots if the device was off.
@@ -178,6 +179,7 @@ class AssistantReceiver : BroadcastReceiver() {
             when (item.repeat.lowercase()) {
                 "daily" -> cal.add(Calendar.DAY_OF_YEAR, 1)
                 "weekly" -> cal.add(Calendar.WEEK_OF_YEAR, 1)
+                "monthly" -> cal.add(Calendar.MONTH, 1)
             }
         }
         return cal.timeInMillis

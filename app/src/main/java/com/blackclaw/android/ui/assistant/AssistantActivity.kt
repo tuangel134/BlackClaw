@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -340,6 +341,8 @@ private fun ItemCard(
     onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val isDraft = item.category == "draft"
     val checkable = item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE ||
         item.type == AssistantItemType.SHOPPING
     Surface(
@@ -395,6 +398,17 @@ private fun ItemCard(
                     fontSize = 16.sp, fontWeight = FontWeight.Bold,
                     color = if (item.amount >= 0) Color(0xFF22C55E) else Color(0xFFEF4444))
                 Spacer(Modifier.width(6.dp))
+            }
+            if (isDraft) {
+                IconButton(onClick = {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("draft", item.body))
+                    android.widget.Toast.makeText(ctx, "Borrador copiado", android.widget.Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.ContentCopy, "Copiar", tint = colors.accent,
+                        modifier = Modifier.size(18.dp))
+                }
             }
             IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                 Icon(Icons.Default.Delete, "Borrar", tint = colors.textTertiary,
