@@ -93,8 +93,9 @@ object ToolSelector {
             tools = listOf("weather", "get_location", "sun_info"),
         ),
         Category(
-            triggers = listOf("ubicacion", "ubicación", "donde estoy", "location", "gps", "coordenadas"),
-            tools = listOf("get_location"),
+            triggers = listOf("ubicacion", "ubicación", "donde estoy", "location", "gps", "coordenadas",
+                "cuando llegue", "cuando salga", "al llegar", "en casa", "en el trabajo", "geofence"),
+            tools = listOf("get_location", "assistant_location_reminder", "assistant_list"),
         ),
         Category(
             triggers = listOf("internet", "red", "network", "velocidad", "speed", "ping", "ip",

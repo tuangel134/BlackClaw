@@ -353,7 +353,7 @@ private fun ItemCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun AddItemDialog(
     type: AssistantItemType,
@@ -464,7 +464,10 @@ private fun AddItemDialog(
                     Text("RETO PARA APAGAR (ALARMA IMPORTANTE)", fontSize = 11.sp,
                         fontWeight = FontWeight.Bold, color = colors.textTertiary, letterSpacing = 0.8.sp)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         listOf("none" to "Sin reto", "math" to "🔢 Mate",
                                "memory" to "🧠 Memoria", "type" to "⌨️ Frase")
                             .forEach { (value, lbl) ->
@@ -476,7 +479,7 @@ private fun AddItemDialog(
                                 ) {
                                     Text(lbl, fontSize = 12.sp,
                                         color = if (sel) colors.background else colors.textSecondary,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                                 }
                             }
                     }

@@ -46,6 +46,10 @@ class KeepAliveJobService : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         XLog.i(TAG, "KeepAlive job triggered, ForegroundService running: ${ForegroundService.isRunning()}")
         ForegroundService.syncToBackgroundState(applicationContext)
+        // Opportunistic location-reminder check (no constant GPS).
+        runCatching {
+            com.blackclaw.android.assistant.GeofenceChecker.check(applicationContext)
+        }
         return false
     }
 

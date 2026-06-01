@@ -116,7 +116,10 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
                         }
                         Switch(
                             checked = enabled,
-                            onCheckedChange = { enabled = it; ProactiveConfig.enabled = it },
+                            onCheckedChange = {
+                                enabled = it; ProactiveConfig.enabled = it
+                                if (it) com.blackclaw.android.service.KeepAliveJobService.schedule(ctx)
+                            },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = colors.background,
                                 checkedTrackColor = colors.accent),
@@ -236,6 +239,14 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
 
             Spacer(Modifier.height(18.dp))
 
+            // ── Voice (TTS) ──
+            Text("VOZ (TTS)", fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, color = colors.textTertiary, letterSpacing = 0.8.sp)
+            Spacer(Modifier.height(8.dp))
+            VoiceSettings(colors, ctx)
+
+            Spacer(Modifier.height(18.dp))
+
             // ── Behaviour / gating ──
             Text("COMPORTAMIENTO", fontSize = 11.sp,
                 fontWeight = FontWeight.Bold, color = colors.textTertiary, letterSpacing = 0.8.sp)
@@ -318,6 +329,128 @@ private fun ToggleRow(
 @Composable
 private fun DividerLine(colors: BlackClawColors) {
     Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.aiBubbleBorder))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceSettings(colors: BlackClawColors, ctx: android.content.Context) {
+    val voices = remember { com.blackclaw.android.assistant.Speaker.availableSpanishVoices() }
+    var voiceName by remember { mutableStateOf(com.blackclaw.android.assistant.Speaker.voiceName) }
+    var rate by remember { mutableStateOf(com.blackclaw.android.assistant.Speaker.rate) }
+    var pitch by remember { mutableStateOf(com.blackclaw.android.assistant.Speaker.pitch) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(color = colors.surface, shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp)) {
+            // Voice picker
+            Text("Voz", fontSize = 13.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            if (voices.isEmpty()) {
+                Text("No se encontraron voces en español. Instala 'Google Speech Services' o " +
+                    "añade voces desde los ajustes de TTS del sistema.",
+                    fontSize = 11.sp, color = colors.textSecondary, lineHeight = 15.sp)
+            } else {
+                Box {
+                    Surface(
+                        color = colors.aiBubble, shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { expanded = true },
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                voices.firstOrNull { it.name == voiceName }?.let { prettyVoice(it) }
+                                    ?: "Predeterminada del sistema",
+                                fontSize = 13.sp, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                            Text("▾", color = colors.accent, fontSize = 14.sp)
+                        }
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Predeterminada del sistema", fontSize = 13.sp) },
+                            onClick = {
+                                voiceName = ""; com.blackclaw.android.assistant.Speaker.voiceName = ""
+                                expanded = false
+                            },
+                        )
+                        voices.forEach { v ->
+                            DropdownMenuItem(
+                                text = { Text(prettyVoice(v), fontSize = 13.sp) },
+                                onClick = {
+                                    voiceName = v.name
+                                    com.blackclaw.android.assistant.Speaker.voiceName = v.name
+                                    expanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            // Rate
+            SliderRow("Velocidad", rate, 0.5f, 1.8f, colors) {
+                rate = it; com.blackclaw.android.assistant.Speaker.rate = it
+            }
+            Spacer(Modifier.height(8.dp))
+            // Pitch
+            SliderRow("Tono", pitch, 0.5f, 1.8f, colors) {
+                pitch = it; com.blackclaw.android.assistant.Speaker.pitch = it
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { com.blackclaw.android.assistant.Speaker.speak(
+                        "Hola, soy BlackClaw. Así sonará tu asistente.") },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accent, contentColor = colors.background),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("Probar voz", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                OutlinedButton(
+                    onClick = {
+                        runCatching {
+                            ctx.startActivity(android.content.Intent("com.android.settings.TTS_SETTINGS")
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("Ajustes TTS", fontSize = 13.sp, color = colors.accent) }
+            }
+        }
+    }
+}
+
+private fun prettyVoice(v: android.speech.tts.Voice): String {
+    val country = v.locale.country.ifBlank { "" }
+    val net = if (v.isNetworkConnectionRequired) " · online" else " · offline"
+    val region = when (country) {
+        "ES" -> "España"; "US" -> "Latino (US)"; "MX" -> "México"
+        "AR" -> "Argentina"; "" -> "Español"; else -> country
+    }
+    // Voice names look like "es-es-x-eea-network"; show region + short id.
+    val shortId = v.name.substringAfterLast("-").take(8)
+    return "$region ($shortId)$net"
+}
+
+@Composable
+private fun SliderRow(
+    label: String, value: Float, min: Float, max: Float,
+    colors: BlackClawColors, onChange: (Float) -> Unit,
+) {
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, fontSize = 13.sp, color = colors.textPrimary)
+            Text("%.1fx".format(value), fontSize = 12.sp, color = colors.accent)
+        }
+        Slider(
+            value = value, onValueChange = onChange, valueRange = min..max,
+            colors = SliderDefaults.colors(
+                thumbColor = colors.accent, activeTrackColor = colors.accent,
+                inactiveTrackColor = colors.aiBubbleBorder),
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

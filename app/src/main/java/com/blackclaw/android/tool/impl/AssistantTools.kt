@@ -244,3 +244,40 @@ class AssistantRemoveTool : BaseTool() {
         else ToolResult.error("No encontré el elemento $id.")
     }
 }
+
+/** Location-based reminder (geofence): fires when the user enters/exits a place. */
+class AssistantLocationReminderTool : BaseTool() {
+    override fun getName() = "assistant_location_reminder"
+    override fun getDisplayName() = "Recordatorio por ubicación"
+    override fun getDescriptionEN() =
+        "Create a location reminder that fires when the user ARRIVES at or LEAVES a place. " +
+        "Provide lat & lon (use get_location for the current spot, e.g. 'remind me when I get home' " +
+        "while at home) and a radius in meters (default 150). trigger=enter|exit. " +
+        "Fires within a few minutes of crossing — no constant GPS."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "recordatorio que salta al llegar/salir de un lugar (geofence)"
+    override fun getParameters() = listOf(
+        ToolParameter("title", "string", "What to remind.", true),
+        ToolParameter("lat", "number", "Latitude of the place.", true),
+        ToolParameter("lon", "number", "Longitude of the place.", true),
+        ToolParameter("radius_m", "integer", "Radius in meters (default 150).", false),
+        ToolParameter("trigger", "string", "enter | exit (default enter).", false),
+        ToolParameter("body", "string", "Optional detail.", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val title = requireString(params, "title").trim()
+        val lat = (params["lat"] as? Number)?.toDouble() ?: params["lat"]?.toString()?.toDoubleOrNull()
+            ?: return ToolResult.error("lat inválido")
+        val lon = (params["lon"] as? Number)?.toDouble() ?: params["lon"]?.toString()?.toDoubleOrNull()
+            ?: return ToolResult.error("lon inválido")
+        val radius = optionalInt(params, "radius_m", 150).coerceIn(50, 5000)
+        val trigger = optionalString(params, "trigger", "enter").lowercase()
+        AssistantStore.create(
+            type = AssistantItemType.REMINDER, title = title,
+            body = optionalString(params, "body", ""),
+            lat = lat, lon = lon, radiusM = radius, geoTrigger = trigger, source = "ai",
+        )
+        val verb = if (trigger == "exit") "salgas de" else "llegues a"
+        return ToolResult.success("Recordatorio por ubicación: '$title' cuando $verb ese lugar (${radius}m).")
+    }
+}

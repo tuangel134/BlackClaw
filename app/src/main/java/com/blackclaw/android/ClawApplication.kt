@@ -44,6 +44,12 @@ class ClawApplication : BaseApp() {
         KVUtils.init(this)
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
+        runCatching {
+            if (com.blackclaw.android.proactive.ProactiveConfig.enabled ||
+                com.blackclaw.android.assistant.GeofenceChecker.hasActiveGeofences()) {
+                com.blackclaw.android.service.KeepAliveJobService.schedule(this)
+            }
+        }
         LocalBackendHealth.recoverPendingGpuCrashIfNeeded()
         ToolRegistry.getInstance().registerAllTools(ToolRegistry.DeviceType.MOBILE)
         com.blackclaw.android.agent.skill.SkillRegistry.loadBuiltInSkills()

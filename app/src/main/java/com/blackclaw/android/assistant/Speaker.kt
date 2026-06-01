@@ -2,6 +2,7 @@ package com.blackclaw.android.assistant
 
 import android.speech.tts.TextToSpeech
 import com.blackclaw.android.ClawApplication
+import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
 import java.util.Locale
 import java.util.UUID
@@ -18,9 +19,22 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object Speaker {
     private const val TAG = "Speaker"
+    private const val KEY_VOICE = "tts_voice_name"
+    private const val KEY_RATE = "tts_rate"
+    private const val KEY_PITCH = "tts_pitch"
 
     @Volatile private var engine: TextToSpeech? = null
     private val ready = AtomicBoolean(false)
+
+    var rate: Float
+        get() = KVUtils.getFloat(KEY_RATE, 1.0f)
+        set(v) { KVUtils.putFloat(KEY_RATE, v); KVUtils.sync(); applyPreferences() }
+    var pitch: Float
+        get() = KVUtils.getFloat(KEY_PITCH, 1.0f)
+        set(v) { KVUtils.putFloat(KEY_PITCH, v); KVUtils.sync(); applyPreferences() }
+    var voiceName: String
+        get() = KVUtils.getString(KEY_VOICE, "")
+        set(v) { KVUtils.putString(KEY_VOICE, v); KVUtils.sync(); applyPreferences() }
 
     @Synchronized
     private fun engine(): TextToSpeech? {
@@ -29,13 +43,7 @@ object Speaker {
             val tts = TextToSpeech(ClawApplication.instance) { status ->
                 ready.set(status == TextToSpeech.SUCCESS)
                 if (status == TextToSpeech.SUCCESS) {
-                    runCatching {
-                        val es = Locale("es", "ES")
-                        val r = engine?.setLanguage(es)
-                        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                            engine?.setLanguage(Locale.getDefault())
-                        }
-                    }
+                    applyPreferences()
                 } else {
                     XLog.w(TAG, "TTS init failed: $status")
                 }
@@ -46,6 +54,39 @@ object Speaker {
             XLog.e(TAG, "TTS create failed", e)
             null
         }
+    }
+
+    /** Apply saved locale/voice/rate/pitch to the live engine. */
+    fun applyPreferences() {
+        val tts = engine ?: return
+        runCatching {
+            tts.setSpeechRate(KVUtils.getFloat(KEY_RATE, 1.0f).coerceIn(0.5f, 2.0f))
+            tts.setPitch(KVUtils.getFloat(KEY_PITCH, 1.0f).coerceIn(0.5f, 2.0f))
+            val voiceName = KVUtils.getString(KEY_VOICE, "")
+            if (voiceName.isNotBlank()) {
+                val v = tts.voices?.firstOrNull { it.name == voiceName }
+                if (v != null) { tts.voice = v; return@runCatching }
+            }
+            // No saved voice → prefer Spanish locale.
+            val es = Locale("es", "ES")
+            val r = tts.setLanguage(es)
+            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                tts.setLanguage(Locale.getDefault())
+            }
+        }
+    }
+
+    /** Spanish (and a few common) voices available on this device's TTS engine. */
+    fun availableSpanishVoices(): List<android.speech.tts.Voice> {
+        val tts = engine() ?: return emptyList()
+        val deadline = System.currentTimeMillis() + 2_000L
+        while (!ready.get() && System.currentTimeMillis() < deadline) {
+            try { Thread.sleep(50) } catch (_: InterruptedException) { return emptyList() }
+        }
+        return runCatching {
+            tts.voices?.filter { it.locale.language == "es" }
+                ?.sortedBy { it.name } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     /** Speak [text] aloud. [flush] true interrupts current speech. */

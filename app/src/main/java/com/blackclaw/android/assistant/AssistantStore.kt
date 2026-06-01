@@ -35,6 +35,12 @@ data class AssistantItem(
     val category: String = "",
     /** Alarm challenge to dismiss: none|math|memory|type. Empty = normal alarm. */
     val challenge: String = "none",
+    /** Geofence (location reminder): target lat/lon and radius (m). 0 = none. */
+    val lat: Double = 0.0,
+    val lon: Double = 0.0,
+    val radiusM: Int = 0,
+    /** Geofence trigger: enter|exit. */
+    val geoTrigger: String = "enter",
     val createdAtMs: Long = System.currentTimeMillis(),
     /** Source that created it, e.g. "ai" or "user" or a notification package. */
     val source: String = "user",
@@ -50,6 +56,10 @@ data class AssistantItem(
         put("amount", amount)
         put("category", category)
         put("challenge", challenge)
+        put("lat", lat)
+        put("lon", lon)
+        put("radiusM", radiusM)
+        put("geoTrigger", geoTrigger)
         put("createdAtMs", createdAtMs)
         put("source", source)
     }
@@ -67,6 +77,10 @@ data class AssistantItem(
             amount = o.optDouble("amount", 0.0),
             category = o.optString("category", ""),
             challenge = o.optString("challenge", "none"),
+            lat = o.optDouble("lat", 0.0),
+            lon = o.optDouble("lon", 0.0),
+            radiusM = o.optInt("radiusM", 0),
+            geoTrigger = o.optString("geoTrigger", "enter"),
             createdAtMs = o.optLong("createdAtMs", System.currentTimeMillis()),
             source = o.optString("source", "user"),
         )
@@ -126,13 +140,18 @@ object AssistantStore {
         amount: Double = 0.0,
         category: String = "",
         challenge: String = "none",
+        lat: Double = 0.0,
+        lon: Double = 0.0,
+        radiusM: Int = 0,
+        geoTrigger: String = "enter",
         source: String = "user",
     ): AssistantItem {
         val item = AssistantItem(
             id = UUID.randomUUID().toString().take(8),
             type = type, title = title, body = body,
             triggerAtMs = triggerAtMs, repeat = repeat,
-            amount = amount, category = category, challenge = challenge, source = source,
+            amount = amount, category = category, challenge = challenge,
+            lat = lat, lon = lon, radiusM = radiusM, geoTrigger = geoTrigger, source = source,
         )
         upsert(item)
         return item
