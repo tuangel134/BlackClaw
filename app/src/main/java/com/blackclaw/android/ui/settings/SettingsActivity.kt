@@ -83,6 +83,7 @@ class SettingsActivity : BaseActivity() {
                 colors = colors,
                 caps = caps,
                 onBack = { finish() },
+                onOpenOnboarding = { startActivity(Intent(this, com.blackclaw.android.ui.onboarding.OnboardingActivity::class.java)) },
                 onOpenAccessibility = { AppCapabilityCoordinator.openSystemSettings(this, AppRequirement.ACCESSIBILITY) },
                 onRequestNotifications = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
@@ -155,6 +156,7 @@ private fun ModernSettingsScreen(
     colors: BlackClawColors,
     caps: com.blackclaw.android.AppCapabilitySnapshot,
     onBack: () -> Unit,
+    onOpenOnboarding: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onRequestNotifications: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -227,6 +229,16 @@ private fun ModernSettingsScreen(
 
             // ── Permisos ───────────────────────────────────────────────────────
             SettingsSection(title = "Permisos", colors = colors) {
+                NavRow(
+                    icon = Icons.Outlined.AutoAwesome,
+                    title = "Configuración guiada",
+                    subtitle = "Activa todos los permisos paso a paso",
+                    trailing = "Abrir",
+                    trailingHighlight = true,
+                    colors = colors,
+                    onClick = onOpenOnboarding,
+                )
+                Divider(colors)
                 StatusRow(
                     icon = Icons.Outlined.Accessibility,
                     title = "Servicio de accesibilidad",

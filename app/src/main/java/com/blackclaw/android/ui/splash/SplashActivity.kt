@@ -14,6 +14,7 @@ import androidx.activity.OnBackPressedCallback
 import com.blackclaw.android.R
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.ui.chat.ComposeChatActivity
+import com.blackclaw.android.ui.onboarding.OnboardingActivity
 
 /**
  * Animated splash:
@@ -109,6 +110,20 @@ class SplashActivity : BaseActivity() {
     }
 
     private fun handOffToChat() {
+        // First launch (or missing essentials): walk the user through permissions.
+        // We only auto-show onboarding once; afterwards they reach it from Settings.
+        val task = intent?.getStringExtra("task")
+        if (task.isNullOrBlank() &&
+            !OnboardingActivity.wasCompleted() &&
+            !OnboardingActivity.hasEssentials(this)) {
+            startActivity(Intent(this, OnboardingActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            @Suppress("DEPRECATION")
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+            finish()
+            return
+        }
         val next = Intent(this, ComposeChatActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             intent?.getStringExtra("task")?.let { putExtra("task", it) }
