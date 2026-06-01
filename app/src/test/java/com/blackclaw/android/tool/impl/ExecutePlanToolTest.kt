@@ -61,4 +61,16 @@ class ExecutePlanToolTest {
         assertEquals("ok", s.expect)
         assertEquals("Chats", s.verifyText)
     }
+
+    @Test
+    fun summarizeScreenCollapsesWhitespace() {
+        val out = tool.summarizeScreen("Chats\n\n  Ana   Bob\tCarlos")
+        assertEquals("Chats Ana Bob Carlos", out)
+    }
+
+    @Test
+    fun summarizeScreenTruncates() {
+        val out = tool.summarizeScreen("x".repeat(1000))
+        assertTrue(out.length <= 300)
+    }
 }

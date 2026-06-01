@@ -107,13 +107,28 @@ class ExecutePlanTool : BaseTool() {
             val suffix = if (attempt > 0) " (reintento)" else ""
             return true to (data.ifBlank { "ok" } + suffix)
         }
-        return false to lastDetail
+        // Both attempts failed. Attach what's actually on screen so the agent can
+        // self-correct instead of guessing blindly.
+        val seen = currentScreenSummary()
+        val detail = if (seen.isNotBlank()) "$lastDetail. En pantalla ahora: $seen" else lastDetail
+        return false to detail
     }
 
     private fun screenContains(text: String): Boolean {
         val r = ToolRegistry.getInstance().executeTool("get_screen_info", emptyMap())
         return r.isSuccess && (r.data ?: "").contains(text, ignoreCase = true)
     }
+
+    /** A short snapshot of the current screen for failure diagnostics. */
+    private fun currentScreenSummary(): String {
+        val r = runCatching { ToolRegistry.getInstance().executeTool("get_screen_info", emptyMap()) }.getOrNull()
+        if (r == null || !r.isSuccess) return ""
+        return summarizeScreen(r.data ?: "")
+    }
+
+    /** Collapse whitespace and cap a raw screen dump for inclusion in an error. Pure. */
+    internal fun summarizeScreen(raw: String, max: Int = 300): String =
+        raw.replace(Regex("\\s+"), " ").trim().take(max)
 
     internal data class Step(
         val tool: String,
