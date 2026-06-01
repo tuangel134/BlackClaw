@@ -334,3 +334,99 @@ class AssistantBudgetTool : BaseTool() {
         else ToolResult.success("Presupuesto mensual: ${"%.2f".format(amount)}. Gastado este mes: ${"%.2f".format(spent)}.")
     }
 }
+
+/** Medication reminder: a daily repeating reminder at a clock time. */
+class AssistantMedicationTool : BaseTool() {
+    override fun getName() = "assistant_medication"
+    override fun getDisplayName() = "Medicación"
+    override fun getDescriptionEN() =
+        "Set a recurring medication reminder. Fires a notification daily at the given time. " +
+        "Use for 'remind me to take X every day at HH:MM'. times can be a single 'HH:MM' or " +
+        "comma-separated for multiple doses."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "recordatorio de medicación diario (una o varias tomas)"
+    override fun getParameters() = listOf(
+        ToolParameter("medication", "string", "Medication name / what to take.", true),
+        ToolParameter("times", "string", "Time(s) HH:MM, comma-separated for several doses.", true),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val med = requireString(params, "medication").trim()
+        val times = requireString(params, "times").split(",").map { it.trim() }.filter { it.isNotBlank() }
+        if (times.isEmpty()) return ToolResult.error("Indica al menos una hora HH:MM.")
+        var made = 0
+        times.forEach { t ->
+            val ts = com.blackclaw.android.assistant.AssistantTime.parse(t)
+            if (ts > 0) {
+                val item = com.blackclaw.android.assistant.AssistantStore.create(
+                    type = com.blackclaw.android.assistant.AssistantItemType.REMINDER,
+                    title = "💊 Tomar $med",
+                    body = "Recordatorio de medicación",
+                    triggerAtMs = ts, repeat = "daily", category = "medication", source = "ai")
+                com.blackclaw.android.assistant.AssistantScheduler.arm(ClawApplication.instance, item)
+                made++
+            }
+        }
+        if (made == 0) return ToolResult.error("No pude entender las horas.")
+        return ToolResult.success("Recordatorio de $med creado ($made toma(s) al día).")
+    }
+}
+
+/** Promise tracking: create a follow-up reminder so the user keeps a commitment. */
+class AssistantTrackPromiseTool : BaseTool() {
+    override fun getName() = "assistant_track_promise"
+    override fun getDisplayName() = "Seguir promesa"
+    override fun getDescriptionEN() =
+        "Track a commitment the user made (e.g. 'I'll call Ana tomorrow') so BlackClaw reminds " +
+        "them if they haven't done it. Provide what was promised and when to follow up."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "crea un seguimiento de una promesa/compromiso del usuario"
+    override fun getParameters() = listOf(
+        ToolParameter("promise", "string", "What the user committed to do.", true),
+        ToolParameter("follow_up", "string", "When to remind, e.g. 'tomorrow 18:00', 'in 3h'.", true),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val promise = requireString(params, "promise").trim()
+        val ts = com.blackclaw.android.assistant.AssistantTime.parse(requireString(params, "follow_up"))
+        if (ts <= 0) return ToolResult.error("No pude entender cuándo recordar.")
+        val item = com.blackclaw.android.assistant.AssistantStore.create(
+            type = com.blackclaw.android.assistant.AssistantItemType.REMINDER,
+            title = "¿Hiciste esto? $promise",
+            body = "Seguimiento de algo que dijiste que harías.",
+            triggerAtMs = ts, category = "promise", source = "ai")
+        com.blackclaw.android.assistant.AssistantScheduler.arm(ClawApplication.instance, item)
+        return ToolResult.success("Te recordaré: '$promise' el ${com.blackclaw.android.assistant.AssistantTime.format(ts)}")
+    }
+}
+
+/** Leave-soon reminder: alert the user to leave ahead of an appointment. */
+class AssistantLeaveReminderTool : BaseTool() {
+    override fun getName() = "assistant_leave_reminder"
+    override fun getDisplayName() = "Aviso de salida"
+    override fun getDescriptionEN() =
+        "Remind the user to LEAVE for an appointment ahead of time. Give the appointment time and " +
+        "how many minutes before to alert (travel + prep buffer). Creates a reminder at " +
+        "(appointment - lead_minutes)."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "avisa con antelación para salir hacia una cita"
+    override fun getParameters() = listOf(
+        ToolParameter("what", "string", "The appointment/where to go.", true),
+        ToolParameter("appointment", "string", "Appointment time, e.g. 'today 15:00', 'tomorrow 09:00'.", true),
+        ToolParameter("lead_minutes", "integer", "Minutes before to alert (default 30).", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val what = requireString(params, "what").trim()
+        val appt = com.blackclaw.android.assistant.AssistantTime.parse(requireString(params, "appointment"))
+        if (appt <= 0) return ToolResult.error("No pude entender la hora de la cita.")
+        val lead = optionalInt(params, "lead_minutes", 30).coerceIn(1, 240)
+        val triggerAt = appt - lead * 60_000L
+        if (triggerAt <= System.currentTimeMillis())
+            return ToolResult.error("Esa salida ya pasó o es inmediata.")
+        val item = com.blackclaw.android.assistant.AssistantStore.create(
+            type = com.blackclaw.android.assistant.AssistantItemType.REMINDER,
+            title = "🚗 Sal ya: $what",
+            body = "Tu cita es a las ${com.blackclaw.android.assistant.AssistantTime.format(appt)} ($lead min antes).",
+            triggerAtMs = triggerAt, category = "leave", source = "ai")
+        com.blackclaw.android.assistant.AssistantScheduler.arm(ClawApplication.instance, item)
+        return ToolResult.success("Te avisaré salir a las ${com.blackclaw.android.assistant.AssistantTime.format(triggerAt)} para '$what'.")
+    }
+}

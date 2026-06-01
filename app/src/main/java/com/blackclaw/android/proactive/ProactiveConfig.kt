@@ -49,7 +49,9 @@ object ProactiveConfig {
         "acción con tiempo: citas, reuniones, horas a las que tengo que estar en un " +
         "lugar, vuelos, fechas límite, pagos, o recordatorios explícitos. " +
         "Si un mensaje menciona una hora a la que debo estar en algún sitio y no tengo " +
-        "una alarma, ponla. Ignora promociones, spam, redes sociales y charla casual."
+        "una alarma, ponla. Si yo prometo algo con tiempo (\"te llamo mañana\", \"el lunes " +
+        "te paso eso\"), crea un recordatorio de seguimiento. Si detectas un cargo, factura " +
+        "o pago, regístralo en finanzas. Ignora promociones, spam, redes sociales y charla casual."
 
     var enabled: Boolean
         get() = KVUtils.getBoolean(KEY_ENABLED, false)

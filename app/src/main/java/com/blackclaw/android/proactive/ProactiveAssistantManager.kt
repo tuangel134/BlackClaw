@@ -122,8 +122,20 @@ object ProactiveAssistantManager {
         if (executed > 0) ProactiveMemory.recordAction()
     }
 
-    /** Open the source chat and scrape visible text to recover a redacted msg. */
+    /** Open the source chat and scrape visible text to recover a redacted msg.
+     *  Cooldown-guarded so we never open the app repeatedly (which on dual-app
+     *  devices pops the OEM "which app?" chooser). */
+    private val lastDeepReadAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val DEEP_READ_COOLDOWN_MS = 5 * 60_000L
+
     private fun tryDeepRead(pkg: String): String? {
+        val now = System.currentTimeMillis()
+        val last = lastDeepReadAt[pkg] ?: 0L
+        if (now - last < DEEP_READ_COOLDOWN_MS) {
+            XLog.d(TAG, "Deep-read cooldown active for $pkg, skipping")
+            return null
+        }
+        lastDeepReadAt[pkg] = now
         return runCatching {
             val svc = com.blackclaw.android.service.ClawAccessibilityService
                 .getConnectedInstance(2_000L) ?: return null

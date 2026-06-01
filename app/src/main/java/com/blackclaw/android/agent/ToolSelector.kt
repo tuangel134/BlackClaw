@@ -181,6 +181,21 @@ object ToolSelector {
             triggers = listOf("skill", "habilidad", "ejecuta skill"),
             tools = listOf("run_skill"),
         ),
+        Category(
+            triggers = listOf("medicina", "medicación", "medicacion", "pastilla", "pastillas", "medicamento",
+                "tomar", "dosis", "pill", "medication", "remedio"),
+            tools = listOf("assistant_medication", "assistant_list"),
+        ),
+        Category(
+            triggers = listOf("prometi", "prometí", "dije que", "tengo que llamar", "follow up",
+                "seguimiento", "compromiso", "no olvides que", "recuerda que dije"),
+            tools = listOf("assistant_track_promise", "assistant_reminder"),
+        ),
+        Category(
+            triggers = listOf("salir", "salgo", "cita", "reunion", "reunión", "llegar a tiempo",
+                "avisame para salir", "trafico", "tráfico", "leave", "appointment"),
+            tools = listOf("assistant_leave_reminder", "assistant_event", "assistant_reminder"),
+        ),
     )
 
     /**

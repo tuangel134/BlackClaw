@@ -909,6 +909,20 @@ public class ClawAccessibilityService extends AccessibilityService {
                 XLog.e(TAG, "Cannot resolve launch intent for " + packageName);
                 return false;
             }
+            // Pin the launch to the resolved component so OEM "app twin" /
+            // cloned-app frameworks don't pop a "which app?" chooser. We resolve
+            // the concrete activity for THIS package and target it explicitly.
+            try {
+                android.content.pm.ResolveInfo ri = getPackageManager().resolveActivity(intent, 0);
+                if (ri != null && ri.activityInfo != null
+                        && packageName.equals(ri.activityInfo.packageName)) {
+                    intent.setComponent(new android.content.ComponentName(
+                            ri.activityInfo.packageName, ri.activityInfo.name));
+                    intent.setPackage(packageName);
+                }
+            } catch (Exception ignore) {
+                // Fall back to the plain launch intent.
+            }
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
             return true;
