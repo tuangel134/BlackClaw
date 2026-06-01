@@ -94,6 +94,20 @@ android {
         compose = true
     }
 
+    // ── APK size: split per-ABI so users download only their architecture. ──
+    // The on-device LLM (liblitertlm_jni.so ~24MB) and MMKV ship 64-bit only,
+    // so 32-bit ABIs can't run inference anyway — we target the two 64-bit ABIs
+    // (arm64 for real phones, x86_64 for emulators) and keep a universal APK as
+    // a safe fallback. This cuts the per-arch APK from ~217MB to roughly half.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
     packaging {
         resources {
             excludes += setOf(
@@ -223,7 +237,12 @@ androidComponents {
         variant.outputs.forEach { output ->
             if (output is com.android.build.api.variant.impl.VariantOutputImpl) {
                 val versionName = android.defaultConfig.versionName ?: "0.0.0"
-                val fileName = "BlackClaw_v${versionName}_${getDateTime()}.apk"
+                // Include the ABI (or "universal") in the filename so the per-ABI
+                // split APKs don't overwrite each other in the output dir.
+                val abi = output.filters
+                    .firstOrNull { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                    ?.identifier ?: "universal"
+                val fileName = "BlackClaw_v${versionName}_${abi}_${getDateTime()}.apk"
                 println("output file name: $fileName")
                 output.outputFileName.set(fileName)
             }

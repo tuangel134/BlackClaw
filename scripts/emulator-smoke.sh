@@ -14,7 +14,13 @@ API_LEVEL="${1:-unknown}"
 echo "::group::APK info"
 echo "Searching for APK under apk/ ..."
 find apk -type f -name '*.apk' || echo "no .apk found anywhere under apk/"
-APK="$(find apk -type f -name '*.apk' | head -1)"
+# ABI splits produce multiple APKs (arm64-v8a, x86_64, universal). The CI
+# emulators are x86_64, so prefer the x86_64 split, then the universal APK,
+# then fall back to whatever is present. Installing the arm64-only split on an
+# x86_64 emulator would crash (missing native libs).
+APK="$(find apk -type f -name '*x86_64*.apk' | head -1)"
+[ -z "$APK" ] && APK="$(find apk -type f -name '*universal*.apk' | head -1)"
+[ -z "$APK" ] && APK="$(find apk -type f -name '*.apk' | head -1)"
 if [ -z "$APK" ] || [ ! -f "$APK" ]; then
   echo "::error::No APK found under apk/. download-artifact may have placed it elsewhere or upload failed."
   ls -laR apk/ || true

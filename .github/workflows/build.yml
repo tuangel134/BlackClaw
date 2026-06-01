@@ -34,8 +34,18 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest
+
       - name: Run Android Lint
         run: ./gradlew lintDebug
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
 
       - name: Upload lint report
         if: always()
