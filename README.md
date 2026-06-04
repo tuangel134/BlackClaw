@@ -413,6 +413,23 @@ First public beta. Highlights:
 
 ---
 
+## 💛 Apoya el proyecto
+
+Si este proyecto te es útil y quieres ayudar a que siga mejorando, puedes apoyar con una donación:
+
+**PayPal**  
+[`https://paypal.me/tuangel1346`](https://paypal.me/tuangel1346)  
+`tuangel1346@gmail.com`
+
+**Criptomonedas (Bitcoin)**  
+\`\`\`
+bc1q5nrv64jchep3hpqptvwmume8rkw68937zftfpa
+\`\`\`
+
+Tu apoyo ayuda a mantener el desarrollo, mejorar la documentación y portar a más plataformas. ¡Gracias! 🙏
+
+---
+
 ## License
 
 Released under the Apache License 2.0. See [`LICENSE`](LICENSE).
