@@ -111,6 +111,14 @@ object ToolRegistry {
         register(WellnessStatusTool())
         register(SleepLogTool())
 
+        // Remote Shell — SSH to PC/servers + local terminal
+        register(RemoteShellTool())
+        register(RemoteConnectTool())
+        register(RemoteDisconnectTool())
+        register(RemoteListTool())
+        register(RemoteDiagnoseTool())
+        register(LocalTerminalTool())
+
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())
         register(SetBrightnessTool())

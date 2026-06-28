@@ -221,6 +221,13 @@ object ToolSelector {
             tools = listOf("mood_log", "wellness_status", "sleep_log"),
         ),
         Category(
+            triggers = listOf("pc", "computadora", "computer", "laptop", "servidor", "server",
+                "ssh", "remoto", "remote", "diagnostica", "diagnose", "arregla", "fix",
+                "wifi no", "no conecta", "lento", "slow", "reinicia", "restart",
+                "terminal", "comando", "consola"),
+            tools = listOf("remote_shell", "remote_connect", "remote_diagnose", "remote_list", "terminal"),
+        ),
+        Category(
             triggers = listOf("borrador", "responde por mi", "respuesta sugerida", "draft", "redacta",
                 "escribe una respuesta", "que le contesto", "qué le contesto"),
             tools = listOf("assistant_draft_reply"),
