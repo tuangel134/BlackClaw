@@ -92,6 +92,25 @@ object ToolRegistry {
         // User profile learning — auto-builds a profile of the user
         register(LearnUserTool())
 
+        // Smart Home — webhook-based device control
+        register(SmartHomeTool())
+        register(ListSmartDevicesTool())
+        register(AddSmartDeviceTool())
+
+        // Habit Tracking — streaks, daily goals, progress
+        register(HabitLogTool())
+        register(HabitStatusTool())
+        register(HabitCreateTool())
+
+        // Focus Mode / Pomodoro
+        register(FocusModeTool())
+        register(FocusStopTool())
+
+        // Wellness — mood, sleep, energy tracking
+        register(MoodLogTool())
+        register(WellnessStatusTool())
+        register(SleepLogTool())
+
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())
         register(SetBrightnessTool())

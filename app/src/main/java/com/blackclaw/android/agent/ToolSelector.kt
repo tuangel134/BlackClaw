@@ -189,12 +189,36 @@ object ToolSelector {
         Category(
             triggers = listOf("rutina", "routine", "mi rutina", "morning routine", "rutina mañana",
                 "rutina noche", "focus", "modo foco", "workout", "ejercicio"),
-            tools = listOf("run_routine", "list_routines", "create_routine", "delete_routine"),
+            tools = listOf("run_routine", "list_routines", "create_routine", "delete_routine",
+                "focus_mode", "focus_stop"),
         ),
         Category(
             triggers = listOf("aprende", "recuerda que", "mi nombre", "vivo en", "trabajo",
                 "me gusta", "prefiero", "suelo", "siempre", "perfil", "conóceme"),
             tools = listOf("learn_user", "remember_fact", "recall_facts"),
+        ),
+        Category(
+            triggers = listOf("smart home", "casa", "hogar", "luz", "luces", "light",
+                "enchufe", "plug", "termostato", "thermostat", "cerradura", "lock",
+                "enciende", "apaga", "prende", "encender", "apagar", "dispositivo"),
+            tools = listOf("smart_home", "list_smart_devices", "add_smart_device"),
+        ),
+        Category(
+            triggers = listOf("hábito", "habito", "habit", "racha", "streak", "agua",
+                "ejercicio", "meditar", "meditación", "leer", "estudiar", "correr",
+                "caminar", "pasos", "vitamina", "progreso"),
+            tools = listOf("habit_log", "habit_status", "habit_create"),
+        ),
+        Category(
+            triggers = listOf("focus", "concentrar", "concentración", "pomodoro", "deep work",
+                "no molestar", "productividad", "silencio", "modo trabajo"),
+            tools = listOf("focus_mode", "focus_stop"),
+        ),
+        Category(
+            triggers = listOf("ánimo", "animo", "mood", "cansado", "estresado", "triste",
+                "feliz", "energía", "energia", "sueño", "dormir", "dormí", "bienestar",
+                "wellness", "cómo me siento", "salud mental"),
+            tools = listOf("mood_log", "wellness_status", "sleep_log"),
         ),
         Category(
             triggers = listOf("borrador", "responde por mi", "respuesta sugerida", "draft", "redacta",
