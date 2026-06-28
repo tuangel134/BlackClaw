@@ -246,6 +246,8 @@ class ComposeChatActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Record user interaction for smart quiet detection
+        runCatching { com.blackclaw.android.proactive.SmartQuietDetector.recordInteraction() }
         _needsPermission.value =
             AppCapabilityCoordinator.accessibilityState(this) != ServiceBindingState.READY
         _isLocalModelActive.value = ModelConfigRepository.isLocalActive()
@@ -388,6 +390,19 @@ class ComposeChatActivity : ComponentActivity() {
     }
 
     private fun newChat() {
+        // Save conversation memory before clearing
+        if (_messages.isNotEmpty()) {
+            runCatching {
+                val msgs = _messages.map { it.role.name to it.content }
+                val summary = com.blackclaw.android.memory.ConversationMemory.extractSummary(msgs)
+                val topics = com.blackclaw.android.memory.ConversationMemory.extractTopics(msgs)
+                if (summary.isNotBlank()) {
+                    com.blackclaw.android.memory.ConversationMemory.record(
+                        conversationStore.currentConversationId, summary, topics
+                    )
+                }
+            }
+        }
         val session = conversationStore.startNewConversation(_messages, currentConversationModelName())
         syncSidebar(session.conversations)
         _messages.clear()

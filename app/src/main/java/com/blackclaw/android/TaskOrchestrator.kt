@@ -327,6 +327,8 @@ class TaskOrchestrator(
 
             override fun onComplete(round: Int, finalAnswer: String, totalTokens: Int, modelName: String?) {
                 XLog.i(TAG, "onComplete: rounds=$round, totalTokens=$totalTokens, model=$modelName, answer=$finalAnswer")
+                // Track activity
+                runCatching { com.blackclaw.android.utils.ActivityTracker.recordTaskCompleted(true, totalTokens) }
                 val cancelAnswers = setOf(
                     ClawApplication.instance.getString(R.string.agent_task_cancel),
                     ClawApplication.instance.getString(R.string.agent_task_cancelled),
@@ -379,6 +381,7 @@ class TaskOrchestrator(
 
             override fun onError(round: Int, error: Exception, totalTokens: Int) {
                 XLog.e(TAG, "onError: ${error.message}, totalTokens=$totalTokens", error)
+                runCatching { com.blackclaw.android.utils.ActivityTracker.recordTaskCompleted(false, totalTokens) }
                 taskEventCallback?.invoke(TaskEvent.Failed(error.message ?: "Unknown error"))
                 ForegroundService.resetToIdle(ClawApplication.instance)
                 flushRoundBuffer()

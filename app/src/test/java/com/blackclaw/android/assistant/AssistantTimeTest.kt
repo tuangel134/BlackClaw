@@ -48,6 +48,27 @@ class AssistantTimeTest {
     }
 
     @Test
+    fun relativeSpanishMinutes() {
+        val before = System.currentTimeMillis()
+        val r = AssistantTime.parse("en 30 min")
+        assertTrue("Spanish 'en 30 min' should parse", r >= before + 30 * 60_000)
+    }
+
+    @Test
+    fun relativeSpanishHours() {
+        val before = System.currentTimeMillis()
+        val r = AssistantTime.parse("en 2 horas")
+        assertTrue("Spanish 'en 2 horas' should parse", r >= before + 2 * 3_600_000)
+    }
+
+    @Test
+    fun relativeDentroDe() {
+        val before = System.currentTimeMillis()
+        val r = AssistantTime.parse("dentro de 45 minutos")
+        assertTrue("'dentro de 45 minutos' should parse", r >= before + 45 * 60_000)
+    }
+
+    @Test
     fun absoluteIsoDateTime() {
         val r = AssistantTime.parse("2030-12-31 23:59")
         val cal = Calendar.getInstance().apply { timeInMillis = r }
@@ -90,6 +111,44 @@ class AssistantTimeTest {
     }
 
     @Test
+    fun pasadoManana() {
+        val r = AssistantTime.parse("pasado mañana 10:00")
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(10, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, cal.get(Calendar.MINUTE))
+        // Should be day after tomorrow
+        val expected = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 2) }
+        assertEquals(expected.get(Calendar.DAY_OF_YEAR), cal.get(Calendar.DAY_OF_YEAR))
+    }
+
+    @Test
+    fun weekdayLunes() {
+        val r = AssistantTime.parse("el lunes 09:00")
+        assertTrue("weekday should resolve to future", r > System.currentTimeMillis())
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(Calendar.MONDAY, cal.get(Calendar.DAY_OF_WEEK))
+        assertEquals(9, cal.get(Calendar.HOUR_OF_DAY))
+    }
+
+    @Test
+    fun weekdayViernes() {
+        val r = AssistantTime.parse("el viernes 15:30")
+        assertTrue("weekday should resolve to future", r > System.currentTimeMillis())
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(Calendar.FRIDAY, cal.get(Calendar.DAY_OF_WEEK))
+        assertEquals(15, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(30, cal.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun weekdayEnglishMonday() {
+        val r = AssistantTime.parse("monday 08:00")
+        assertTrue("weekday should resolve to future", r > System.currentTimeMillis())
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(Calendar.MONDAY, cal.get(Calendar.DAY_OF_WEEK))
+    }
+
+    @Test
     fun formatRendersDashForEmpty() {
         assertEquals("—", AssistantTime.format(0L))
         assertEquals("—", AssistantTime.format(-5L))
@@ -100,5 +159,18 @@ class AssistantTimeTest {
         val out = AssistantTime.format(System.currentTimeMillis())
         assertTrue(out.isNotBlank())
         assertTrue(out != "—")
+    }
+
+    @Test
+    fun formatShowsHoyForToday() {
+        val out = AssistantTime.format(System.currentTimeMillis() + 60_000)
+        assertTrue("Today should show 'hoy'", out.contains("hoy"))
+    }
+
+    @Test
+    fun formatShowsMananaForTomorrow() {
+        val tomorrow = System.currentTimeMillis() + 24 * 3_600_000
+        val out = AssistantTime.format(tomorrow)
+        assertTrue("Tomorrow should show 'mañana'", out.contains("mañana"))
     }
 }

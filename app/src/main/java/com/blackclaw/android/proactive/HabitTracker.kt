@@ -145,11 +145,10 @@ object HabitTracker {
         else -> kind
     }
 
-    /** A short suggestion line for a detected habit. */
+    /** A short description of a detected habit. */
     fun describe(habit: Habit): String {
         val dow = DOW_ES[habit.dayOfWeek] ?: "ese día"
         val hh = "%02d:00".format(habit.hour)
-        return "Sueles poner ${kindEs(habit.kind)} a las $hh los $dow " +
-            "(${habit.count} veces). ¿Quieres que lo automatice?"
+        return "Sueles poner ${kindEs(habit.kind)} a las $hh los $dow (${habit.count} veces)."
     }
 }

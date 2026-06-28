@@ -78,11 +78,11 @@ public class ClawNotificationListener extends NotificationListenerService {
 
         if (title.isEmpty() && text.isEmpty()) return;
 
-        // Proactive Assistant sees notifications from ANY app (it applies its
-        // own per-app filter + LLM importance check). Fail-safe: never throws.
+        // Proactive Assistant: route through NotificationBatcher for intelligent
+        // batching (groups rapid-fire messages from same app into one LLM call).
         try {
-            com.blackclaw.android.proactive.ProactiveAssistantManager.INSTANCE
-                    .onNotification(pkg, title, text);
+            com.blackclaw.android.proactive.NotificationBatcher.INSTANCE
+                    .submit(pkg, title, text);
         } catch (Throwable t) {
             XLog.w(TAG, "Proactive hook failed: " + t.getMessage());
         }

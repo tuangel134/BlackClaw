@@ -49,8 +49,9 @@ object ProactiveBriefing {
             if (ProactiveConfig.speakBriefings) {
                 Speaker.speak("$title. $text")
             }
-            // After the morning briefing, surface at most one newly-learned habit
-            // as a gentle suggestion the user can act on.
+            // Night briefing: auto-set alarms for early morning events without alarms
+            if (kind == Kind.NIGHT) runCatching { autoSetMorningAlarms() }
+            // After the morning briefing, auto-create detected habits
             if (kind == Kind.MORNING) runCatching { surfaceHabitSuggestion() }
             XLog.i(TAG, "$kind briefing delivered")
         } catch (e: Throwable) {
@@ -59,20 +60,94 @@ object ProactiveBriefing {
     }
 
     /**
-     * Offer ONE newly-learned habit as a suggestion (logged in the hub + push).
-     * We mark it as suggested so we don't nag about the same pattern again.
+     * Night briefing: check if tomorrow has early events (before 10am) that
+     * don't have a corresponding alarm. If so, auto-create an alarm 30 min before.
+     */
+    private fun autoSetMorningAlarms() {
+        if (!ProactiveConfig.allowAlarms) return
+        val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+        val tomorrowStart = (tomorrow.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
+        }.timeInMillis
+        val tomorrowMorning = (tomorrow.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 10); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
+        }.timeInMillis
+
+        // Find events/reminders tomorrow morning
+        val earlyItems = AssistantStore.all().filter {
+            it.triggerAtMs in tomorrowStart until tomorrowMorning && !it.done &&
+            it.type in setOf(AssistantItemType.EVENT, AssistantItemType.REMINDER)
+        }
+        if (earlyItems.isEmpty()) return
+
+        // Check existing alarms for tomorrow
+        val existingAlarms = AssistantStore.all().filter {
+            it.type == AssistantItemType.ALARM && !it.done &&
+            it.triggerAtMs in tomorrowStart until tomorrowMorning
+        }.map { it.triggerAtMs }
+
+        for (item in earlyItems) {
+            val alarmTime = item.triggerAtMs - 30 * 60_000L  // 30 min before
+            // Skip if there's already an alarm within 15 min of when we'd set one
+            val hasAlarm = existingAlarms.any { kotlin.math.abs(it - alarmTime) < 15 * 60_000L }
+            if (hasAlarm) continue
+
+            val alarmCal = Calendar.getInstance().apply { timeInMillis = alarmTime }
+            val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(alarmTime))
+            ToolRegistry.getInstance().executeTool("assistant_alarm", mapOf(
+                "when" to timeStr,
+                "label" to "Despierta: ${item.title}",
+            ))
+            XLog.i(TAG, "Auto-set morning alarm at $timeStr for '${item.title}'")
+        }
+    }
+
+    /**
+     * After morning briefing, automatically set up detected habits instead of
+     * just suggesting them. The assistant ACTS, it doesn't ask permission.
      */
     private fun surfaceHabitSuggestion() {
         val habit = HabitTracker.newHabits().firstOrNull() ?: return
-        val text = HabitTracker.describe(habit)
+        // Instead of just suggesting, actually create the recurring item
+        val registry = ToolRegistry.getInstance()
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, habit.dayOfWeek)
+            set(Calendar.HOUR_OF_DAY, habit.hour)
+            set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
+            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.WEEK_OF_YEAR, 1)
+        }
+        val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(cal.timeInMillis))
+        when (habit.kind) {
+            "alarm" -> {
+                registry.executeTool("assistant_alarm", mapOf(
+                    "when" to timeStr,
+                    "label" to "Alarma recurrente (hábito detectado)",
+                    "repeat" to "weekly",
+                ))
+            }
+            "reminder" -> {
+                registry.executeTool("assistant_reminder", mapOf(
+                    "title" to "Recordatorio recurrente (hábito detectado)",
+                    "when" to timeStr,
+                    "repeat" to "weekly",
+                ))
+            }
+            else -> {
+                // For events and other types, just create a note
+                registry.executeTool("assistant_note", mapOf(
+                    "title" to "Patrón: ${HabitTracker.describe(habit)}",
+                ))
+            }
+        }
+        val text = "Automaticé un patrón: ${HabitTracker.describe(habit).removeSuffix(" ¿Quieres que lo automatice?")}"
         AssistantStore.create(
             type = AssistantItemType.ALERT,
-            title = "💡 Patrón detectado",
+            title = "⚡ Hábito automatizado",
             body = text, category = "habit", source = "ai",
         )
-        AssistantReceiver.postNotification(ClawApplication.instance, "💡 Patrón detectado", text, highPriority = false)
+        AssistantReceiver.postNotification(ClawApplication.instance, "⚡ Hábito automatizado", text, highPriority = false)
         HabitTracker.markSuggested(habit)
-        XLog.i(TAG, "Surfaced habit suggestion: ${habit.id}")
+        XLog.i(TAG, "Auto-created habit: ${habit.id}")
     }
 
     /**
@@ -263,18 +338,21 @@ object ProactiveBriefing {
         if (state.isBlank()) return null
         val prompt = buildString {
             appendLine(if (kind == Kind.MORNING)
-                "Eres el asistente personal del usuario. Dale un briefing matutino breve, cálido y útil."
+                "Eres el asistente personal del usuario. Dale un briefing matutino breve, cálido y útil. " +
+                "Si ves algo que necesita acción (reunión sin alarma, deadline sin recordatorio), " +
+                "DILE que ya lo hiciste (porque YA actuaste), no preguntes si quiere que lo hagas."
             else
-                "Eres el asistente personal del usuario. Dale un resumen nocturno breve para preparar mañana.")
+                "Eres el asistente personal del usuario. Dale un resumen nocturno breve para preparar mañana. " +
+                "Si mañana hay algo temprano y no hay alarma, dile que ya la pusiste.")
             appendLine()
             appendLine("Datos disponibles:")
             appendLine(state)
             appendLine()
             ProactiveMemory.preferencesSnippet().takeIf { it.isNotBlank() }?.let { appendLine(it); appendLine() }
             appendLine("Instrucciones:")
-            appendLine("- Máximo 4-5 líneas, en español, tono natural (no robótico).")
-            appendLine("- Menciona lo importante del día/mañana y, si ves algo accionable")
-            appendLine("  (p.ej. reunión temprano sin alarma), SUGIÉRELO en una frase.")
+            appendLine("- Máximo 4-5 líneas, en español, tono natural y directo (no preguntas retóricas).")
+            appendLine("- Menciona lo importante del día/mañana.")
+            appendLine("- NO preguntes '¿quieres que ponga alarma?' — si hay algo accionable, YA actuaste.")
             appendLine("- Si no hay nada relevante, dilo en una línea amable.")
             appendLine("- No inventes datos que no estén arriba.")
         }

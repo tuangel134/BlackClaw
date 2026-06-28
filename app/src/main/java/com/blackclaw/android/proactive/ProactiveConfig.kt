@@ -50,13 +50,18 @@ object ProactiveConfig {
 
     /** Default guidance the user can edit — sets the assistant's judgment. */
     const val DEFAULT_INSTRUCTIONS =
-        "Avísame y actúa solo cuando algo sea realmente importante o requiera una " +
-        "acción con tiempo: citas, reuniones, horas a las que tengo que estar en un " +
-        "lugar, vuelos, fechas límite, pagos, o recordatorios explícitos. " +
-        "Si un mensaje menciona una hora a la que debo estar en algún sitio y no tengo " +
-        "una alarma, ponla. Si yo prometo algo con tiempo (\"te llamo mañana\", \"el lunes " +
-        "te paso eso\"), crea un recordatorio de seguimiento. Si detectas un cargo, factura " +
-        "o pago, regístralo en finanzas. Ignora promociones, spam, redes sociales y charla casual."
+        "Actúa siempre que puedas. No preguntes para confirmar — toma la decisión tú. " +
+        "Si un mensaje menciona una hora, reunión, vuelo, cita, clase, turno, evento, " +
+        "o cualquier cosa con hora → PON LA ALARMA directamente (30 min antes si no dicen " +
+        "otra cosa). Si alguien dice 'mañana a las 7', 'el lunes a las 9', 'a las 15:00' " +
+        "→ alarma. Si yo prometo algo ('te llamo mañana', 'el lunes te paso eso', " +
+        "'luego te escribo') → recordatorio de seguimiento automático. " +
+        "Detectas un cargo, factura, pago, cobro, transferencia → regístralo en finanzas. " +
+        "Fechas límite, entregas, deadlines → recordatorio el día antes. " +
+        "Ignora SOLO: promociones de tiendas, spam, publicidad, sorteos, newsletters. " +
+        "Chat casual entre amigos que NO menciona horas ni compromisos → ignora. " +
+        "Pero si un amigo dice 'nos vemos a las 8', 'la fiesta es a las 10', " +
+        "'paso por ti a las 7' → eso SÍ es accionable, pon alarma/recordatorio."
 
     var enabled: Boolean
         get() = KVUtils.getBoolean(KEY_ENABLED, false)
@@ -79,11 +84,11 @@ object ProactiveConfig {
         set(v) { KVUtils.putBoolean(KEY_ALLOW_NOTES, v); KVUtils.sync() }
 
     var allowCalendar: Boolean
-        get() = KVUtils.getBoolean(KEY_ALLOW_CALENDAR, false)
+        get() = KVUtils.getBoolean(KEY_ALLOW_CALENDAR, true)
         set(v) { KVUtils.putBoolean(KEY_ALLOW_CALENDAR, v); KVUtils.sync() }
 
     var allowFinance: Boolean
-        get() = KVUtils.getBoolean(KEY_ALLOW_FINANCE, false)
+        get() = KVUtils.getBoolean(KEY_ALLOW_FINANCE, true)
         set(v) { KVUtils.putBoolean(KEY_ALLOW_FINANCE, v); KVUtils.sync() }
 
     /** When true, the assistant acts silently and only notifies for important things. */
@@ -126,19 +131,21 @@ object ProactiveConfig {
         return if (s < e) hour in s until e else (hour >= s || hour < e)
     }
 
-    /** Max autonomous actions per rolling hour (anti-runaway). Default 8. */
+    /** Max autonomous actions per rolling hour (anti-runaway). Default 20. */
     var maxActionsPerHour: Int
-        get() = KVUtils.getInt(KEY_MAX_ACTIONS_HOUR, 8)
-        set(v) { KVUtils.putInt(KEY_MAX_ACTIONS_HOUR, v.coerceIn(1, 50)); KVUtils.sync() }
+        get() = KVUtils.getInt(KEY_MAX_ACTIONS_HOUR, 20)
+        set(v) { KVUtils.putInt(KEY_MAX_ACTIONS_HOUR, v.coerceIn(1, 100)); KVUtils.sync() }
 
-    /** When unsure, ask the user (notification) instead of acting silently. */
+    /** When unsure, ask the user (notification) instead of acting silently.
+     *  Default false — the assistant acts decisively without asking. */
     var askWhenUnsure: Boolean
-        get() = KVUtils.getBoolean(KEY_ASK_WHEN_UNSURE, true)
+        get() = KVUtils.getBoolean(KEY_ASK_WHEN_UNSURE, false)
         set(v) { KVUtils.putBoolean(KEY_ASK_WHEN_UNSURE, v); KVUtils.sync() }
 
-    /** Allow opening the chat to read a truncated/redacted message via a11y. */
+    /** Allow opening the chat to read a truncated/redacted message via a11y.
+     *  Default true — the assistant reads the full message for better decisions. */
     var deepRead: Boolean
-        get() = KVUtils.getBoolean(KEY_DEEP_READ, false)
+        get() = KVUtils.getBoolean(KEY_DEEP_READ, true)
         set(v) { KVUtils.putBoolean(KEY_DEEP_READ, v); KVUtils.sync() }
 
     // ──────────────────────── Briefings ────────────────────────

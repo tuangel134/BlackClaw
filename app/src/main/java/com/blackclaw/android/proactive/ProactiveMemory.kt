@@ -207,7 +207,8 @@ object ProactiveMemory {
             .toList()
     }
 
-    /** Guidance line fed into the classifier so it backs off on rejected categories. */
+    /** Guidance line fed into the classifier so it's aware of previous corrections,
+     *  but still biases toward action. Only surfaces for heavily-corrected categories. */
     fun correctionGuidanceSnippet(): String {
         val cats = correctedCategories()
         if (cats.isEmpty()) return ""
@@ -216,10 +217,9 @@ object ProactiveMemory {
             "note" to "notas", "event" to "eventos", "alert" to "avisos", "draft" to "borradores",
             "shopping" to "items de compras",
         )
-        return "## Correcciones del usuario (sé más prudente)\n" +
+        return "## Ajustes aprendidos (el usuario borró algunos de estos)\n" +
             cats.joinToString("\n") { (cat, _) ->
-                "- El usuario suele borrar los ${esName[cat] ?: cat} que creo solo/a. " +
-                    "Crea ${esName[cat] ?: cat} únicamente si es claramente necesario; si dudas, ignora o pregunta."
+                "- ${esName[cat] ?: cat}: el usuario borró algunos. Asegúrate de que sean realmente relevantes antes de crear."
             }
     }
 

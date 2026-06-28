@@ -106,8 +106,10 @@ class DefaultAgentService : AgentService {
   - Abrir app → wait → tap algo conocido
   - input_text → system_key("enter")
   - 3 swipes seguidos para llegar al fondo de una lista
+  - open_app → wait → find_and_tap("Send")
 - Pasos máximo: 6. Si CUALQUIER paso depende de leer la pantalla, NO lo metas en el plan; haz solo lo que ya sabes y luego get_screen_info.
 - Para pasos críticos, añade verificación: "verify_text" (texto que debe aparecer en pantalla tras el paso) o "expect" (subcadena que debe traer el resultado del paso). Si falla, el paso se reintenta una vez y, si sigue fallando, el plan se aborta con el detalle. Úsalo p.ej. tras open_app: {"tool":"open_app","params":{...},"verify_text":"Chats"}.
+- PREFIERE execute_plan sobre llamadas individuales cuando ya sabes los pasos. Es mucho más rápido.
 
 ## Rules
 - One tool call per turn. Check screen after each action.
@@ -184,8 +186,25 @@ class DefaultAgentService : AgentService {
             "volume_up", "volume_down", "press_menu", "press_power",
             "clipboard", "send_file", "repeat_actions", "wait"
         )
-        /** ms to wait for UI to settle before capturing screen after an action */
-        private const val SCREEN_SETTLE_MS = 500L
+        /** ms to wait for UI to settle before capturing screen after an action.
+         *  Different tools need different settle times — navigation/transitions
+         *  need more time, simple taps need less. */
+        private const val SCREEN_SETTLE_MS_DEFAULT = 400L
+        private const val SCREEN_SETTLE_MS_NAVIGATION = 800L
+
+        private val FAST_SETTLE_TOOLS = setOf(
+            "input_text", "type_text", "system_key", "clipboard",
+            "volume_up", "volume_down", "press_menu",
+        )
+        private val SLOW_SETTLE_TOOLS = setOf(
+            "open_app", "scroll_to_find", "find_and_tap",
+        )
+
+        private fun settleTimeForTool(toolName: String): Long = when {
+            toolName in FAST_SETTLE_TOOLS -> 250L
+            toolName in SLOW_SETTLE_TOOLS -> SCREEN_SETTLE_MS_NAVIGATION
+            else -> SCREEN_SETTLE_MS_DEFAULT
+        }
 
         /** Whether to write raw network request/response data to sandbox cache files for debugging */
         @JvmField
@@ -641,12 +660,14 @@ class DefaultAgentService : AgentService {
         val fullSystemPrompt = buildString {
             append(basePrompt)
             append(playbookSection)
+            append(LanguageDetector.getLanguageInstruction(rawUserRequest))
             append(inAppSearchGuard.buildPromptSection())
             append(emailComposeGuard.buildPromptSection())
             append(directDeviceDataGuard.buildPromptSection())
             append(buildDeviceContext())
             append(AmbientContext.asPromptSection())
             append(TaskHistoryStore.asPromptSnippet())
+            append(com.blackclaw.android.memory.ConversationMemory.asPromptSnippet())
             append(toolCatalogSection)
         }
 
@@ -903,6 +924,7 @@ class DefaultAgentService : AgentService {
                 }
 
                 val result = ToolRegistry.getInstance().executeTool(toolName, params)
+                runCatching { com.blackclaw.android.utils.ActivityTracker.recordToolUsed(toolName) }
                 val paramsString = if (params.isEmpty()) "" else params.toString()
                 callback.onToolResult(iterations, toolName, displayName, paramsString, result)
                 if (result.isSuccess) {
@@ -944,7 +966,7 @@ class DefaultAgentService : AgentService {
                 // immediately without spending an extra 5 s inference round on get_screen_info.
                 val combinedResultData: String = if (toolName in ACTION_TOOLS) {
                     try {
-                        Thread.sleep(SCREEN_SETTLE_MS) // let UI animate/settle
+                        Thread.sleep(settleTimeForTool(toolName)) // adaptive settle time
                         val screenTool = ToolRegistry.getInstance().getTool("get_screen_info")
                         val screenAfter = screenTool?.execute(emptyMap())
                         if (screenAfter != null && screenAfter.isSuccess && !screenAfter.data.isNullOrBlank()) {
