@@ -282,6 +282,8 @@ class ComposeChatActivity : ComponentActivity() {
 
     private fun sendChat(text: String) {
         chatSessionController.sendChat(text)
+        // Record interaction for profile learning
+        runCatching { com.blackclaw.android.memory.UserProfile.recordInteraction("chat", text.take(80)) }
     }
 
     private fun handleIntentAutomation(intent: Intent?, initialDelayMs: Long) {

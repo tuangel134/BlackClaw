@@ -187,6 +187,16 @@ object ToolSelector {
             tools = listOf("run_skill"),
         ),
         Category(
+            triggers = listOf("rutina", "routine", "mi rutina", "morning routine", "rutina mañana",
+                "rutina noche", "focus", "modo foco", "workout", "ejercicio"),
+            tools = listOf("run_routine", "list_routines", "create_routine", "delete_routine"),
+        ),
+        Category(
+            triggers = listOf("aprende", "recuerda que", "mi nombre", "vivo en", "trabajo",
+                "me gusta", "prefiero", "suelo", "siempre", "perfil", "conóceme"),
+            tools = listOf("learn_user", "remember_fact", "recall_facts"),
+        ),
+        Category(
             triggers = listOf("borrador", "responde por mi", "respuesta sugerida", "draft", "redacta",
                 "escribe una respuesta", "que le contesto", "qué le contesto"),
             tools = listOf("assistant_draft_reply"),

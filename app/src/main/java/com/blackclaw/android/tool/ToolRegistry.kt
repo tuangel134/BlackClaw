@@ -83,6 +83,15 @@ object ToolRegistry {
         register(AssistantSavingsGoalTool())
         register(AssistantExportFinanceTool())
 
+        // Routines — multi-step automated sequences
+        register(RunRoutineTool())
+        register(ListRoutinesTool())
+        register(CreateRoutineTool())
+        register(DeleteRoutineTool())
+
+        // User profile learning — auto-builds a profile of the user
+        register(LearnUserTool())
+
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())
         register(SetBrightnessTool())

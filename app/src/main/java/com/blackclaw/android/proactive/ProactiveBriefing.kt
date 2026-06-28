@@ -53,6 +53,8 @@ object ProactiveBriefing {
             if (kind == Kind.NIGHT) runCatching { autoSetMorningAlarms() }
             // After the morning briefing, auto-create detected habits
             if (kind == Kind.MORNING) runCatching { surfaceHabitSuggestion() }
+            // Periodic profile learning from interaction patterns
+            runCatching { com.blackclaw.android.memory.UserProfile.learnFromInteractions() }
             XLog.i(TAG, "$kind briefing delivered")
         } catch (e: Throwable) {
             XLog.w(TAG, "Briefing failed: ${e.message}")
