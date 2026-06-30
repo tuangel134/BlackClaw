@@ -316,9 +316,17 @@ class ComposeChatActivity : ComponentActivity() {
     // ==================== CHAT ====================
 
     private fun sendChat(text: String) {
-        chatSessionController.sendChat(text)
         // Record interaction for profile learning
         runCatching { com.blackclaw.android.memory.UserProfile.recordInteraction("chat", text.take(80)) }
+        // If the message is clearly an action ("pon una alarma", "manda un mensaje"),
+        // route it to the agent (which has tools) instead of plain chat — otherwise
+        // the chat model just *describes* doing it instead of actually doing it.
+        if (com.blackclaw.android.agent.DefaultAgentService.isTaskLike(text)) {
+            XLog.i(TAG, "sendChat: task-like message → routing to agent: $text")
+            taskFlowController.sendTask(text)
+            return
+        }
+        chatSessionController.sendChat(text)
     }
 
     private fun handleIntentAutomation(intent: Intent?, initialDelayMs: Long) {

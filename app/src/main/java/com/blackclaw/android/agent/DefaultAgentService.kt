@@ -173,11 +173,26 @@ class DefaultAgentService : AgentService {
             """(?i)\b(open|send|tap|search|play|take|install|click|go to|navigate|turn on|turn off|""" +
             """monitor|close|swipe|scroll|compose|find|call|dial|check|read my|show me|""" +
             """set|enable|disable|download|delete|share|copy|paste|type|write|reply|forward|""" +
-            """launch|start|stop|cancel|record|capture|scan|upload|attach|move|rename)\b"""
+            """launch|start|stop|cancel|record|capture|scan|upload|attach|move|rename|""" +
+            // ── Spanish action verbs (the app's primary language) ──
+            """abre|abrir|manda|mandar|env[ií]a|enviar|busca|buscar|pon|poner|ponme|""" +
+            """reproduce|reproducir|toca|llama|llamar|marca|marcar|escribe|escribir|""" +
+            """recu[eé]rdame|recordar|recu[eé]rda|av[ií]same|avisar|programa|programar|""" +
+            """agenda|agendar|crea|crear|borra|borrar|elimina|eliminar|activa|activar|""" +
+            """desactiva|desactivar|enciende|encender|apaga|apagar|sube|baja|ajusta|""" +
+            """descarga|descargar|comparte|compartir|copia|copiar|pega|pegar|traduce|""" +
+            """traducir|calcula|calcular|anota|anotar|apunta|apuntar|guarda|guardar|""" +
+            """ejecuta|ejecutar|inicia|iniciar|det[eé]n|detener|cancela|cancelar|""" +
+            """ll[eé]vame|abre la|p[oó]n una|ponme una|qu[ií]tame|quita|silencia|vibra)\b"""
         )
         private val DEVICE_NOUN_REGEX = Regex(
             """(?i)\b(screen|notification|battery|wifi|bluetooth|storage|clipboard|""" +
-            """camera|microphone|volume|brightness|airplane mode|hotspot|nfc|gps|location)\b"""
+            """camera|microphone|volume|brightness|airplane mode|hotspot|nfc|gps|location|""" +
+            // ── Spanish device/action nouns ──
+            """pantalla|notificaci[oó]n|notificaciones|bater[ií]a|almacenamiento|""" +
+            """portapapeles|c[aá]mara|micr[oó]fono|volumen|brillo|linterna|""" +
+            """alarma|recordatorio|temporizador|alarmas|recordatorios|nota|notas|""" +
+            """mensaje|mensajes|whatsapp|llamada|contacto|ubicaci[oó]n)\b"""
         )
         private val QUESTION_ONLY_REGEX = Regex(
             """(?i)^(what|who|where|when|why|how|is|are|can|could|would|should|do|does|did)\b"""
