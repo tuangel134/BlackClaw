@@ -142,6 +142,67 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Text("Idioma de reconocimiento", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                var activeLang by remember { mutableStateOf(VoskModelManager.activeLang) }
+                var enReady by remember { mutableStateOf(VoskModelManager.isReady(VoskModelManager.Lang.EN)) }
+                var dlEn by remember { mutableStateOf(false) }
+                var dlProg by remember { mutableStateOf(0) }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf(VoskModelManager.Lang.ES to "Español (garra)",
+                           VoskModelManager.Lang.EN to "English (claw)").forEach { (lang, label) ->
+                        val selected = activeLang == lang
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (selected) accent.copy(alpha = 0.2f) else Color.Transparent,
+                                    RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (lang == VoskModelManager.Lang.EN && !enReady) {
+                                        // need download first
+                                    } else {
+                                        VoskModelManager.activeLang = lang
+                                        activeLang = lang
+                                        if (VoiceInputManager.wakeEnabled) {
+                                            runCatching { com.blackclaw.android.service.VoiceWakeService.start(ctx) }
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            Text(label, color = if (selected) accent else textSecondary,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 13.sp)
+                        }
+                    }
+                }
+                if (!enReady) {
+                    if (dlEn) {
+                        Text("Descargando modelo inglés… $dlProg%", color = textSecondary, fontSize = 12.sp)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = accent)
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .background(accent.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    dlEn = true
+                                    VoskModelManager.download(VoskModelManager.Lang.EN,
+                                        onProgress = { dlProg = it },
+                                        onDone = { ok ->
+                                            dlEn = false
+                                            enReady = ok
+                                            if (ok) {
+                                                VoskModelManager.activeLang = VoskModelManager.Lang.EN
+                                                activeLang = VoskModelManager.Lang.EN
+                                            }
+                                        })
+                                }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            Text("⬇ Descargar inglés (~40MB)", color = accent, fontSize = 13.sp)
+                        }
+                    }
+                }
+                HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
                 Text("Reconocimiento offline", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 val statusText = when {
                     modelReady -> "✓ Listo — funciona sin internet y sin beep (palabra: \"garra\")"

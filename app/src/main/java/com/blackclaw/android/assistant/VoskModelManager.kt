@@ -3,126 +3,172 @@ package com.blackclaw.android.assistant
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipInputStream
 
 /**
- * Manages the offline Vosk speech model used by the wake-word engine.
+ * Manages offline Vosk speech models for the wake-word engine — now multi-language.
  *
- * The model ships BUNDLED inside the APK (app/src/main/assets/vosk-model-es.zip)
- * so the user doesn't have to download anything and it works out of the box,
- * offline, with no key/account. On first use we unpack the ~40 MB zip from
- * assets into the app's private storage (Vosk needs a directory path).
+ *  - Spanish (es): ships BUNDLED in the APK (assets/vosk-model-es.zip), unpacked
+ *    on first use. Always available, zero download.
+ *  - English (en): DOWNLOADABLE on demand (kept out of the APK to stay small).
  *
- * We use the small Spanish model (vosk-model-small-es-0.42) — light enough for
- * continuous listening on a phone.
+ * The user picks the recognition language; the engine loads that model and uses
+ * the matching wake word ("garra" for ES, "claw" for EN).
  */
 object VoskModelManager {
 
     private const val TAG = "VoskModel"
-    private const val ASSET_ZIP = "vosk-model-es.zip"
-    private const val MODEL_DIR_NAME = "vosk-model-es"
-    private const val KEY_READY = "vosk_model_ready"
+
+    enum class Lang(
+        val code: String,
+        val dirName: String,
+        val asset: String?,      // bundled asset zip (null = download only)
+        val url: String?,        // download url (null = bundled only)
+        val wakeWord: String,
+    ) {
+        ES("es", "vosk-model-es", "vosk-model-es.zip", null, "garra"),
+        EN("en", "vosk-model-en", null,
+            "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip", "claw"),
+        ;
+        companion object {
+            fun of(code: String): Lang = entries.firstOrNull { it.code == code } ?: ES
+        }
+    }
+
+    private const val KEY_ACTIVE_LANG = "vosk_active_lang"
+    private fun readyKey(lang: Lang) = "vosk_model_ready_${lang.code}"
 
     private val worker = Executors.newSingleThreadExecutor()
-    private val preparingFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val preparingFlag = AtomicBoolean(false)
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .build()
 
     val preparing: Boolean get() = preparingFlag.get()
-    // Kept for API compatibility with the voice tool wording.
     val downloading: Boolean get() = preparingFlag.get()
 
-    /** Root dir that contains the unpacked model (the dir holding conf/, am/, …). */
-    fun modelPath(): String {
-        val root = File(ClawApplication.instance.filesDir, MODEL_DIR_NAME)
+    /** Recognition language the engine should use. */
+    var activeLang: Lang
+        get() = Lang.of(KVUtils.getString(KEY_ACTIVE_LANG, "es"))
+        set(v) { KVUtils.putString(KEY_ACTIVE_LANG, v.code); KVUtils.sync() }
+
+    // ── Paths / readiness (per language) ──
+
+    fun modelPath(lang: Lang = activeLang): String {
+        val root = File(ClawApplication.instance.filesDir, lang.dirName)
         val nested = root.listFiles()?.firstOrNull { File(it, "conf").isDirectory }
         return (nested ?: root).absolutePath
     }
 
-    fun isReady(): Boolean {
-        if (!KVUtils.getBoolean(KEY_READY, false)) return false
-        return File(modelPath(), "conf").isDirectory
+    fun isReady(lang: Lang = activeLang): Boolean {
+        if (!KVUtils.getBoolean(readyKey(lang), false)) return false
+        return File(modelPath(lang), "conf").isDirectory
     }
 
-    /** Is the bundled model asset present in this build? */
-    fun isBundled(): Boolean = runCatching {
-        ClawApplication.instance.assets.list("")?.contains(ASSET_ZIP) == true
-    }.getOrDefault(false)
+    /** Wake word for the active language. */
+    fun activeWakeWord(): String = activeLang.wakeWord
 
-    /**
-     * Ensure the model is unpacked and ready. Extracts from the bundled asset on
-     * a background thread. [onProgress] gets 0-100, [onDone] gets success.
-     * (Method name kept as `download` so existing callers/tools don't change.)
-     */
-    fun download(onProgress: (Int) -> Unit = {}, onDone: (Boolean) -> Unit = {}) {
-        if (isReady()) { onDone(true); return }
-        // Atomic check-and-set so two callers can't both start extraction.
+    fun isBundled(lang: Lang): Boolean {
+        val a = lang.asset ?: return false
+        return runCatching { ClawApplication.instance.assets.list("")?.contains(a) == true }
+            .getOrDefault(false)
+    }
+
+    // ── Preparation (extract bundled OR download) ──
+
+    /** Method name kept as `download` for existing callers; prepares [lang]. */
+    fun download(lang: Lang = activeLang, onProgress: (Int) -> Unit = {}, onDone: (Boolean) -> Unit = {}) {
+        if (isReady(lang)) { onDone(true); return }
         if (!preparingFlag.compareAndSet(false, true)) return
         worker.submit {
-            val ok = runCatching { extractFromAssets(onProgress) }.getOrElse {
-                XLog.w(TAG, "Model extract failed: ${it.message}"); false
+            val ok = runCatching { prepare(lang, onProgress) }.getOrElse {
+                XLog.w(TAG, "Prepare ${lang.code} failed: ${it.message}"); false
             }
-            if (ok) { KVUtils.putBoolean(KEY_READY, true); KVUtils.sync() }
+            if (ok) { KVUtils.putBoolean(readyKey(lang), true); KVUtils.sync() }
             preparingFlag.set(false)
             onDone(ok)
         }
     }
 
-    /** Eagerly prepare the model in the background if bundled and not yet ready. */
+    /** Ensure the bundled Spanish model is unpacked in the background. */
     fun prepareIfNeeded() {
-        if (isReady() || preparing || !isBundled()) return
-        download()
+        if (isReady(Lang.ES) || preparing || !isBundled(Lang.ES)) return
+        download(Lang.ES)
     }
 
-    private fun extractFromAssets(onProgress: (Int) -> Unit): Boolean {
-        val ctx = ClawApplication.instance
-        val root = File(ctx.filesDir, MODEL_DIR_NAME)
+    fun delete(lang: Lang) {
+        runCatching {
+            File(ClawApplication.instance.filesDir, lang.dirName).deleteRecursively()
+            KVUtils.putBoolean(readyKey(lang), false); KVUtils.sync()
+        }
+    }
+
+    private fun prepare(lang: Lang, onProgress: (Int) -> Unit): Boolean {
+        val root = File(ClawApplication.instance.filesDir, lang.dirName)
         if (root.exists()) root.deleteRecursively()
         root.mkdirs()
-
-        XLog.i(TAG, "Unpacking bundled Vosk model…")
-        // Approximate size for progress (small-es model unpacks to ~50MB).
-        val approxTotal = 50L * 1024 * 1024
-        var written = 0L
-
-        ctx.assets.open(ASSET_ZIP).use { input ->
-            ZipInputStream(input.buffered()).use { zip ->
-                var entry = zip.nextEntry
-                val buf = ByteArray(64 * 1024)
-                while (entry != null) {
-                    val outFile = File(root, entry.name)
-                    if (!outFile.canonicalPath.startsWith(root.canonicalPath)) {
-                        entry = zip.nextEntry; continue
-                    }
-                    if (entry.isDirectory) {
-                        outFile.mkdirs()
-                    } else {
-                        outFile.parentFile?.mkdirs()
-                        outFile.outputStream().use { out ->
-                            var n = zip.read(buf)
-                            while (n >= 0) {
-                                out.write(buf, 0, n)
-                                written += n
-                                onProgress(((written * 100) / approxTotal).toInt().coerceIn(0, 99))
-                                n = zip.read(buf)
-                            }
-                        }
-                    }
-                    zip.closeEntry()
-                    entry = zip.nextEntry
-                }
-            }
+        return when {
+            lang.asset != null && isBundled(lang) -> extractFromAsset(lang.asset, root, onProgress)
+            lang.url != null -> downloadAndExtract(lang.url, root, onProgress)
+            else -> false
+        }.also { ok ->
+            XLog.i(TAG, "Prepare ${lang.code} ${if (ok) "OK" else "FAILED"} at ${modelPath(lang)}")
         }
-        val ok = File(modelPath(), "conf").isDirectory
-        onProgress(100)
-        XLog.i(TAG, "Model unpack ${if (ok) "OK" else "INCOMPLETE"} at ${modelPath()}")
-        return ok
     }
 
-    fun delete() {
-        runCatching {
-            File(ClawApplication.instance.filesDir, MODEL_DIR_NAME).deleteRecursively()
-            KVUtils.putBoolean(KEY_READY, false); KVUtils.sync()
+    private fun extractFromAsset(asset: String, root: File, onProgress: (Int) -> Unit): Boolean {
+        val approxTotal = 50L * 1024 * 1024
+        var written = 0L
+        ClawApplication.instance.assets.open(asset).use { input ->
+            ZipInputStream(input.buffered()).use { zip -> unzip(zip, root) { written += it; onProgress(((written * 100) / approxTotal).toInt().coerceIn(0, 99)) } }
+        }
+        onProgress(100)
+        return File(root.listFiles()?.firstOrNull { File(it, "conf").isDirectory } ?: root, "conf").isDirectory
+            || File(root, "conf").isDirectory
+    }
+
+    private fun downloadAndExtract(url: String, root: File, onProgress: (Int) -> Unit): Boolean {
+        val req = Request.Builder().url(url).get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) { XLog.w(TAG, "HTTP ${resp.code}"); return false }
+            val body = resp.body ?: return false
+            val total = body.contentLength().takeIf { it > 0 } ?: (45L * 1024 * 1024)
+            var read = 0L
+            ZipInputStream(body.byteStream().buffered()).use { zip ->
+                unzip(zip, root) { read += it; onProgress(((read * 100) / total).toInt().coerceIn(0, 99)) }
+            }
+        }
+        onProgress(100)
+        return File(root.listFiles()?.firstOrNull { File(it, "conf").isDirectory } ?: root, "conf").isDirectory
+            || File(root, "conf").isDirectory
+    }
+
+    private inline fun unzip(zip: ZipInputStream, root: File, onBytes: (Long) -> Unit) {
+        var entry = zip.nextEntry
+        val buf = ByteArray(64 * 1024)
+        while (entry != null) {
+            val outFile = File(root, entry.name)
+            if (!outFile.canonicalPath.startsWith(root.canonicalPath)) {
+                zip.closeEntry(); entry = zip.nextEntry; continue
+            }
+            if (entry.isDirectory) {
+                outFile.mkdirs()
+            } else {
+                outFile.parentFile?.mkdirs()
+                outFile.outputStream().use { out ->
+                    var n = zip.read(buf)
+                    while (n >= 0) { out.write(buf, 0, n); onBytes(n.toLong()); n = zip.read(buf) }
+                }
+            }
+            zip.closeEntry()
+            entry = zip.nextEntry
         }
     }
 }

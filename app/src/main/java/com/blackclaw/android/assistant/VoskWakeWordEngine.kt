@@ -28,9 +28,14 @@ class VoskWakeWordEngine {
     companion object {
         private const val TAG = "VoskWake"
         private const val SAMPLE_RATE = 16000
-        private val WAKE_TOKENS = setOf("garra", "guerra", "gara")
+        // Wake tokens per language (Vosk emits clean dictionary words).
+        private val WAKE_TOKENS_ES = setOf("garra", "guerra", "gara")
+        private val WAKE_TOKENS_EN = setOf("claw", "flaw", "clause", "black claw")
         private const val AWAIT_TIMEOUT_MS = 12_000L
     }
+
+    private fun wakeTokens(): Set<String> =
+        if (VoskModelManager.activeLang == VoskModelManager.Lang.EN) WAKE_TOKENS_EN else WAKE_TOKENS_ES
 
     @Volatile private var model: Model? = null
     @Volatile private var recognizer: Recognizer? = null
@@ -181,11 +186,13 @@ class VoskWakeWordEngine {
         }
 
         val tokens = text.split(" ").filter { it.isNotBlank() }
-        val wakeIdx = tokens.indexOfLast { it in WAKE_TOKENS }
+        val wt = wakeTokens()
+        val wakeIdx = tokens.indexOfLast { it in wt }
         if (wakeIdx < 0) return
         onState?.invoke("heard")
 
         var rest = tokens.drop(wakeIdx + 1)
+        // Drop a trailing wake-word modifier ("garra negra" / "black claw").
         if (rest.firstOrNull() == "negra") rest = rest.drop(1)
         val command = rest.joinToString(" ").trim()
 
