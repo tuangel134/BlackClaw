@@ -31,25 +31,6 @@ class VoskWakeWordEngine {
         private const val SAMPLE_RATE = 16000.0f
         // Accept these as the wake token (all real words Vosk knows).
         private val WAKE_TOKENS = setOf("garra", "guerra", "gara")  // tolerate close hits
-
-        /** Varied JARVIS-style acknowledgements — picked at random each time. */
-        private val ACKS = listOf(
-            "Dígame, jefe.",
-            "¿Qué necesita, jefe?",
-            "A sus órdenes.",
-            "Aquí estoy, jefe.",
-            "Siempre activo para usted.",
-            "¿En qué le ayudo?",
-            "Lo escucho.",
-            "Usted dirá, jefe.",
-            "A su disposición.",
-            "¿Qué tiene en mente?",
-            "Listo cuando usted quiera.",
-            "Cómo no, jefe.",
-            "Por supuesto, dígame.",
-            "Para eso estoy.",
-        )
-        private fun randomAck(): String = ACKS.random()
     }
 
     private var model: Model? = null
@@ -138,11 +119,11 @@ class VoskWakeWordEngine {
         } else {
             XLog.i(TAG, "Wake only → awaiting command")
             awaitingCommand = true
-            // Speak a varied ack and mute mic-echo for its duration.
-            val ack = randomAck()
+            // Speak a varied JARVIS ack and mute mic-echo for its duration.
+            val ack = JarvisVoice.wakeAck()
             lastAckWords = ack.lowercase().replace(Regex("[^a-záéíóúñ ]"), "")
                 .split(" ").filter { it.length > 2 }.toSet()
-            ttsUntilMs = System.currentTimeMillis() + 2500
+            ttsUntilMs = System.currentTimeMillis() + 2800
             Speaker.speak(ack)
         }
     }

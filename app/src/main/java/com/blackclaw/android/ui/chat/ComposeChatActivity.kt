@@ -286,9 +286,7 @@ class ComposeChatActivity : ComponentActivity() {
             onCommand = { command ->
                 runOnUiThread {
                     com.blackclaw.android.assistant.Speaker.speak(
-                        listOf("Enseguida.", "Marchando, jefe.", "Ahora mismo.",
-                               "Voy a ello.", "Hecho, jefe.", "Por supuesto.",
-                               "En seguida me encargo.").random())
+                        com.blackclaw.android.assistant.JarvisVoice.commandAck())
                     if (com.blackclaw.android.agent.DefaultAgentService.isTaskLike(command)) {
                         taskFlowController.sendTask(command)
                     } else {

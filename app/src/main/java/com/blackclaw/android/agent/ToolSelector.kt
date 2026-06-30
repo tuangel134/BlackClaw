@@ -103,8 +103,11 @@ object ToolSelector {
             tools = listOf("network_speed", "ping_host", "public_ip", "connectivity_check"),
         ),
         Category(
-            triggers = listOf("busca en internet", "buscar", "search", "google", "investiga", "web"),
-            tools = listOf("web_search", "open_url", "http_fetch"),
+            triggers = listOf("busca en internet", "buscar", "search", "google", "investiga", "web",
+                "qué película", "que pelicula", "estrena", "noticias", "news", "precio", "cotización",
+                "cotizacion", "resultado", "quién ganó", "quien gano", "cartelera", "qué hay", "que hay",
+                "información sobre", "informacion sobre", "averigua", "consulta"),
+            tools = listOf("web_answer", "web_search", "open_url", "http_fetch"),
         ),
         Category(
             triggers = listOf("traduce", "translate", "idioma", "traducción", "traduccion"),

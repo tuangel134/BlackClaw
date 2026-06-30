@@ -145,6 +145,7 @@ object ToolRegistry {
         register(ShowRecentsTool())
         register(OpenUrlTool())
         register(WebSearchTool())
+        register(WebAnswerTool())
         register(ShareTextTool())
 
         // Calendar / SMS / Contacts / Call log
