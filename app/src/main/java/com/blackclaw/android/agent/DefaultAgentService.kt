@@ -645,7 +645,14 @@ class DefaultAgentService : AgentService {
         // Sending all ~85 tool schemas costs ~13k tokens/request and blows past
         // Groq's rate limit. Instead we PRELOAD a relevant subset (full schema)
         // and show the FULL catalog as compact text in the prompt; the model can
-        // request_tool(...) to load anything else. Disabled for LOCAL models.
+        // request_tool(...) to load anything else.
+        //
+        // For LOCAL models we DON'T use the request_tool indirection (small
+        // models handle it poorly), but we STILL relevance-filter the toolset:
+        // sending all ~115 full schemas every turn (~15k tokens) blows past a
+        // local Gemma's context window. Instead we preload a generous relevant
+        // subset (CORE + keyword matches). The inline "Tool selection guide" in
+        // LOCAL_TASK_PROMPT keeps the model aware of the broader toolset.
         val progressiveDisclosure = config.provider != LlmProvider.LOCAL
         val activeToolNames = LinkedHashSet<String>()
         var toolCatalogSection = ""
@@ -656,7 +663,14 @@ class DefaultAgentService : AgentService {
             toolCatalogSection = "\n\n" + ToolSelector.buildCatalog(activeToolNames)
             XLog.i(TAG, "runAgentLoop: preloaded ${toolSpecs.size}/${allToolSpecs.size} tools + catalog")
         } else {
-            toolSpecs = allToolSpecs
+            // LOCAL: relevance-filtered preload (no catalog, no request_tool).
+            activeToolNames.addAll(ToolSelector.selectPreloadNames(rawUserRequest, maxTools = 34))
+            // request_tool only works with progressive disclosure (cloud); drop it
+            // for local so the model doesn't waste a turn calling a no-op.
+            activeToolNames.remove("request_tool")
+            toolSpecs = LangChain4jToolBridge.buildToolSpecifications(activeToolNames)
+                .ifEmpty { allToolSpecs }
+            XLog.i(TAG, "runAgentLoop: LOCAL preloaded ${toolSpecs.size}/${allToolSpecs.size} tools (relevance-filtered)")
         }
 
         // Build System Prompt — use optimized prompt for local LLM
