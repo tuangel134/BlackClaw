@@ -93,10 +93,25 @@ class VoiceWakeService : Service() {
         if (pausedForCall) return
         // Don't grab the mic if a call/communication audio mode is active.
         if (isCallActive()) { pausedForCall = true; return }
+        // Battery guard: don't keep the mic + recognizer running when critically
+        // low and unplugged (continuous listening is power-hungry).
+        if (!batteryOk()) {
+            updateNotif("paused_battery")
+            return
+        }
         VoiceInputManager.startWakeLoop(
             onCommand = { command, whisper -> onVoiceCommand(command, whisper) },
             onError = { XLog.d(TAG, "wake error: $it") },
         )
+    }
+
+    private fun batteryOk(): Boolean {
+        return runCatching {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+            val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+            val charging = bm?.isCharging ?: true
+            charging || level > 10
+        }.getOrDefault(true)
     }
 
     private fun onVoiceCommand(command: String, whisper: Boolean) {
@@ -270,6 +285,7 @@ class VoiceWakeService : Service() {
             "speaking" -> "Respondiendo…"
             "heard" -> "Te escuché…"
             "listening_followup" -> "Escuchando (sigue hablando)…"
+            "paused_battery" -> "Pausado (batería baja)"
             else -> "Di \"garra\" seguido de tu orden"
         }
         val b = notifBuilder ?: return

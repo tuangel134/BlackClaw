@@ -59,8 +59,11 @@ class WebAnswerTool : BaseTool() {
             if (it.isNotBlank()) sb.append("Respuesta directa: ").append(it).append("\n\n")
         }
 
-        // 2) HTML result snippets.
-        val results = runCatching { htmlResults(query, maxResults) }.getOrDefault(emptyList())
+        // 2) HTML result snippets (DuckDuckGo, then Bing as fallback).
+        var results = runCatching { htmlResults(query, maxResults) }.getOrDefault(emptyList())
+        if (results.isEmpty()) {
+            results = runCatching { bingResults(query, maxResults) }.getOrDefault(emptyList())
+        }
         if (results.isNotEmpty()) {
             sb.append("Resultados de búsqueda:\n")
             results.forEachIndexed { i, r ->
@@ -148,6 +151,33 @@ class WebAnswerTool : BaseTool() {
         if (idx < 0) return raw.take(120)
         val enc = raw.substring(idx + marker.length).substringBefore("&")
         return runCatching { java.net.URLDecoder.decode(enc, "UTF-8") }.getOrDefault(raw).take(120)
+    }
+
+    /** Bing HTML fallback when DuckDuckGo returns nothing. */
+    private fun bingResults(query: String, max: Int): List<Result> {
+        val url = "https://www.bing.com/search?q=${enc(query)}"
+        val req = Request.Builder().url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header("Accept", "text/html").get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return emptyList()
+            val html = resp.body?.string() ?: return emptyList()
+            val results = mutableListOf<Result>()
+            // Bing results: <li class="b_algo"> … <h2><a href="URL">TITLE</a></h2> … <p>SNIPPET</p>
+            val blockRe = Regex("""<li class="b_algo">(.*?)</li>""", RegexOption.DOT_MATCHES_ALL)
+            val titleRe = Regex("""<h2>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+            val snipRe = Regex("""<p[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
+            for (m in blockRe.findAll(html)) {
+                if (results.size >= max) break
+                val block = m.groupValues[1]
+                val t = titleRe.find(block) ?: continue
+                val title = stripHtml(t.groupValues[2])
+                val link = t.groupValues[1]
+                val snippet = snipRe.find(block)?.groupValues?.get(1)?.let { stripHtml(it) } ?: ""
+                if (title.isNotBlank()) results.add(Result(title, snippet, link.take(120)))
+            }
+            return results
+        }
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")

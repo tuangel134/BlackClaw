@@ -40,6 +40,30 @@ class ComposeChatActivity : ComponentActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val conversationStore by lazy { ConversationStore(this) }
 
+    /** Image picker for the attach button → OCR → route to the agent. */
+    private val pickImageLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) onImagePicked(uri)
+    }
+
+    private fun onImagePicked(uri: android.net.Uri) {
+        Toast.makeText(this, "Leyendo imagen…", Toast.LENGTH_SHORT).show()
+        executor.submit {
+            val text = runCatching { com.blackclaw.android.perception.ImageOcr.recognizeUri(uri) }.getOrDefault("")
+            runOnUiThread {
+                if (text.isBlank()) {
+                    Toast.makeText(this, "No detecté texto en la imagen", Toast.LENGTH_SHORT).show()
+                    return@runOnUiThread
+                }
+                val prompt = "Te comparto una imagen. Su texto (OCR):\n\n${text.take(4000)}\n\n" +
+                    "Si es un recibo o factura y te pido registrarlo, regístralo en finanzas. " +
+                    "Si te pido traducir o resumir, hazlo. Si no, dime brevemente qué contiene."
+                taskFlowController.sendTask(prompt)
+            }
+        }
+    }
+
     // Compose state — observed by ChatScreen
     private val _messages = mutableStateListOf<ChatMessage>()
     private val _modelStatus = mutableStateOf("No model loaded")
@@ -166,7 +190,7 @@ class ComposeChatActivity : ComponentActivity() {
                 onOpenAutoReplies = { startActivity(Intent(this, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
                 onOpenAssistant = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
                 onFixPermissions = { startActivity(Intent(this, SettingsActivity::class.java)) },
-                onAttach = { Toast.makeText(this, "Image upload coming soon", Toast.LENGTH_SHORT).show() },
+                onAttach = { runCatching { pickImageLauncher.launch("image/*") } },
                 conversations = _conversations.toList(),
                 onSelectConversation = { loadConversation(it) },
                 onDeleteConversation = { conv ->

@@ -158,6 +158,12 @@ object ToolSelector {
             tools = listOf("read_screen_ocr", "tap_ocr", "take_screenshot"),
         ),
         Category(
+            triggers = listOf("foto", "imagen", "image", "photo", "lee la imagen", "lee la foto",
+                "qué dice", "que dice", "recibo", "ticket", "factura", "receipt", "escanea",
+                "menú", "menu", "documento", "traduce esta"),
+            tools = listOf("ocr_image", "scan_receipt"),
+        ),
+        Category(
             triggers = listOf("gesto", "pellizca", "pinch", "zoom", "arrastra", "drag", "traza", "patron", "patrón"),
             tools = listOf("pinch", "drag_drop", "path_trace", "long_press", "tap_burst"),
         ),

@@ -210,6 +210,9 @@ object ToolRegistry {
         // Perception (game / surface support via screen capture + OCR)
         register(ReadScreenOcrTool())
         register(TapOcrTool())
+        // Photo OCR + receipt scanning (vision over shared images)
+        register(OcrImageTool())
+        register(ScanReceiptTool())
 
         // Multi-step planning (skip LLM rounds when the plan is obvious)
         register(ExecutePlanTool())
