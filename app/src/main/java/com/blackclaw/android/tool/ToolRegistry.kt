@@ -37,6 +37,8 @@ object ToolRegistry {
         register(WaitTool())
         register(RepeatActionsTool())
         register(ClipboardTool())
+        // Visual verification — confirm an action worked (a11y + OCR)
+        register(VerifyScreenTool())
         // Progressive tool disclosure: lets the LLM load tools from the catalog
         register(RequestToolTool())
         register(SendFileTool())

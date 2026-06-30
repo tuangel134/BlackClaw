@@ -216,6 +216,10 @@ dependencies {
     // NanoHTTPD 嵌入式 HTTP 服务器（局域网配置服务）
     implementation(libs.nanohttpd)
 
+    // JSch (maintained fork) — pure-Java SSH client for remote PC/server control.
+    // No external binaries needed (unlike sshpass/ssh). Works on all Android versions.
+    implementation(libs.jsch)
+
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

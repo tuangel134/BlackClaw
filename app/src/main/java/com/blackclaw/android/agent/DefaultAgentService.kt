@@ -147,7 +147,12 @@ class DefaultAgentService : AgentService {
 - If the user mentions routines ("every morning I...", "before bed I always..."), offer to create a routine with create_routine.
 - When executing repetitive tasks, suggest creating a routine for next time.
 - Use run_routine when the user asks for their saved routines.
-- You're building a profile — the more you know, the better you anticipate."""
+- You're building a profile — the more you know, the better you anticipate.
+
+## Verification (avoid silent failures)
+- After a CRITICAL action (sending a message, completing a purchase flow, submitting a form), call verify_screen(expect="...") to confirm it actually worked before reporting success.
+- If verify_screen returns NOT_FOUND, the action likely failed — check get_screen_info and retry, don't claim success.
+- Example: after send_message → verify_screen(expect="Enviado") or check the message appears in the chat."""
 
         /** Maximum number of retries on LLM API call failure */
         private const val MAX_API_RETRIES = 3
@@ -683,10 +688,10 @@ class DefaultAgentService : AgentService {
             append(directDeviceDataGuard.buildPromptSection())
             append(buildDeviceContext())
             append(AmbientContext.asPromptSection())
-            append(com.blackclaw.android.memory.UserProfile.asPromptSnippet())
-            append(TaskHistoryStore.asPromptSnippet())
-            append(com.blackclaw.android.memory.ConversationMemory.asPromptSnippet())
-            append(com.blackclaw.android.assistant.RoutineEngine.asPromptSnippet())
+            // Unified memory: profile + facts + routines + task history +
+            // conversations, assembled under a single budget by priority.
+            append(com.blackclaw.android.memory.MemoryHub.assembleForProvider(
+                config.provider == LlmProvider.LOCAL))
             append(toolCatalogSection)
         }
 

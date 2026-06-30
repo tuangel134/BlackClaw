@@ -5,11 +5,6 @@ import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /**
@@ -296,111 +291,82 @@ class LocalTerminalTool : BaseTool() {
     }
 }
 
-// ── SSH Executor (simple password-auth via raw socket + exec) ──
-// Uses a lightweight approach: connects via socket, does basic SSH auth,
-// and executes commands. For production, a proper SSH library like JSch
-// would be better, but this works for the common case.
+// ── SSH Executor (JSch-based, pure Java, no external binaries) ──
 
 object SshExecutor {
     private const val TAG = "SshExecutor"
 
     /**
-     * Execute a command over SSH using JSch-less approach.
-     * We use Runtime.exec with ssh client if available, otherwise fall back to
-     * a raw socket approach for simple command execution.
+     * Execute a command over SSH using JSch (pure Java).
+     * Works on all Android versions without external binaries.
      */
     fun execute(conn: RemoteConnectionStore.Connection, command: String, timeoutSec: Int): String {
-        // Try using the system's ssh/sshpass if available (most Android ROMs with Termux)
-        // Otherwise fall back to a direct socket-based approach
-
-        // Method 1: Try sshpass + ssh (if installed, e.g. Termux environment)
-        val sshpassResult = trySshpass(conn, command, timeoutSec)
-        if (sshpassResult != null) return sshpassResult
-
-        // Method 2: Use built-in simple exec with ProcessBuilder
-        // This uses Android's ssh binary if available
-        val sshResult = trySshBinary(conn, command, timeoutSec)
-        if (sshResult != null) return sshResult
-
-        // Method 3: Raw TCP with expect-like password sending
-        // This is the most compatible but least reliable
-        return tryRawExec(conn, command, timeoutSec)
-    }
-
-    private fun trySshpass(conn: RemoteConnectionStore.Connection, command: String, timeoutSec: Int): String? {
-        return try {
-            val process = ProcessBuilder(
-                "sshpass", "-p", conn.password,
-                "ssh", "-o", "StrictHostKeyChecking=no",
-                "-o", "ConnectTimeout=$timeoutSec",
-                "-p", "${conn.port}",
-                "${conn.user}@${conn.host}",
-                command
-            ).redirectErrorStream(true).start()
-            val completed = process.waitFor(timeoutSec.toLong() + 5, TimeUnit.SECONDS)
-            if (!completed) { process.destroyForcibly(); null }
-            else process.inputStream.bufferedReader().readText().take(8000)
-        } catch (e: Exception) {
-            null // sshpass not available
-        }
-    }
-
-    private fun trySshBinary(conn: RemoteConnectionStore.Connection, command: String, timeoutSec: Int): String? {
-        return try {
-            // Check if ssh binary exists
-            val which = Runtime.getRuntime().exec(arrayOf("which", "ssh"))
-            which.waitFor(3, TimeUnit.SECONDS)
-            val sshPath = which.inputStream.bufferedReader().readText().trim()
-            if (sshPath.isBlank()) return null
-
-            // Use expect-like script to provide password
-            val script = """
-                #!/system/bin/sh
-                exec ssh -o StrictHostKeyChecking=no -o ConnectTimeout=$timeoutSec \
-                    -o PasswordAuthentication=yes -p ${conn.port} \
-                    ${conn.user}@${conn.host} '$command'
-            """.trimIndent()
-
-            val process = ProcessBuilder("sh", "-c", script)
-                .redirectErrorStream(true).start()
-
-            // Write password if prompted
-            val writer = OutputStreamWriter(process.outputStream)
-            Thread.sleep(1000)
-            writer.write(conn.password + "\n")
-            writer.flush()
-
-            val completed = process.waitFor(timeoutSec.toLong() + 5, TimeUnit.SECONDS)
-            if (!completed) { process.destroyForcibly(); null }
-            else process.inputStream.bufferedReader().readText().take(8000)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun tryRawExec(conn: RemoteConnectionStore.Connection, command: String, timeoutSec: Int): String {
-        // Fallback: just try to connect and provide an error message explaining
-        // that a proper SSH client is needed
+        val jsch = com.jcraft.jsch.JSch()
+        var session: com.jcraft.jsch.Session? = null
+        var channel: com.jcraft.jsch.ChannelExec? = null
         try {
-            val socket = Socket()
-            socket.connect(InetSocketAddress(conn.host, conn.port), timeoutSec * 1000)
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-            val banner = reader.readLine() // SSH banner
-            socket.close()
+            session = jsch.getSession(conn.user, conn.host, conn.port)
+            session.setPassword(conn.password)
+            val config = java.util.Properties()
+            config["StrictHostKeyChecking"] = "no"
+            config["PreferredAuthentications"] = "password,keyboard-interactive"
+            session.setConfig(config)
+            session.connect(timeoutSec * 1000)
 
-            if (banner != null && banner.startsWith("SSH-")) {
-                throw RuntimeException(
-                    "SSH server detectado ($banner) pero no hay cliente SSH compatible. " +
-                    "Instala Termux con openssh para habilitar conexiones SSH desde BlackClaw, " +
-                    "o usa 'pkg install openssh sshpass' en Termux."
-                )
-            } else {
-                throw RuntimeException("El puerto ${conn.port} respondió pero no parece ser SSH.")
+            channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
+            channel.setCommand(command)
+            channel.setErrStream(null)
+            val input = channel.inputStream
+            val errStream = java.io.ByteArrayOutputStream()
+            channel.setErrStream(errStream)
+            channel.connect()
+
+            val output = StringBuilder()
+            val buffer = ByteArray(4096)
+            val deadline = System.currentTimeMillis() + timeoutSec * 1000L
+            while (true) {
+                while (input.available() > 0) {
+                    val read = input.read(buffer, 0, buffer.size)
+                    if (read < 0) break
+                    output.append(String(buffer, 0, read))
+                    if (output.length > 8000) break
+                }
+                if (channel.isClosed) {
+                    if (input.available() > 0) continue
+                    break
+                }
+                if (System.currentTimeMillis() > deadline) {
+                    output.append("\n…[timeout]")
+                    break
+                }
+                Thread.sleep(100)
             }
-        } catch (e: java.net.ConnectException) {
-            throw RuntimeException("No puedo conectar a ${conn.host}:${conn.port}. ¿El PC está encendido y en la misma red?")
-        } catch (e: java.net.SocketTimeoutException) {
-            throw RuntimeException("Timeout conectando a ${conn.host}:${conn.port}.")
+
+            val errText = errStream.toString()
+            val exitCode = channel.exitStatus
+            val combined = buildString {
+                append(output.toString())
+                if (errText.isNotBlank()) {
+                    if (isNotBlank()) append("\n")
+                    append("[stderr] ").append(errText)
+                }
+                if (exitCode != 0 && exitCode != -1) {
+                    append("\n[exit code: $exitCode]")
+                }
+            }
+            return if (combined.length > 8000) combined.take(8000) + "\n…[truncado]" else combined
+        } catch (e: com.jcraft.jsch.JSchException) {
+            val msg = e.message ?: ""
+            throw RuntimeException(when {
+                msg.contains("Auth fail") || msg.contains("auth") -> "Autenticación falló. Verifica usuario/contraseña."
+                msg.contains("timeout") || msg.contains("Connection refused") ->
+                    "No puedo conectar a ${conn.host}:${conn.port}. ¿El PC está encendido, en la misma red, y con SSH activo?"
+                msg.contains("UnknownHost") -> "No encuentro el host ${conn.host}. Verifica la IP."
+                else -> "Error SSH: $msg"
+            })
+        } finally {
+            runCatching { channel?.disconnect() }
+            runCatching { session?.disconnect() }
         }
     }
 }

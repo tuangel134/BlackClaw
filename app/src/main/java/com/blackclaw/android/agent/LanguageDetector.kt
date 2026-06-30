@@ -56,9 +56,14 @@ object LanguageDetector {
         esScore += accents * 2
 
         return when {
+            // Clear winner with at least 2 markers
             esScore > enScore && esScore >= 2 -> Language.SPANISH
             enScore > esScore && enScore >= 2 -> Language.ENGLISH
-            accents > 0 -> Language.SPANISH  // Accents alone → Spanish
+            // Single marker but the other language has none → lean that way
+            esScore >= 1 && enScore == 0 -> Language.SPANISH
+            enScore >= 1 && esScore == 0 -> Language.ENGLISH
+            // Accents alone → Spanish
+            accents > 0 -> Language.SPANISH
             else -> Language.UNKNOWN
         }
     }
