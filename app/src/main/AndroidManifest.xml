@@ -163,6 +163,17 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <service
+            android:name=".service.VoiceTileService"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_monochrome"
+            android:label="Voz BlackClaw"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- Shizuku provider — required by Shizuku-API to hand the user's binder
              to BlackClaw. We do NOT enable Shizuku itself here, that's the user's

@@ -84,4 +84,14 @@ object WhisperMode {
         for (i in 0 until len) { val s = buffer[i].toDouble(); sq += s * s }
         return sqrt(sq / len)
     }
+
+    /** Set the user's normal speaking level from a calibration sample (RMS). */
+    fun calibrateNormalLevel(rms: Double) {
+        if (rms > 200) {
+            normalLevel = rms.coerceIn(400.0, 12000.0)
+            KVUtils.sync()
+        }
+    }
+
+    fun currentNormalLevel(): Double = normalLevel
 }

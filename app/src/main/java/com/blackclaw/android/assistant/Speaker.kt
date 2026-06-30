@@ -25,6 +25,8 @@ object Speaker {
 
     @Volatile private var engine: TextToSpeech? = null
     private val ready = AtomicBoolean(false)
+    /** Optional callback fired when the current utterance finishes speaking. */
+    @Volatile private var onUtteranceDone: (() -> Unit)? = null
 
     var rate: Float
         get() = KVUtils.getFloat(KEY_RATE, 1.0f)
@@ -44,6 +46,20 @@ object Speaker {
                 ready.set(status == TextToSpeech.SUCCESS)
                 if (status == TextToSpeech.SUCCESS) {
                     applyPreferences()
+                    runCatching {
+                        engine?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String?) {}
+                            override fun onDone(utteranceId: String?) {
+                                val cb = onUtteranceDone; onUtteranceDone = null
+                                cb?.let { runCatching { it() } }
+                            }
+                            @Deprecated("Deprecated in Java")
+                            override fun onError(utteranceId: String?) {
+                                val cb = onUtteranceDone; onUtteranceDone = null
+                                cb?.let { runCatching { it() } }
+                            }
+                        })
+                    }
                 } else {
                     XLog.w(TAG, "TTS init failed: $status")
                 }
@@ -91,44 +107,70 @@ object Speaker {
 
     /** Speak [text] aloud. [flush] true interrupts current speech. */
     fun speak(text: String, flush: Boolean = true) {
-        speakInternal(text, flush, whisper = false)
+        speakInternal(text, flush, whisper = false, onDone = null)
     }
 
     /** Speak softly — quieter, lower pitch, slightly slower (whisper-back). */
     fun speakWhisper(text: String, flush: Boolean = true) {
-        speakInternal(text, flush, whisper = true)
+        speakInternal(text, flush, whisper = true, onDone = null)
     }
 
-    private fun speakInternal(text: String, flush: Boolean, whisper: Boolean) {
+    /** Speak and invoke [onDone] when the utterance finishes (for follow-up timing). */
+    fun speak(text: String, whisper: Boolean, onDone: () -> Unit) {
+        speakInternal(text, flush = true, whisper = whisper, onDone = onDone)
+    }
+
+    private fun speakInternal(text: String, flush: Boolean, whisper: Boolean, onDone: (() -> Unit)?) {
         val clean = text.trim()
-        if (clean.isBlank()) return
-        val tts = engine() ?: return
+        if (clean.isBlank()) { onDone?.invoke(); return }
+        val tts = engine() ?: run { onDone?.invoke(); return }
         val deadline = System.currentTimeMillis() + 2_500L
         while (!ready.get() && System.currentTimeMillis() < deadline) {
             try { Thread.sleep(50) } catch (_: InterruptedException) { return }
         }
-        if (!ready.get()) { XLog.w(TAG, "TTS not ready, skipping speak"); return }
+        if (!ready.get()) { XLog.w(TAG, "TTS not ready, skipping speak"); onDone?.invoke(); return }
+        onUtteranceDone = onDone
+        // Multi-language: speak in the language of the text (EN vs ES) so replies
+        // in either language sound right.
+        runCatching { applyLanguageFor(clean) }
         val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
         runCatching {
             if (whisper) {
-                // Softer voice: lower pitch + slightly slower. Volume is set
-                // per-utterance via KEY_PARAM_VOLUME so we don't touch system volume.
                 tts.setPitch((KVUtils.getFloat(KEY_PITCH, 1.0f) * 0.85f).coerceIn(0.5f, 2.0f))
                 tts.setSpeechRate((KVUtils.getFloat(KEY_RATE, 1.0f) * 0.92f).coerceIn(0.5f, 2.0f))
                 val params = android.os.Bundle().apply {
                     putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.30f)
                 }
                 tts.speak(clean.take(4000), mode, params, "blackclaw-w-${UUID.randomUUID()}")
-                // Restore normal pitch/rate for subsequent (non-whisper) speech.
                 applyPreferences()
             } else {
                 tts.speak(clean.take(4000), mode, null, "blackclaw-${UUID.randomUUID()}")
             }
-        }.onFailure { XLog.w(TAG, "speak failed: ${it.message}") }
+        }.onFailure { XLog.w(TAG, "speak failed: ${it.message}"); onUtteranceDone = null; onDone?.invoke() }
     }
 
     fun stop() {
         runCatching { engine?.stop() }
+    }
+
+    /** Set the TTS language to match the text (English vs Spanish). */
+    private fun applyLanguageFor(text: String) {
+        val tts = engine ?: return
+        val lang = com.blackclaw.android.agent.LanguageDetector.detect(text)
+        runCatching {
+            when (lang) {
+                com.blackclaw.android.agent.LanguageDetector.Language.ENGLISH ->
+                    tts.setLanguage(Locale.ENGLISH)
+                else -> {
+                    // Keep the user's configured Spanish voice/locale.
+                    val es = Locale("es", "ES")
+                    val r = tts.setLanguage(es)
+                    if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        tts.setLanguage(Locale.getDefault())
+                    }
+                }
+            }
+        }
     }
 
     fun isSpeaking(): Boolean = runCatching { engine?.isSpeaking == true }.getOrDefault(false)

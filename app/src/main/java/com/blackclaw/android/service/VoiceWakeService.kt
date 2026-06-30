@@ -56,6 +56,8 @@ class VoiceWakeService : Service() {
 
     @Volatile private var pausedForCall = false
     @Volatile private var runningTask = false
+    @Volatile private var pendingConfirm: String? = null   // destructive command awaiting "sí"
+    @Volatile private var pendingConfirmWhisper = false
 
     private var telephonyManager: TelephonyManager? = null
     private var phoneListener: PhoneStateListener? = null
@@ -67,6 +69,7 @@ class VoiceWakeService : Service() {
         super.onCreate()
         startForegroundNotif()
         registerCallStateWatcher()
+        VoiceInputManager.setStateListener { state -> updateNotif(state) }
         startListening()
         XLog.i(TAG, "VoiceWakeService created")
     }
@@ -78,6 +81,7 @@ class VoiceWakeService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        runCatching { VoiceInputManager.setStateListener(null) }
         runCatching { VoiceInputManager.stopWakeLoop() }
         unregisterCallStateWatcher()
         XLog.i(TAG, "VoiceWakeService destroyed")
@@ -96,29 +100,77 @@ class VoiceWakeService : Service() {
     }
 
     private fun onVoiceCommand(command: String, whisper: Boolean) {
-        if (runningTask) {
-            if (whisper) Speaker.speakWhisper("Un momento, jefe.") else Speaker.speak("Un momento, jefe, sigo con lo anterior.")
+        // Resolve a pending destructive-confirmation first.
+        val pending = pendingConfirm
+        if (pending != null) {
+            pendingConfirm = null
+            val low = command.lowercase()
+            val yes = listOf("sí", "si", "confirmo", "confirma", "hazlo", "dale", "adelante", "ok", "vale", "claro")
+            val confirmed = yes.any { low.contains(it) }
+            if (confirmed) {
+                say("De acuerdo, jefe.", pendingConfirmWhisper)
+                runCommand(pending, pendingConfirmWhisper)
+            } else {
+                say("Cancelado.", whisper)
+            }
             return
         }
-        if (whisper) Speaker.speakWhisper(JarvisVoice.wakeAck()) else Speaker.speak(JarvisVoice.commandAck())
+
+        if (runningTask) {
+            say("Un momento, jefe.", whisper)
+            return
+        }
+
+        // Destructive-action confirmation for hands-free safety.
+        if (isDestructive(command)) {
+            pendingConfirm = command
+            pendingConfirmWhisper = whisper
+            say("¿Seguro que quieres que haga eso, jefe? Dime sí para continuar.", whisper)
+            VoiceInputManager.armFollowUp(8000L)  // listen for the yes/no
+            return
+        }
+
+        say(if (whisper) JarvisVoice.wakeAck() else JarvisVoice.commandAck(), whisper)
+        runCommand(command, whisper)
+    }
+
+    private fun runCommand(command: String, whisper: Boolean) {
         runningTask = true
+        updateNotif("processing")
         val taskId = "voice-" + UUID.randomUUID().toString().take(8)
         runCatching {
             appViewModel.startTask(command, taskId) { event ->
                 when (event) {
                     is TaskEvent.Completed -> { speakResult(event.answer, whisper); runningTask = false }
                     is TaskEvent.Failed -> {
-                        if (whisper) Speaker.speakWhisper("No pude completarlo.") else Speaker.speak("No pude completarlo, jefe.")
-                        runningTask = false
+                        say("No pude completarlo, jefe.", whisper)
+                        runningTask = false; updateNotif("idle")
                     }
-                    is TaskEvent.Cancelled, is TaskEvent.Blocked -> { runningTask = false }
+                    is TaskEvent.Cancelled, is TaskEvent.Blocked -> { runningTask = false; updateNotif("idle") }
                     else -> Unit
                 }
             }
         }.onFailure {
             XLog.w(TAG, "startTask failed: ${it.message}")
-            runningTask = false
+            runningTask = false; updateNotif("idle")
         }
+    }
+
+    private fun say(text: String, whisper: Boolean) {
+        if (whisper) Speaker.speakWhisper(text) else Speaker.speak(text)
+    }
+
+    /** Heuristic destructive-intent check for spoken commands (ES/EN). */
+    private fun isDestructive(command: String): Boolean {
+        val c = command.lowercase()
+        val patterns = listOf(
+            "borra todo", "borrar todo", "elimina todo", "eliminar todo",
+            "formatea", "formatear", "restablece", "restablecer de fábrica", "restablecer de fabrica",
+            "desinstala", "desinstalar", "envía dinero", "envia dinero", "transfiere", "transferir",
+            "paga ", "pagar ", "confirma la compra", "borra todos", "elimina todos",
+            "delete all", "factory reset", "uninstall", "send money", "transfer ",
+        )
+        return patterns.any { c.contains(it) }
     }
 
     private fun speakResult(text: String, whisper: Boolean) {
@@ -127,9 +179,18 @@ class VoiceWakeService : Service() {
             .replace(Regex("https?://\\S+"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
-        if (clean.isNotBlank()) {
-            if (whisper) Speaker.speakWhisper(clean.take(500)) else Speaker.speak(clean.take(500))
+        updateNotif("speaking")
+        val toSay = clean.take(500)
+        if (toSay.isBlank()) { armFollowUpAndIdle(); return }
+        // After speaking the result, open a follow-up window (continuous convo).
+        Speaker.speak(toSay, whisper) {
+            armFollowUpAndIdle()
         }
+    }
+
+    private fun armFollowUpAndIdle() {
+        VoiceInputManager.armFollowUp(7000L)
+        updateNotif("listening_followup")
     }
 
     // ── Phone-call mic etiquette ──
@@ -201,6 +262,28 @@ class VoiceWakeService : Service() {
 
     // ── Foreground notification ──
 
+    private var notifBuilder: NotificationCompat.Builder? = null
+
+    private fun updateNotif(state: String) {
+        val text = when (state) {
+            "processing" -> "Procesando tu orden…"
+            "speaking" -> "Respondiendo…"
+            "heard" -> "Te escuché…"
+            "listening_followup" -> "Escuchando (sigue hablando)…"
+            else -> "Di \"garra\" seguido de tu orden"
+        }
+        val b = notifBuilder ?: return
+        b.setContentText(text)
+        runCatching {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIF_ID, b.build())
+        }
+        // Auto-return to idle text a bit after transient states.
+        if (state == "heard") {
+            android.os.Handler(mainLooper).postDelayed({ if (!runningTask) updateNotif("idle") }, 4000)
+        }
+    }
+
     private fun startForegroundNotif() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -222,6 +305,7 @@ class VoiceWakeService : Service() {
             .setOngoing(true)
             .setContentIntent(pi)
             .setPriority(NotificationCompat.PRIORITY_MIN)
+            .also { notifBuilder = it }
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

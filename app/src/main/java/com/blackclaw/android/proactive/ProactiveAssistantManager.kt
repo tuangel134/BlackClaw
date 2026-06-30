@@ -395,6 +395,19 @@ object ProactiveAssistantManager {
                 val r = registry.executeTool("assistant_alert", mapOf(
                     "title" to label, "body" to message.take(200),
                 ))
+                // Voice announcement: if the user has voice mode + spoken alerts
+                // on and it's not quiet hours, read the heads-up aloud.
+                if (ProactiveConfig.speakAlerts &&
+                    com.blackclaw.android.assistant.VoiceInputManager.wakeEnabled) {
+                    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    if (!ProactiveConfig.inQuietHours(hour) &&
+                        !SmartQuietDetector.shouldSuppressNotify()) {
+                        runCatching {
+                            com.blackclaw.android.assistant.Speaker.speak(
+                                "Jefe, $label. ${message.take(160)}")
+                        }
+                    }
+                }
                 logAction("📢 Aviso — $label", r.isSuccess)
             }
             else -> XLog.d(TAG, "Proactive: unknown action '$action'")

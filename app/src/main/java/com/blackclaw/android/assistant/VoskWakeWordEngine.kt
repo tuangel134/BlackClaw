@@ -39,12 +39,24 @@ class VoskWakeWordEngine {
     @Volatile private var active = false
     @Volatile private var awaitingCommand = false
     @Volatile private var awaitingSince = 0L
+    @Volatile private var followUpUntil = 0L          // continuous-conversation window
     @Volatile private var ttsUntilMs = 0L
     @Volatile private var lastAckWords: Set<String> = emptySet()
     private var onCommand: ((String, Boolean) -> Unit)? = null
+    /** Optional listening-state callback for visual feedback: idle/listening/heard. */
+    var onState: ((String) -> Unit)? = null
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     fun isRunning(): Boolean = active
+
+    /** Open a follow-up window so the next phrase needs no wake word (Alexa-style). */
+    fun armFollowUp(durationMs: Long = 7000L) {
+        if (active) {
+            followUpUntil = System.currentTimeMillis() + durationMs
+            onState?.invoke("listening_followup")
+            XLog.d(TAG, "Follow-up window armed ${durationMs}ms")
+        }
+    }
 
     @SuppressLint("MissingPermission") // caller ensures RECORD_AUDIO is granted
     @Synchronized
@@ -101,13 +113,32 @@ class VoskWakeWordEngine {
     private fun captureLoop() {
         val buf = ShortArray(SAMPLE_RATE / 4)  // ~250ms chunks
         val rec = recognizer ?: return
+        // ── VAD: only feed the recognizer when there's voice energy, with a
+        // short hangover after speech so we don't clip word endings. Saves CPU
+        // and avoids transcribing background noise. ──
+        var ambient = 200.0          // adaptive noise floor
+        var voiceHangover = 0        // buffers to keep processing after voice
         while (active) {
             val ar = audioRecord ?: break
             val n = try { ar.read(buf, 0, buf.size) } catch (e: Exception) { break }
             if (n <= 0) continue
-            // Amplitude for whisper detection.
-            WhisperMode.feed(buf, n)
-            // Transcription.
+            val rms = WhisperMode.rmsOf(buf, n)
+            // Update ambient noise floor slowly when it's quiet.
+            if (rms < ambient * 1.5) ambient = (ambient * 0.95 + rms * 0.05).coerceIn(80.0, 4000.0)
+            val voiceThreshold = ambient * 2.2 + 150.0
+            val hasVoice = rms > voiceThreshold
+
+            if (hasVoice) {
+                voiceHangover = 4   // ~1s hangover
+                WhisperMode.feed(buf, n)
+            } else if (voiceHangover > 0) {
+                voiceHangover--
+                WhisperMode.feed(buf, n)
+            } else {
+                // Silence — skip recognizer work entirely (the VAD win).
+                continue
+            }
+
             val end = try { rec.acceptWaveForm(buf, n) } catch (e: Exception) { false }
             if (end) {
                 val text = extractText(rec.result)
@@ -140,9 +171,19 @@ class VoskWakeWordEngine {
             }
         }
 
+        // Follow-up window: accept a command WITHOUT the wake word right after a
+        // reply (continuous conversation, Alexa-style).
+        if (System.currentTimeMillis() < followUpUntil) {
+            followUpUntil = 0
+            XLog.i(TAG, "Follow-up command: '$text' whisper=$whisper")
+            fire(text, whisper)
+            return
+        }
+
         val tokens = text.split(" ").filter { it.isNotBlank() }
         val wakeIdx = tokens.indexOfLast { it in WAKE_TOKENS }
         if (wakeIdx < 0) return
+        onState?.invoke("heard")
 
         var rest = tokens.drop(wakeIdx + 1)
         if (rest.firstOrNull() == "negra") rest = rest.drop(1)

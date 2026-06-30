@@ -195,6 +195,42 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                 )
             }
 
+            // Whisper calibration
+            var calibrating by remember { mutableStateOf(false) }
+            var calibMsg by remember { mutableStateOf("") }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(surface, RoundedCornerShape(14.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Calibrar voz normal", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    calibMsg.ifBlank { "Mejora la detección del susurro: pulsa y habla normal 2 segundos." },
+                    color = textSecondary, fontSize = 13.sp,
+                )
+                Box(
+                    modifier = Modifier
+                        .background(accent.copy(alpha = if (calibrating) 0.08f else 0.15f), RoundedCornerShape(10.dp))
+                        .clickable(enabled = !calibrating) {
+                            calibrating = true
+                            calibMsg = "🎙 Escuchando… habla normal"
+                            VoiceInputManager.calibrateWhisper { rms ->
+                                calibrating = false
+                                calibMsg = if (rms > 0) "✓ Calibrado (nivel ${rms.toInt()})" else "No te escuché, intenta de nuevo"
+                                // Restart the service if voice mode is on.
+                                if (VoiceInputManager.wakeEnabled) {
+                                    runCatching { com.blackclaw.android.service.VoiceWakeService.start(ctx) }
+                                }
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                ) {
+                    Text(if (calibrating) "Escuchando…" else "Calibrar ahora", color = accent, fontWeight = FontWeight.Bold)
+                }
+            }
+
             // Help
             Text(
                 "El modo voz escucha en segundo plano mientras BlackClaw está abierto. " +

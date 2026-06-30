@@ -175,6 +175,11 @@ object ProactiveConfig {
         get() = KVUtils.getBoolean(KEY_SPEAK_BRIEFINGS, false)
         set(v) { KVUtils.putBoolean(KEY_SPEAK_BRIEFINGS, v); KVUtils.sync() }
 
+    /** Read important proactive alerts aloud when voice mode is on. */
+    var speakAlerts: Boolean
+        get() = KVUtils.getBoolean("proactive_speak_alerts", true)
+        set(v) { KVUtils.putBoolean("proactive_speak_alerts", v); KVUtils.sync() }
+
     // ──────────────────────── Weekly finance summary ────────────────────────
 
     /** Weekly recap of spending/income vs budget. Off by default. */

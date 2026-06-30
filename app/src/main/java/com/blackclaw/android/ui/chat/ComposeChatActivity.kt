@@ -237,6 +237,15 @@ class ComposeChatActivity : ComponentActivity() {
         // Usage: adb shell am start -n com.blackclaw.android/.ui.chat.ComposeChatActivity --es task "open my camera"
         handleIntentAutomation(intent, initialDelayMs = 2000)
 
+        // First-launch: show the features guide once so users discover what's here.
+        if (!KVUtils.getBoolean("seen_features_guide", false)) {
+            KVUtils.putBoolean("seen_features_guide", true); KVUtils.sync()
+            Handler(Looper.getMainLooper()).postDelayed({
+                runCatching {
+                    startActivity(Intent(this, com.blackclaw.android.ui.guide.FeaturesGuideActivity::class.java))
+                }
+            }, 800)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -132,6 +132,60 @@ object VoiceInputManager {
     /** True when the offline (Vosk) wake engine is the active backend. */
     fun isOfflineWakeReady(): Boolean = VoskModelManager.isReady()
 
+    /** Arm a follow-up window (continuous conversation) on the offline engine. */
+    fun armFollowUp(durationMs: Long = 7000L) {
+        runCatching { voskEngine.armFollowUp(durationMs) }
+    }
+
+    /** Observe listening state changes (idle/listening/heard/listening_followup). */
+    fun setStateListener(cb: ((String) -> Unit)?) {
+        voskEngine.onState = cb
+    }
+
+    /**
+     * Calibrate the whisper detector: pause listening, record ~2.5s of the user
+     * speaking normally, set that as the "normal level". Runs on a background
+     * thread; [onDone] gets the measured RMS (or 0 on failure). The caller is
+     * responsible for restarting the wake service afterwards if it was on.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun calibrateWhisper(onDone: (Double) -> Unit) {
+        stopWakeLoop()  // release the mic for the calibration capture
+        Thread({
+            var rms = 0.0
+            runCatching {
+                Thread.sleep(400)  // let the mic free up
+                val rate = 16000
+                val minBuf = android.media.AudioRecord.getMinBufferSize(
+                    rate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT)
+                if (minBuf > 0) {
+                    val ar = android.media.AudioRecord(
+                        android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        rate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                        android.media.AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+                    if (ar.state == android.media.AudioRecord.STATE_INITIALIZED) {
+                        ar.startRecording()
+                        val buf = ShortArray(rate / 4)
+                        var sumSq = 0.0; var count = 0L
+                        val deadline = System.currentTimeMillis() + 2500
+                        while (System.currentTimeMillis() < deadline) {
+                            val n = ar.read(buf, 0, buf.size)
+                            if (n > 0) {
+                                for (i in 0 until n) { val s = buf[i].toDouble(); sumSq += s * s }
+                                count += n
+                            }
+                        }
+                        ar.stop(); ar.release()
+                        if (count > 0) rms = kotlin.math.sqrt(sumSq / count)
+                    }
+                }
+            }.onFailure { XLog.w(TAG, "Calibration failed: ${it.message}") }
+            if (rms > 0) WhisperMode.calibrateNormalLevel(rms)
+            main.post { onDone(rms) }
+        }, "whisper-calibrate").apply { isDaemon = true }.start()
+    }
+
     private fun listenForWake(onCommand: (String) -> Unit) {
         if (!wakeLoopActive) return
         BeepSuppressor.mute()  // keep streams muted while we (re)start listening
