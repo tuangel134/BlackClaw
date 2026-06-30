@@ -28,7 +28,13 @@ data class CloudModelConfig(
         get() = baseUrl.ifBlank {
             if (provider == CloudProvider.CUSTOM) "" else provider.defaultBaseUrl
         }
-    val isConfigured: Boolean get() = modelName.isNotBlank() && apiKey.isNotBlank()
+    /** OpenCode Zen is anonymous: the literal "public" bearer token works with
+     *  no registration, so we supply it automatically when the user hasn't. */
+    val resolvedApiKey: String
+        get() = if (provider == CloudProvider.OPENCODE_ZEN && apiKey.isBlank()) "public" else apiKey
+    val isConfigured: Boolean
+        get() = modelName.isNotBlank() &&
+            (apiKey.isNotBlank() || provider == CloudProvider.OPENCODE_ZEN)
     val agentProvider: LlmProvider
         get() = when (provider) {
             CloudProvider.ANTHROPIC -> LlmProvider.ANTHROPIC
@@ -67,7 +73,7 @@ data class ResolvedModelConfig(
             )
         } else {
             AgentConfig(
-                apiKey = activeCloud.apiKey,
+                apiKey = activeCloud.resolvedApiKey,
                 baseUrl = activeCloud.resolvedBaseUrl,
                 modelName = activeCloud.modelName,
                 systemPrompt = finalSystemPrompt,

@@ -528,8 +528,14 @@ class LlmConfigActivity : BaseActivity() {
             updateTabStyles()
             renderModels()
             tvStatus.visibility = View.GONE
+            // OpenCode Zen is anonymous — auto-fill the literal "public" token so
+            // the user can just pick a free model and hit Save (no registration).
             val savedKey = KVUtils.getApiKeyForProvider(provider.name)
-            etApiKey.setText(savedKey)
+            if (provider == CloudProvider.OPENCODE_ZEN) {
+                etApiKey.setText(savedKey.ifBlank { "public" })
+            } else {
+                etApiKey.setText(savedKey)
+            }
         }
         // Re-assign click listeners with the inner function
         tabViews.forEach { (provider, tab) ->

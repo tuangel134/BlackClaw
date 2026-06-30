@@ -55,6 +55,19 @@ enum class CloudProvider(
             CloudModel("gemini-2.5-pro", "Gemini 2.5 Pro", 1.25, 10.00, ModelTier.PRO, 1_000_000),
         )
     ),
+    OPENCODE_ZEN(
+        displayName = "OpenCode Zen (Gratis)",
+        defaultBaseUrl = "https://opencode.ai/zen/v1",
+        models = listOf(
+            CloudModel("deepseek-v4-flash-free", "DeepSeek V4 Flash (Gratis)", 0.0, 0.0, ModelTier.SMART, 128_000, recommended = true),
+            CloudModel("qwen3.6-plus-free", "Qwen 3.6 Plus (Gratis)", 0.0, 0.0, ModelTier.SMART, 128_000),
+            CloudModel("minimax-m3-free", "MiniMax M3 (Gratis)", 0.0, 0.0, ModelTier.FAST, 128_000),
+            CloudModel("nemotron-3-ultra-free", "Nemotron 3 Ultra (Gratis)", 0.0, 0.0, ModelTier.PRO, 128_000),
+            CloudModel("mimo-v2.5-free", "MiMo V2.5 (Gratis)", 0.0, 0.0, ModelTier.FAST, 128_000),
+            CloudModel("north-mini-code-free", "North Mini Code (Gratis)", 0.0, 0.0, ModelTier.FAST, 128_000),
+            CloudModel("big-pickle", "Big Pickle (Gratis)", 0.0, 0.0, ModelTier.SMART, 128_000),
+        )
+    ),
     CUSTOM(
         displayName = "Custom",
         defaultBaseUrl = "",

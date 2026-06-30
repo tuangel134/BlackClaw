@@ -34,7 +34,7 @@ object LlmSessionManager {
         }
 
         val cloud = config.activeCloud
-        if (cloud.apiKey.isEmpty()) {
+        if (cloud.resolvedApiKey.isEmpty()) {
             XLog.w(TAG, "createCloudChatModel: no API key configured")
             return null
         }
@@ -43,7 +43,7 @@ object LlmSessionManager {
         return when (cloud.agentProvider) {
             com.blackclaw.android.agent.LlmProvider.ANTHROPIC -> AnthropicChatModel.builder()
                 .httpClientBuilder(OkHttpClientBuilderAdapter())
-                .apiKey(cloud.apiKey)
+                .apiKey(cloud.resolvedApiKey)
                 .modelName(cloud.modelName)
                 .baseUrl(cloud.resolvedBaseUrl)
                 .temperature(temperature)
@@ -51,7 +51,7 @@ object LlmSessionManager {
 
             else -> OpenAiChatModel.builder()
                 .httpClientBuilder(OkHttpClientBuilderAdapter())
-                .apiKey(cloud.apiKey)
+                .apiKey(cloud.resolvedApiKey)
                 .modelName(cloud.modelName.ifEmpty { "gpt-4o-mini" })
                 .baseUrl(cloud.resolvedBaseUrl.ifEmpty { "https://api.openai.com/v1" })
                 .temperature(temperature)
@@ -66,7 +66,7 @@ object LlmSessionManager {
         val config = ModelConfigRepository.snapshot()
         if (config.activeMode == ActiveModelMode.LOCAL) return null
         val cloud = config.activeCloud
-        if (cloud.apiKey.isEmpty() || cloud.modelName.isEmpty()) {
+        if (cloud.resolvedApiKey.isEmpty() || cloud.modelName.isEmpty()) {
             XLog.w(TAG, "createCloudClient: incomplete cloud config")
             return null
         }
