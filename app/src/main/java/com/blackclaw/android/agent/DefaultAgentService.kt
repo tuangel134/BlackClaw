@@ -964,6 +964,8 @@ class DefaultAgentService : AgentService {
 
                 val result = ToolRegistry.getInstance().executeTool(toolName, params)
                 runCatching { com.blackclaw.android.utils.ActivityTracker.recordToolUsed(toolName) }
+                // Learning by demonstration: capture replayable steps when recording.
+                runCatching { com.blackclaw.android.agent.DemonstrationRecorder.record(toolName, params, result.isSuccess) }
                 val paramsString = if (params.isEmpty()) "" else params.toString()
                 callback.onToolResult(iterations, toolName, displayName, paramsString, result)
                 if (result.isSuccess) {

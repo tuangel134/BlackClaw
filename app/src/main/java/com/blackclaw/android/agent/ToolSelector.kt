@@ -224,8 +224,21 @@ object ToolSelector {
             triggers = listOf("pc", "computadora", "computer", "laptop", "servidor", "server",
                 "ssh", "remoto", "remote", "diagnostica", "diagnose", "arregla", "fix",
                 "wifi no", "no conecta", "lento", "slow", "reinicia", "restart",
-                "terminal", "comando", "consola"),
-            tools = listOf("remote_shell", "remote_connect", "remote_diagnose", "remote_list", "terminal"),
+                "terminal", "comando", "consola", "vigila", "monitor", "tail", "log",
+                "avísame si", "avisame si"),
+            tools = listOf("remote_shell", "remote_connect", "remote_diagnose", "remote_list",
+                "terminal", "remote_monitor", "stop_monitor", "list_monitors"),
+        ),
+        Category(
+            triggers = listOf("aprende esto", "mira cómo", "mira como", "graba esto", "graba lo que",
+                "demostración", "demostracion", "enséñate", "enseñate", "guárdalo como",
+                "guardalo como", "aprende a"),
+            tools = listOf("start_demo", "save_demo", "cancel_demo", "list_routines"),
+        ),
+        Category(
+            triggers = listOf("voz", "voice", "manos libres", "hands free", "escucha", "micrófono",
+                "microfono", "hey blackclaw", "palabra de activación", "wake word", "dicta"),
+            tools = listOf("voice_mode", "speak_text"),
         ),
         Category(
             triggers = listOf("borrador", "responde por mi", "respuesta sugerida", "draft", "redacta",

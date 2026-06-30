@@ -101,10 +101,18 @@ object UserMemoryStore {
     @Synchronized
     fun search(query: String): List<Fact> {
         if (query.isBlank()) return all()
+        val facts = all()
+        // 1. Substring match (fast, exact)
         val q = query.lowercase()
-        return all().filter {
+        val exact = facts.filter {
             it.key.lowercase().contains(q) || it.value.lowercase().contains(q)
         }
+        if (exact.isNotEmpty()) return exact
+        // 2. Semantic fallback — match by meaning when wording differs
+        //    ("¿qué me dijo el jefe?" finds a fact about "mi superior").
+        val docs = facts.map { "${it.key} ${it.value}" }
+        val ranked = SemanticSearch.rank(query, docs, minScore = 0.08)
+        return ranked.map { facts[it.first] }
     }
 
     /** Build a compact text block to inject into the system prompt. */

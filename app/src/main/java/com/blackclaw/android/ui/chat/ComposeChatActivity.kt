@@ -262,6 +262,39 @@ class ComposeChatActivity : ComponentActivity() {
                 visibleMessages = _messages.toList(),
             )
         }
+        maybeStartVoiceWakeLoop()
+    }
+
+    /**
+     * Hands-free mode: if the user enabled the wake word and granted mic
+     * permission, listen continuously while the app is in the foreground.
+     * Detected commands ("Hey BlackClaw, ...") are routed as tasks.
+     */
+    private fun maybeStartVoiceWakeLoop() {
+        if (!com.blackclaw.android.assistant.VoiceInputManager.wakeEnabled) return
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            runCatching {
+                androidx.core.app.ActivityCompat.requestPermissions(
+                    this, arrayOf(android.Manifest.permission.RECORD_AUDIO), 4201)
+            }
+            return
+        }
+        com.blackclaw.android.assistant.VoiceInputManager.startWakeLoop(
+            onCommand = { command ->
+                runOnUiThread {
+                    com.blackclaw.android.assistant.Speaker.speak("Enseguida.")
+                    if (com.blackclaw.android.agent.DefaultAgentService.isTaskLike(command)) {
+                        taskFlowController.sendTask(command)
+                    } else {
+                        sendChat(command)
+                    }
+                }
+            },
+            onError = { XLog.d(TAG, "Voice wake: $it") },
+        )
     }
 
     override fun onPause() {
@@ -270,6 +303,7 @@ class ComposeChatActivity : ComponentActivity() {
         permHandler.removeCallbacks(permPoller)
         activeTaskShellController.onPause()
         chatSessionController.onPause(conversationStore.currentConversationId)
+        runCatching { com.blackclaw.android.assistant.VoiceInputManager.stopWakeLoop() }
     }
 
     override fun onDestroy() {

@@ -121,6 +121,19 @@ object ToolRegistry {
         register(RemoteDiagnoseTool())
         register(LocalTerminalTool())
 
+        // PC co-pilot: persistent remote monitoring with alerts
+        register(RemoteMonitorTool())
+        register(StopMonitorTool())
+        register(ListMonitorsTool())
+
+        // Learning by demonstration — record actions, save as routine
+        register(StartDemoTool())
+        register(SaveDemoTool())
+        register(CancelDemoTool())
+
+        // Hands-free voice mode (wake word + STT)
+        register(VoiceModeTool())
+
         // Direct device control (no UI navigation needed)
         register(SetVolumeTool())
         register(SetBrightnessTool())
