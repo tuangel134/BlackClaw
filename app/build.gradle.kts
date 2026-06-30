@@ -220,6 +220,12 @@ dependencies {
     // No external binaries needed (unlike sshpass/ssh). Works on all Android versions.
     implementation(libs.jsch)
 
+    // Vosk — fully offline speech recognition / keyword spotting. No API key, no
+    // account, no audio leaves the device. Used for the always-listening wake
+    // word (no system beep, unlike SpeechRecognizer). The model is downloaded
+    // once at runtime (kept out of the APK to avoid bloating it ~40MB).
+    implementation("com.alphacephei:vosk-android:0.3.47")
+
 
     testImplementation(libs.junit)
     // Real org.json for unit tests (Android's is a stub that returns defaults).

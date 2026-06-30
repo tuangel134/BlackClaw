@@ -163,7 +163,14 @@ class AssistantTimeTest {
 
     @Test
     fun formatShowsHoyForToday() {
-        val out = AssistantTime.format(System.currentTimeMillis() + 60_000)
+        // Use a fixed midday timestamp for "today" so the test is not flaky near
+        // midnight (now + delta could cross into tomorrow).
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 12)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+        }
+        val out = AssistantTime.format(cal.timeInMillis)
         assertTrue("Today should show 'hoy'", out.contains("hoy"))
     }
 

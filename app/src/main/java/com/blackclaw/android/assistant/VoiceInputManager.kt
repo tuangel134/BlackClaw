@@ -39,6 +39,8 @@ object VoiceInputManager {
     @Volatile private var recognizer: SpeechRecognizer? = null
     @Volatile private var wakeLoopActive = false
     private val main = Handler(Looper.getMainLooper())
+    /** Offline engine (preferred when its model is downloaded). */
+    private val voskEngine = VoskWakeWordEngine()
 
     var wakeWord: String
         get() = KVUtils.getString(KEY_WAKE_WORD, "blackclaw")
@@ -100,19 +102,34 @@ object VoiceInputManager {
      */
     fun startWakeLoop(onCommand: (String) -> Unit, onError: (String) -> Unit = {}) {
         if (wakeLoopActive) return
-        if (!isAvailable()) { onError("Reconocimiento de voz no disponible."); return }
         wakeLoopActive = true
+        // Prefer the fully-offline Vosk engine (no beep, continuous). It only
+        // works once its model is downloaded; otherwise fall back to the system
+        // SpeechRecognizer loop (with the beep suppressed).
+        if (VoskModelManager.isReady() && voskEngine.start(onCommand)) {
+            XLog.i(TAG, "Wake loop: using offline Vosk engine")
+            return
+        }
+        if (!isAvailable()) {
+            wakeLoopActive = false
+            onError("Reconocimiento de voz no disponible.")
+            return
+        }
         BeepSuppressor.mute()   // silence the per-cycle recognition beep
-        XLog.i(TAG, "Wake loop started (word='$wakeWord')")
+        XLog.i(TAG, "Wake loop: using SpeechRecognizer (word='$wakeWord')")
         main.post { listenForWake(onCommand) }
     }
 
     fun stopWakeLoop() {
         wakeLoopActive = false
+        runCatching { voskEngine.stop() }
         cleanup()
         BeepSuppressor.restore()
         XLog.i(TAG, "Wake loop stopped")
     }
+
+    /** True when the offline (Vosk) wake engine is the active backend. */
+    fun isOfflineWakeReady(): Boolean = VoskModelManager.isReady()
 
     private fun listenForWake(onCommand: (String) -> Unit) {
         if (!wakeLoopActive) return
