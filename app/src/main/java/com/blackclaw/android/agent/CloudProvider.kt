@@ -56,7 +56,7 @@ enum class CloudProvider(
         )
     ),
     OPENCODE_ZEN(
-        displayName = "OpenCode Zen (Gratis)",
+        displayName = "BlackClaw Free",
         defaultBaseUrl = "https://opencode.ai/zen/v1",
         models = listOf(
             // Seed list (hand-verified free with Bearer public). The live list is

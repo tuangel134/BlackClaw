@@ -102,6 +102,7 @@ object VoiceInputManager {
         if (wakeLoopActive) return
         if (!isAvailable()) { onError("Reconocimiento de voz no disponible."); return }
         wakeLoopActive = true
+        BeepSuppressor.mute()   // silence the per-cycle recognition beep
         XLog.i(TAG, "Wake loop started (word='$wakeWord')")
         main.post { listenForWake(onCommand) }
     }
@@ -109,11 +110,13 @@ object VoiceInputManager {
     fun stopWakeLoop() {
         wakeLoopActive = false
         cleanup()
+        BeepSuppressor.restore()
         XLog.i(TAG, "Wake loop stopped")
     }
 
     private fun listenForWake(onCommand: (String) -> Unit) {
         if (!wakeLoopActive) return
+        BeepSuppressor.mute()  // keep streams muted while we (re)start listening
         val sr = SpeechRecognizer.createSpeechRecognizer(ClawApplication.instance)
         recognizer = sr
         var fired = false
@@ -128,8 +131,9 @@ object VoiceInputManager {
                     if (m != null && m.command.isNotEmpty()) {
                         fired = true
                         XLog.i(TAG, "Wake (partial) '${m.matchedVariant}' → '${m.command}'")
+                        BeepSuppressor.restore()  // let TTS reply be heard
                         main.post { onCommand(m.command) }
-                        restartWakeAfterDelay(onCommand)
+                        restartWakeAfterDelay(onCommand, delayMs = 3000)
                         return
                     }
                 }
@@ -153,23 +157,26 @@ object VoiceInputManager {
         for (text in candidates) {
             val m = WakeWordMatcher.match(text, wakeWord) ?: continue
             XLog.i(TAG, "Wake word '${m.matchedVariant}' detected, command='${m.command}'")
+            BeepSuppressor.restore()  // audible TTS / command
             if (m.command.isNotEmpty()) {
                 main.post { onCommand(m.command) }
+                restartWakeAfterDelay(onCommand, delayMs = 3000)
             } else {
                 // Just the wake word — acknowledge and listen for the command next.
                 Speaker.speak("Dígame, jefe.")
+                restartWakeAfterDelay(onCommand, delayMs = 2000)
             }
-            break
+            return
         }
         restartWakeAfterDelay(onCommand)
     }
 
-    private fun restartWakeAfterDelay(onCommand: (String) -> Unit) {
+    private fun restartWakeAfterDelay(onCommand: (String) -> Unit, delayMs: Long = 350) {
         cleanup()
         if (!wakeLoopActive) return
-        // Short gap — partial results already catch the wake word fast, so we
-        // just need a brief pause to recycle the recognizer cleanly.
-        main.postDelayed({ listenForWake(onCommand) }, 300)
+        // Short gap for silence cycles (muted, no beep). Longer gap after a
+        // command so any TTS reply finishes before we mute + listen again.
+        main.postDelayed({ listenForWake(onCommand) }, delayMs)
     }
 
     private fun cleanup() {
