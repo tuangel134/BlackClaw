@@ -3,18 +3,17 @@ package com.blackclaw.android.assistant
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
- * Downloads and manages the offline Vosk speech model used by the wake-word
- * engine. Kept OUT of the APK (it's ~40 MB) and fetched once at runtime to the
- * app's private storage. After download, everything runs 100% offline — no key,
- * no account, no audio ever leaves the device.
+ * Manages the offline Vosk speech model used by the wake-word engine.
+ *
+ * The model ships BUNDLED inside the APK (app/src/main/assets/vosk-model-es.zip)
+ * so the user doesn't have to download anything and it works out of the box,
+ * offline, with no key/account. On first use we unpack the ~40 MB zip from
+ * assets into the app's private storage (Vosk needs a directory path).
  *
  * We use the small Spanish model (vosk-model-small-es-0.42) — light enough for
  * continuous listening on a phone.
@@ -22,23 +21,20 @@ import java.util.zip.ZipInputStream
 object VoskModelManager {
 
     private const val TAG = "VoskModel"
-    private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
+    private const val ASSET_ZIP = "vosk-model-es.zip"
     private const val MODEL_DIR_NAME = "vosk-model-es"
     private const val KEY_READY = "vosk_model_ready"
 
     private val worker = Executors.newSingleThreadExecutor()
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build()
 
-    @Volatile var downloading = false
+    @Volatile var preparing = false
         private set
+    // Kept for API compatibility with the voice tool wording.
+    val downloading: Boolean get() = preparing
 
     /** Root dir that contains the unpacked model (the dir holding conf/, am/, …). */
     fun modelPath(): String {
         val root = File(ClawApplication.instance.filesDir, MODEL_DIR_NAME)
-        // The zip unpacks into a nested folder; find the one with a "conf" dir.
         val nested = root.listFiles()?.firstOrNull { File(it, "conf").isDirectory }
         return (nested ?: root).absolutePath
     }
@@ -48,44 +44,53 @@ object VoskModelManager {
         return File(modelPath(), "conf").isDirectory
     }
 
+    /** Is the bundled model asset present in this build? */
+    fun isBundled(): Boolean = runCatching {
+        ClawApplication.instance.assets.list("")?.contains(ASSET_ZIP) == true
+    }.getOrDefault(false)
+
     /**
-     * Download + unzip the model on a background thread.
-     * [onProgress] gets 0-100 (or -1 on indeterminate), [onDone] gets success.
+     * Ensure the model is unpacked and ready. Extracts from the bundled asset on
+     * a background thread. [onProgress] gets 0-100, [onDone] gets success.
+     * (Method name kept as `download` so existing callers/tools don't change.)
      */
     fun download(onProgress: (Int) -> Unit = {}, onDone: (Boolean) -> Unit = {}) {
-        if (downloading) return
+        if (preparing) return
         if (isReady()) { onDone(true); return }
-        downloading = true
+        preparing = true
         worker.submit {
-            val ok = runCatching { doDownload(onProgress) }.getOrElse {
-                XLog.w(TAG, "Model download failed: ${it.message}"); false
+            val ok = runCatching { extractFromAssets(onProgress) }.getOrElse {
+                XLog.w(TAG, "Model extract failed: ${it.message}"); false
             }
-            if (ok) {
-                KVUtils.putBoolean(KEY_READY, true); KVUtils.sync()
-            }
-            downloading = false
+            if (ok) { KVUtils.putBoolean(KEY_READY, true); KVUtils.sync() }
+            preparing = false
             onDone(ok)
         }
     }
 
-    private fun doDownload(onProgress: (Int) -> Unit): Boolean {
-        val root = File(ClawApplication.instance.filesDir, MODEL_DIR_NAME)
+    /** Eagerly prepare the model in the background if bundled and not yet ready. */
+    fun prepareIfNeeded() {
+        if (isReady() || preparing || !isBundled()) return
+        download()
+    }
+
+    private fun extractFromAssets(onProgress: (Int) -> Unit): Boolean {
+        val ctx = ClawApplication.instance
+        val root = File(ctx.filesDir, MODEL_DIR_NAME)
         if (root.exists()) root.deleteRecursively()
         root.mkdirs()
 
-        XLog.i(TAG, "Downloading Vosk model…")
-        val req = Request.Builder().url(MODEL_URL).get().build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) { XLog.w(TAG, "HTTP ${resp.code}"); return false }
-            val body = resp.body ?: return false
-            val total = body.contentLength()
-            var read = 0L
-            ZipInputStream(body.byteStream()).use { zip ->
+        XLog.i(TAG, "Unpacking bundled Vosk model…")
+        // Approximate size for progress (small-es model unpacks to ~50MB).
+        val approxTotal = 50L * 1024 * 1024
+        var written = 0L
+
+        ctx.assets.open(ASSET_ZIP).use { input ->
+            ZipInputStream(input.buffered()).use { zip ->
                 var entry = zip.nextEntry
                 val buf = ByteArray(64 * 1024)
                 while (entry != null) {
                     val outFile = File(root, entry.name)
-                    // Zip-slip guard
                     if (!outFile.canonicalPath.startsWith(root.canonicalPath)) {
                         entry = zip.nextEntry; continue
                     }
@@ -97,8 +102,8 @@ object VoskModelManager {
                             var n = zip.read(buf)
                             while (n >= 0) {
                                 out.write(buf, 0, n)
-                                read += n
-                                if (total > 0) onProgress(((read * 100) / total).toInt().coerceIn(0, 100))
+                                written += n
+                                onProgress(((written * 100) / approxTotal).toInt().coerceIn(0, 99))
                                 n = zip.read(buf)
                             }
                         }
@@ -109,7 +114,8 @@ object VoskModelManager {
             }
         }
         val ok = File(modelPath(), "conf").isDirectory
-        XLog.i(TAG, "Model download ${if (ok) "OK" else "INCOMPLETE"} at ${modelPath()}")
+        onProgress(100)
+        XLog.i(TAG, "Model unpack ${if (ok) "OK" else "INCOMPLETE"} at ${modelPath()}")
         return ok
     }
 

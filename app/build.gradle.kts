@@ -118,6 +118,10 @@ android {
     }
 
     packaging {
+        // The bundled Vosk model is already a compressed .zip — don't re-compress.
+        jniLibs {
+            useLegacyPackaging = false
+        }
         resources {
             excludes += setOf(
                 "META-INF/DEPENDENCIES",
@@ -127,6 +131,10 @@ android {
                 "META-INF/NOTICE.txt",
             )
         }
+    }
+
+    androidResources {
+        noCompress += "zip"
     }
 }
 

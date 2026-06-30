@@ -45,6 +45,9 @@ class ClawApplication : BaseApp() {
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
         runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
+        // Unpack the bundled offline voice model in the background so the
+        // hands-free wake word works out of the box (no download needed).
+        runCatching { com.blackclaw.android.assistant.VoskModelManager.prepareIfNeeded() }
         runCatching {
             if (com.blackclaw.android.proactive.ProactiveConfig.enabled ||
                 com.blackclaw.android.assistant.GeofenceChecker.hasActiveGeofences()) {

@@ -101,6 +101,7 @@ class SettingsActivity : BaseActivity() {
                 onOpenScheduled = { startActivity(Intent(this, ScheduledTasksActivity::class.java)) },
                 onOpenToolBrowser = { startActivity(Intent(this, ToolBrowserActivity::class.java)) },
                 onOpenAutoReplies = { startActivity(Intent(this, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
+                onOpenVoice = { startActivity(Intent(this, VoiceSettingsActivity::class.java)) },
                 onOpenProactive = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
                 onOpenShizuku = { startActivity(Intent(this, com.blackclaw.android.ui.shizuku.ShizukuSetupActivity::class.java)) },
                 onOpenAdbPro = { startActivity(Intent(this, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
@@ -169,6 +170,7 @@ private fun ModernSettingsScreen(
     onOpenScheduled: () -> Unit,
     onOpenToolBrowser: () -> Unit,
     onOpenAutoReplies: () -> Unit,
+    onOpenVoice: () -> Unit,
     onOpenProactive: () -> Unit,
     onOpenShizuku: () -> Unit,
     onOpenAdbPro: () -> Unit,
@@ -371,6 +373,19 @@ private fun ModernSettingsScreen(
                     trailingHighlight = activeAutoReplies > 0,
                     colors = colors,
                     onClick = onOpenAutoReplies,
+                )
+                Divider(colors)
+                val voiceOn = com.blackclaw.android.assistant.VoiceInputManager.wakeEnabled
+                val voiceReady = com.blackclaw.android.assistant.VoskModelManager.isReady()
+                NavRow(
+                    icon = Icons.Outlined.Mic,
+                    title = "Modo voz (manos libres)",
+                    subtitle = if (voiceReady) "Di 'garra' + tu orden — offline, sin beep"
+                               else "Activación por voz",
+                    trailing = if (voiceOn) "Activado" else "Desactivado",
+                    trailingHighlight = voiceOn,
+                    colors = colors,
+                    onClick = onOpenVoice,
                 )
             }
 
