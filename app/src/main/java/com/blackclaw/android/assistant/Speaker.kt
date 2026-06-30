@@ -91,6 +91,15 @@ object Speaker {
 
     /** Speak [text] aloud. [flush] true interrupts current speech. */
     fun speak(text: String, flush: Boolean = true) {
+        speakInternal(text, flush, whisper = false)
+    }
+
+    /** Speak softly — quieter, lower pitch, slightly slower (whisper-back). */
+    fun speakWhisper(text: String, flush: Boolean = true) {
+        speakInternal(text, flush, whisper = true)
+    }
+
+    private fun speakInternal(text: String, flush: Boolean, whisper: Boolean) {
         val clean = text.trim()
         if (clean.isBlank()) return
         val tts = engine() ?: return
@@ -101,7 +110,20 @@ object Speaker {
         if (!ready.get()) { XLog.w(TAG, "TTS not ready, skipping speak"); return }
         val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
         runCatching {
-            tts.speak(clean.take(4000), mode, null, "blackclaw-${UUID.randomUUID()}")
+            if (whisper) {
+                // Softer voice: lower pitch + slightly slower. Volume is set
+                // per-utterance via KEY_PARAM_VOLUME so we don't touch system volume.
+                tts.setPitch((KVUtils.getFloat(KEY_PITCH, 1.0f) * 0.85f).coerceIn(0.5f, 2.0f))
+                tts.setSpeechRate((KVUtils.getFloat(KEY_RATE, 1.0f) * 0.92f).coerceIn(0.5f, 2.0f))
+                val params = android.os.Bundle().apply {
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.30f)
+                }
+                tts.speak(clean.take(4000), mode, params, "blackclaw-w-${UUID.randomUUID()}")
+                // Restore normal pitch/rate for subsequent (non-whisper) speech.
+                applyPreferences()
+            } else {
+                tts.speak(clean.take(4000), mode, null, "blackclaw-${UUID.randomUUID()}")
+            }
         }.onFailure { XLog.w(TAG, "speak failed: ${it.message}") }
     }
 

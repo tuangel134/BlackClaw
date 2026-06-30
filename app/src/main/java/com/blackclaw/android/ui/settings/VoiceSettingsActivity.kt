@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.blackclaw.android.assistant.VoiceInputManager
 import com.blackclaw.android.assistant.VoskModelManager
+import com.blackclaw.android.assistant.WhisperMode
 import com.blackclaw.android.base.BaseActivity
 
 /**
@@ -60,6 +61,7 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
     val textSecondary = Color(0xFF7A80A0)
 
     var enabled by remember { mutableStateOf(VoiceInputManager.wakeEnabled) }
+    var whisper by remember { mutableStateOf(WhisperMode.enabled) }
     var modelReady by remember { mutableStateOf(VoskModelManager.isReady()) }
     var preparing by remember { mutableStateOf(VoskModelManager.preparing) }
     var progress by remember { mutableStateOf(0) }
@@ -169,6 +171,28 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                         Text("Preparar modelo offline", color = accent, fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+
+            // Whisper mode toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(surface, RoundedCornerShape(14.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Modo susurro", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(
+                        "Si le susurras, te responde susurrando (como Alexa). Requiere el modelo offline.",
+                        color = textSecondary, fontSize = 13.sp,
+                    )
+                }
+                Switch(
+                    checked = whisper,
+                    onCheckedChange = { whisper = it; WhisperMode.enabled = it },
+                    colors = SwitchDefaults.colors(checkedTrackColor = accent),
+                )
             }
 
             // Help

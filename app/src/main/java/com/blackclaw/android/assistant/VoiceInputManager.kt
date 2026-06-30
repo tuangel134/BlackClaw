@@ -100,12 +100,11 @@ object VoiceInputManager {
      * Start the hands-free wake-word loop. [onCommand] receives the phrase that
      * followed the wake word. Keeps re-listening until [stopWakeLoop].
      */
-    fun startWakeLoop(onCommand: (String) -> Unit, onError: (String) -> Unit = {}) {
+    fun startWakeLoop(onCommand: (String, Boolean) -> Unit, onError: (String) -> Unit = {}) {
         if (wakeLoopActive) return
         wakeLoopActive = true
-        // Prefer the fully-offline Vosk engine (no beep, continuous). It only
-        // works once its model is downloaded; otherwise fall back to the system
-        // SpeechRecognizer loop (with the beep suppressed).
+        // Prefer the fully-offline Vosk engine (no beep, continuous, + whisper
+        // detection). Falls back to SpeechRecognizer (no whisper detection there).
         if (VoskModelManager.isReady() && voskEngine.start(onCommand)) {
             XLog.i(TAG, "Wake loop: using offline Vosk engine")
             return
@@ -117,7 +116,8 @@ object VoiceInputManager {
         }
         BeepSuppressor.mute()   // silence the per-cycle recognition beep
         XLog.i(TAG, "Wake loop: using SpeechRecognizer (word='$wakeWord')")
-        main.post { listenForWake(onCommand) }
+        // SpeechRecognizer path can't measure amplitude → whisper=false.
+        main.post { listenForWake { cmd -> onCommand(cmd, false) } }
     }
 
     fun stopWakeLoop() {

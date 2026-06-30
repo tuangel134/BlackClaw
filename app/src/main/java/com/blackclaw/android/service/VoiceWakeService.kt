@@ -90,25 +90,25 @@ class VoiceWakeService : Service() {
         // Don't grab the mic if a call/communication audio mode is active.
         if (isCallActive()) { pausedForCall = true; return }
         VoiceInputManager.startWakeLoop(
-            onCommand = { command -> onVoiceCommand(command) },
+            onCommand = { command, whisper -> onVoiceCommand(command, whisper) },
             onError = { XLog.d(TAG, "wake error: $it") },
         )
     }
 
-    private fun onVoiceCommand(command: String) {
+    private fun onVoiceCommand(command: String, whisper: Boolean) {
         if (runningTask) {
-            Speaker.speak("Un momento, jefe, sigo con lo anterior.")
+            if (whisper) Speaker.speakWhisper("Un momento, jefe.") else Speaker.speak("Un momento, jefe, sigo con lo anterior.")
             return
         }
-        Speaker.speak(JarvisVoice.commandAck())
+        if (whisper) Speaker.speakWhisper(JarvisVoice.wakeAck()) else Speaker.speak(JarvisVoice.commandAck())
         runningTask = true
         val taskId = "voice-" + UUID.randomUUID().toString().take(8)
         runCatching {
             appViewModel.startTask(command, taskId) { event ->
                 when (event) {
-                    is TaskEvent.Completed -> { speakResult(event.answer); runningTask = false }
+                    is TaskEvent.Completed -> { speakResult(event.answer, whisper); runningTask = false }
                     is TaskEvent.Failed -> {
-                        Speaker.speak("No pude completarlo, jefe.")
+                        if (whisper) Speaker.speakWhisper("No pude completarlo.") else Speaker.speak("No pude completarlo, jefe.")
                         runningTask = false
                     }
                     is TaskEvent.Cancelled, is TaskEvent.Blocked -> { runningTask = false }
@@ -121,13 +121,15 @@ class VoiceWakeService : Service() {
         }
     }
 
-    private fun speakResult(text: String) {
+    private fun speakResult(text: String, whisper: Boolean) {
         val clean = text
             .replace(Regex("[*_#`>]+"), " ")
             .replace(Regex("https?://\\S+"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
-        if (clean.isNotBlank()) Speaker.speak(clean.take(500))
+        if (clean.isNotBlank()) {
+            if (whisper) Speaker.speakWhisper(clean.take(500)) else Speaker.speak(clean.take(500))
+        }
     }
 
     // ── Phone-call mic etiquette ──
