@@ -44,6 +44,7 @@ class ClawApplication : BaseApp() {
         KVUtils.init(this)
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
+        runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
         runCatching {
             if (com.blackclaw.android.proactive.ProactiveConfig.enabled ||
                 com.blackclaw.android.assistant.GeofenceChecker.hasActiveGeofences()) {

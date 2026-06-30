@@ -444,7 +444,10 @@ class LlmConfigActivity : BaseActivity() {
                 return
             }
 
-            selectedProvider.models.forEach { model ->
+            val modelList = if (selectedProvider == CloudProvider.OPENCODE_ZEN)
+                com.blackclaw.android.agent.OpenCodeZenModels.models()
+            else selectedProvider.models
+            modelList.forEach { model ->
                 val isSelected = model.id == selectedModelId
                 val card = CardView(this).apply {
                     layoutParams = LinearLayout.LayoutParams(
@@ -533,6 +536,13 @@ class LlmConfigActivity : BaseActivity() {
             val savedKey = KVUtils.getApiKeyForProvider(provider.name)
             if (provider == CloudProvider.OPENCODE_ZEN) {
                 etApiKey.setText(savedKey.ifBlank { "public" })
+                // Refresh + re-verify the free model list in the background, then
+                // re-render so newly free / no-longer-free models reflect reality.
+                com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale { _ ->
+                    runOnUiThread {
+                        if (selectedProvider == CloudProvider.OPENCODE_ZEN) renderModels()
+                    }
+                }
             } else {
                 etApiKey.setText(savedKey)
             }
