@@ -31,12 +31,14 @@ class VoskWakeWordEngine {
         private const val SAMPLE_RATE = 16000.0f
         // Accept these as the wake token (all real words Vosk knows).
         private val WAKE_TOKENS = setOf("garra", "guerra", "gara")  // tolerate close hits
+        private const val AWAIT_TIMEOUT_MS = 12_000L  // reset stuck "awaiting command"
     }
 
-    private var model: Model? = null
-    private var speech: SpeechService? = null
+    @Volatile private var model: Model? = null
+    @Volatile private var speech: SpeechService? = null
     @Volatile private var active = false
     @Volatile private var awaitingCommand = false
+    @Volatile private var awaitingSince = 0L          // for a stuck-await timeout
     @Volatile private var ttsUntilMs = 0L          // ignore mic echo while TTS plays
     @Volatile private var lastAckWords: Set<String> = emptySet()
     private var onCommand: ((String) -> Unit)? = null
@@ -44,6 +46,7 @@ class VoskWakeWordEngine {
 
     fun isRunning(): Boolean = active
 
+    @Synchronized
     fun start(onCommand: (String) -> Unit): Boolean {
         if (active) return true
         if (!VoskModelManager.isReady()) return false
@@ -64,6 +67,7 @@ class VoskWakeWordEngine {
         }
     }
 
+    @Synchronized
     fun stop() {
         active = false
         awaitingCommand = false
@@ -97,10 +101,18 @@ class VoskWakeWordEngine {
         }
 
         if (awaitingCommand) {
-            awaitingCommand = false
-            XLog.i(TAG, "Command (2nd phrase): '$text'")
-            fire(text)
-            return
+            // If we've been waiting too long for the command after the wake word,
+            // reset so an unrelated later phrase isn't misrouted as a command.
+            if (System.currentTimeMillis() - awaitingSince > AWAIT_TIMEOUT_MS) {
+                awaitingCommand = false
+                XLog.d(TAG, "Awaiting-command timed out, ignoring stale phrase")
+                // fall through to normal wake-word matching below
+            } else {
+                awaitingCommand = false
+                XLog.i(TAG, "Command (2nd phrase): '$text'")
+                fire(text)
+                return
+            }
         }
 
         val tokens = text.split(" ").filter { it.isNotBlank() }
@@ -119,6 +131,7 @@ class VoskWakeWordEngine {
         } else {
             XLog.i(TAG, "Wake only → awaiting command")
             awaitingCommand = true
+            awaitingSince = System.currentTimeMillis()
             // Speak a varied JARVIS ack and mute mic-echo for its duration.
             val ack = JarvisVoice.wakeAck()
             lastAckWords = ack.lowercase().replace(Regex("[^a-záéíóúñ ]"), "")

@@ -112,6 +112,7 @@ object RemoteMonitorManager {
     )
 
     private val monitors = ConcurrentHashMap<String, Monitor>()
+    private val idCounter = java.util.concurrent.atomic.AtomicInteger(0)
     private val scheduler: ScheduledExecutorService =
         Executors.newScheduledThreadPool(2) { r ->
             Thread(r, "RemoteMonitor").apply { isDaemon = true }
@@ -123,7 +124,7 @@ object RemoteMonitorManager {
         conn: RemoteConnectionStore.Connection,
         command: String, match: String, intervalSec: Int, label: String,
     ): String {
-        val id = "mon" + (System.currentTimeMillis() % 100000)
+        val id = "mon" + idCounter.incrementAndGet()
         val regex = runCatching { Regex(match, RegexOption.IGNORE_CASE) }.getOrNull()
         val future = scheduler.scheduleWithFixedDelay({
             poll(id, conn, command, regex, match, label)

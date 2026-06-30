@@ -263,21 +263,33 @@ class LocalTerminalTool : BaseTool() {
         }
 
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val process = ProcessBuilder("sh", "-c", command)
+                .redirectErrorStream(true)  // merge stderr→stdout, single pipe
+                .start()
+            // Drain the output CONCURRENTLY with waiting, so commands that emit
+            // more than the OS pipe buffer (~64KB) don't deadlock.
+            val outBuffer = StringBuilder()
+            val reader = Thread {
+                runCatching {
+                    process.inputStream.bufferedReader().use { br ->
+                        val buf = CharArray(4096)
+                        var n = br.read(buf)
+                        while (n >= 0) {
+                            if (outBuffer.length < 16000) outBuffer.append(buf, 0, n)
+                            n = br.read(buf)
+                        }
+                    }
+                }
+            }.apply { isDaemon = true; start() }
+
             val completed = process.waitFor(timeout, TimeUnit.SECONDS)
             if (!completed) {
                 process.destroyForcibly()
+                reader.join(500)
                 return ToolResult.error("Timeout después de ${timeout}s.")
             }
-            val stdout = process.inputStream.bufferedReader().readText()
-            val stderr = process.errorStream.bufferedReader().readText()
-            val output = buildString {
-                if (stdout.isNotBlank()) append(stdout)
-                if (stderr.isNotBlank()) {
-                    if (isNotBlank()) append("\n[stderr] ")
-                    append(stderr)
-                }
-            }
+            reader.join(1000)
+            val output = outBuffer.toString()
             val exitCode = process.exitValue()
             val result = if (output.length > 8000) output.take(8000) + "\n…[truncado]" else output
             if (exitCode == 0) {
@@ -315,32 +327,34 @@ object SshExecutor {
 
             channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
             channel.setCommand(command)
-            channel.setErrStream(null)
             val input = channel.inputStream
             val errStream = java.io.ByteArrayOutputStream()
             channel.setErrStream(errStream)
             channel.connect()
 
-            val output = StringBuilder()
+            // Accumulate raw bytes, then decode once as UTF-8 at the end — decoding
+            // each chunk separately corrupts multibyte chars split across reads.
+            val outBytes = java.io.ByteArrayOutputStream()
             val buffer = ByteArray(4096)
             val deadline = System.currentTimeMillis() + timeoutSec * 1000L
             while (true) {
                 while (input.available() > 0) {
                     val read = input.read(buffer, 0, buffer.size)
                     if (read < 0) break
-                    output.append(String(buffer, 0, read))
-                    if (output.length > 8000) break
+                    outBytes.write(buffer, 0, read)
+                    if (outBytes.size() > 16000) break
                 }
                 if (channel.isClosed) {
                     if (input.available() > 0) continue
                     break
                 }
                 if (System.currentTimeMillis() > deadline) {
-                    output.append("\n…[timeout]")
+                    outBytes.write("\n…[timeout]".toByteArray())
                     break
                 }
                 Thread.sleep(100)
             }
+            val output = StringBuilder(outBytes.toString("UTF-8"))
 
             val errText = errStream.toString()
             val exitCode = channel.exitStatus

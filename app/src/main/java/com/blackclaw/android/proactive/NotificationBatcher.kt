@@ -52,11 +52,10 @@ object NotificationBatcher {
         val now = System.currentTimeMillis()
         val notification = PendingNotification(pkg, title, text, now)
 
-        // Append to the pending list for this package.
-        pending.getOrPut(pkg) { mutableListOf() }.let { list ->
-            synchronized(list) {
-                list.add(notification)
-            }
+        // Single lock guards the map+list as one unit, so a notification can't be
+        // appended to a list that flush() just removed (which would strand it).
+        synchronized(pending) {
+            pending.getOrPut(pkg) { mutableListOf() }.add(notification)
         }
 
         // Reset (or start) the flush timer for this package.
@@ -73,11 +72,11 @@ object NotificationBatcher {
      */
     private fun flush(pkg: String) {
         val batch: List<PendingNotification>
-        val list = pending.remove(pkg) ?: return
-        synchronized(list) {
+        synchronized(pending) {
+            val list = pending.remove(pkg) ?: return
             batch = list.toList()
+            timers.remove(pkg)
         }
-        timers.remove(pkg)
 
         if (batch.isEmpty()) return
 

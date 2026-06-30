@@ -93,7 +93,7 @@ object VoiceInputManager {
             }
         })
         runCatching { sr.startListening(buildIntent()) }
-            .onFailure { onError("No pude iniciar el micrófono: ${it.message}") }
+            .onFailure { sr.destroy(); recognizer = null; onError("No pude iniciar el micrófono: ${it.message}") }
     }
 
     /**
@@ -123,7 +123,8 @@ object VoiceInputManager {
     fun stopWakeLoop() {
         wakeLoopActive = false
         runCatching { voskEngine.stop() }
-        cleanup()
+        // SpeechRecognizer must be touched on the main thread.
+        main.post { cleanup() }
         BeepSuppressor.restore()
         XLog.i(TAG, "Wake loop stopped")
     }

@@ -182,10 +182,12 @@ object SmartHomeRegistry {
     }
 
     fun executeDevice(device: SmartDevice, action: String, value: String): String {
+        // JSON-escape interpolated values so quotes/specials can't break the body.
+        fun esc(s: String) = JSONObject.quote(s).let { it.substring(1, it.length - 1) }
         var body = device.bodyTemplate.ifBlank {
-            """{"action":"$action"${if (value.isNotBlank()) ",\"value\":\"$value\"" else ""}}"""
+            """{"action":"${esc(action)}"${if (value.isNotBlank()) ",\"value\":\"${esc(value)}\"" else ""}}"""
         }
-        body = body.replace("{action}", action).replace("{value}", value)
+        body = body.replace("{action}", esc(action)).replace("{value}", esc(value))
 
         val reqBuilder = Request.Builder().url(device.webhookUrl)
         if (device.headers.isNotBlank()) {
@@ -200,16 +202,16 @@ object SmartHomeRegistry {
             else -> reqBuilder.post(body.toRequestBody("application/json".toMediaType())).build()
         }
 
-        val response = client.newCall(request).execute()
-        val code = response.code
-        val responseBody = response.body?.string()?.take(200) ?: ""
-        response.close()
-
-        if (code in 200..299) {
-            XLog.i(TAG, "Smart home OK: ${device.name} → $action ($code)")
-            return "OK ($code)"
-        } else {
-            throw RuntimeException("HTTP $code: $responseBody")
+        // .use{} guarantees the response/connection is closed even if .string() throws.
+        client.newCall(request).execute().use { response ->
+            val code = response.code
+            val responseBody = response.body?.string()?.take(200) ?: ""
+            if (code in 200..299) {
+                XLog.i(TAG, "Smart home OK: ${device.name} → $action ($code)")
+                return "OK ($code)"
+            } else {
+                throw RuntimeException("HTTP $code: $responseBody")
+            }
         }
     }
 }

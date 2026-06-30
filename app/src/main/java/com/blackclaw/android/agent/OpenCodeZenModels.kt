@@ -99,13 +99,21 @@ object OpenCodeZenModels {
         }
     }
 
-    /** Fetch the catalog, pick candidates, probe each, return the verified ids. */
+    /** Fetch the catalog, pick candidates, probe each (in parallel), return verified ids. */
     private fun fetchAndVerify(): List<String> {
         val candidates = fetchCandidates()
         if (candidates.isEmpty()) return emptyList()
-        val verified = candidates.filter { probeIsFree(it) }
-        // If verification somehow rejects everything (network blip), fall back
-        // to the intersection with the seed so we never end up empty.
+        // Probe concurrently so a refresh takes ~one timeout, not N×timeout.
+        val pool = Executors.newFixedThreadPool(candidates.size.coerceAtMost(6))
+        val verified = try {
+            candidates.map { id -> pool.submit<Pair<String, Boolean>> { id to probeIsFree(id) } }
+                .mapNotNull { runCatching { it.get(25, TimeUnit.SECONDS) }.getOrNull() }
+                .filter { it.second }
+                .map { it.first }
+        } finally {
+            pool.shutdownNow()
+        }
+        // If verification rejected everything (network blip), keep the seed subset.
         return verified.ifEmpty { candidates.filter { it in SEED } }
     }
 

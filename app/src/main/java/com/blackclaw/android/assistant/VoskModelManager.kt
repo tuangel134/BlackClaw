@@ -26,11 +26,11 @@ object VoskModelManager {
     private const val KEY_READY = "vosk_model_ready"
 
     private val worker = Executors.newSingleThreadExecutor()
+    private val preparingFlag = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    @Volatile var preparing = false
-        private set
+    val preparing: Boolean get() = preparingFlag.get()
     // Kept for API compatibility with the voice tool wording.
-    val downloading: Boolean get() = preparing
+    val downloading: Boolean get() = preparingFlag.get()
 
     /** Root dir that contains the unpacked model (the dir holding conf/, am/, …). */
     fun modelPath(): String {
@@ -55,15 +55,15 @@ object VoskModelManager {
      * (Method name kept as `download` so existing callers/tools don't change.)
      */
     fun download(onProgress: (Int) -> Unit = {}, onDone: (Boolean) -> Unit = {}) {
-        if (preparing) return
         if (isReady()) { onDone(true); return }
-        preparing = true
+        // Atomic check-and-set so two callers can't both start extraction.
+        if (!preparingFlag.compareAndSet(false, true)) return
         worker.submit {
             val ok = runCatching { extractFromAssets(onProgress) }.getOrElse {
                 XLog.w(TAG, "Model extract failed: ${it.message}"); false
             }
             if (ok) { KVUtils.putBoolean(KEY_READY, true); KVUtils.sync() }
-            preparing = false
+            preparingFlag.set(false)
             onDone(ok)
         }
     }

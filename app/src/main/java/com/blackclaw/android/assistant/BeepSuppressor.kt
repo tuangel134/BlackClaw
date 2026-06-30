@@ -30,7 +30,6 @@ object BeepSuppressor {
         AudioManager.STREAM_NOTIFICATION,
     )
 
-    private val saved = HashMap<Int, Int>()
     @Volatile private var muted = false
 
     private fun am(): AudioManager? =
@@ -40,27 +39,30 @@ object BeepSuppressor {
     fun mute() {
         if (muted) return
         val audio = am() ?: return
-        runCatching {
-            saved.clear()
-            for (s in STREAMS) {
-                saved[s] = audio.getStreamVolume(s)
+        // Mark muted BEFORE touching streams so a partial failure still lets
+        // restore() run and unmute whatever did get muted.
+        muted = true
+        for (s in STREAMS) {
+            runCatching {
                 @Suppress("DEPRECATION")
                 audio.setStreamMute(s, true)
-            }
-            muted = true
-        }.onFailure { XLog.d(TAG, "mute failed: ${it.message}") }
+            }.onFailure { XLog.d(TAG, "mute $s failed: ${it.message}") }
+        }
     }
 
     @Synchronized
     fun restore() {
-        if (!muted) return
-        val audio = am() ?: return
-        runCatching {
+        val audio = am()
+        // Always attempt to unmute every stream, regardless of the flag, so we
+        // never leave the device muted (idempotent — setStreamMute(false) is safe).
+        if (audio != null) {
             for (s in STREAMS) {
-                @Suppress("DEPRECATION")
-                audio.setStreamMute(s, false)
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    audio.setStreamMute(s, false)
+                }.onFailure { XLog.d(TAG, "restore $s failed: ${it.message}") }
             }
-            muted = false
-        }.onFailure { XLog.d(TAG, "restore failed: ${it.message}") }
+        }
+        muted = false
     }
 }
