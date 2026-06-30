@@ -31,7 +31,25 @@ class VoskWakeWordEngine {
         private const val SAMPLE_RATE = 16000.0f
         // Accept these as the wake token (all real words Vosk knows).
         private val WAKE_TOKENS = setOf("garra", "guerra", "gara")  // tolerate close hits
-        private const val ACK = "Dígame, jefe."
+
+        /** Varied JARVIS-style acknowledgements — picked at random each time. */
+        private val ACKS = listOf(
+            "Dígame, jefe.",
+            "¿Qué necesita, jefe?",
+            "A sus órdenes.",
+            "Aquí estoy, jefe.",
+            "Siempre activo para usted.",
+            "¿En qué le ayudo?",
+            "Lo escucho.",
+            "Usted dirá, jefe.",
+            "A su disposición.",
+            "¿Qué tiene en mente?",
+            "Listo cuando usted quiera.",
+            "Cómo no, jefe.",
+            "Por supuesto, dígame.",
+            "Para eso estoy.",
+        )
+        private fun randomAck(): String = ACKS.random()
     }
 
     private var model: Model? = null
@@ -39,6 +57,7 @@ class VoskWakeWordEngine {
     @Volatile private var active = false
     @Volatile private var awaitingCommand = false
     @Volatile private var ttsUntilMs = 0L          // ignore mic echo while TTS plays
+    @Volatile private var lastAckWords: Set<String> = emptySet()
     private var onCommand: ((String) -> Unit)? = null
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -87,9 +106,14 @@ class VoskWakeWordEngine {
         if (!active) return
         val text = textRaw.trim().lowercase()
         if (text.isBlank()) return
-        // Ignore the mic picking up our own "Dígame, jefe" TTS.
+        // Ignore the mic picking up our own spoken acknowledgement.
         if (System.currentTimeMillis() < ttsUntilMs) return
         if (text.contains("digame") || text.contains("dígame")) return
+        // If the phrase is mostly words from the ack we just spoke, it's an echo.
+        if (lastAckWords.isNotEmpty()) {
+            val words = text.split(" ").filter { it.length > 2 }.toSet()
+            if (words.isNotEmpty() && words.all { it in lastAckWords }) return
+        }
 
         if (awaitingCommand) {
             awaitingCommand = false
@@ -114,9 +138,12 @@ class VoskWakeWordEngine {
         } else {
             XLog.i(TAG, "Wake only → awaiting command")
             awaitingCommand = true
-            // Speak the ack and mute mic-echo for its duration.
-            ttsUntilMs = System.currentTimeMillis() + 1800
-            Speaker.speak(ACK)
+            // Speak a varied ack and mute mic-echo for its duration.
+            val ack = randomAck()
+            lastAckWords = ack.lowercase().replace(Regex("[^a-záéíóúñ ]"), "")
+                .split(" ").filter { it.length > 2 }.toSet()
+            ttsUntilMs = System.currentTimeMillis() + 2500
+            Speaker.speak(ack)
         }
     }
 

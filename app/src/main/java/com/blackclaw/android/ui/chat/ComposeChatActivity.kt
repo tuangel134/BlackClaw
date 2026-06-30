@@ -285,7 +285,10 @@ class ComposeChatActivity : ComponentActivity() {
         com.blackclaw.android.assistant.VoiceInputManager.startWakeLoop(
             onCommand = { command ->
                 runOnUiThread {
-                    com.blackclaw.android.assistant.Speaker.speak("Enseguida.")
+                    com.blackclaw.android.assistant.Speaker.speak(
+                        listOf("Enseguida.", "Marchando, jefe.", "Ahora mismo.",
+                               "Voy a ello.", "Hecho, jefe.", "Por supuesto.",
+                               "En seguida me encargo.").random())
                     if (com.blackclaw.android.agent.DefaultAgentService.isTaskLike(command)) {
                         taskFlowController.sendTask(command)
                     } else {
