@@ -58,8 +58,10 @@ object VoiceInputManager {
     private fun buildIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        // Partial results let us catch the wake word mid-utterance (faster, and
+        // recovers cases where the full result is truncated).
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         // Prefer on-device recognition when the OEM supports it (privacy + offline).
         putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
     }
@@ -114,11 +116,29 @@ object VoiceInputManager {
         if (!wakeLoopActive) return
         val sr = SpeechRecognizer.createSpeechRecognizer(ClawApplication.instance)
         recognizer = sr
+        var fired = false
         sr.setRecognitionListener(object : SimpleRecognition() {
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (fired) return
+                val candidates = partialResults
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+                // Check every alternative the recognizer offers — improves hit rate.
+                for (c in candidates) {
+                    val m = WakeWordMatcher.match(c, wakeWord)
+                    if (m != null && m.command.isNotEmpty()) {
+                        fired = true
+                        XLog.i(TAG, "Wake (partial) '${m.matchedVariant}' → '${m.command}'")
+                        main.post { onCommand(m.command) }
+                        restartWakeAfterDelay(onCommand)
+                        return
+                    }
+                }
+            }
             override fun onResults(results: Bundle) {
-                val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.trim().orEmpty().lowercase()
-                handleWakeResult(text, onCommand)
+                if (fired) { restartWakeAfterDelay(onCommand); return }
+                val candidates = results
+                    .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                handleWakeResult(candidates, onCommand)
             }
             override fun onError(error: Int) {
                 // Common during silence — just restart the loop after a short delay.
@@ -129,19 +149,17 @@ object VoiceInputManager {
             .onFailure { restartWakeAfterDelay(onCommand) }
     }
 
-    private fun handleWakeResult(text: String, onCommand: (String) -> Unit) {
-        val ww = wakeWord
-        val idx = text.indexOf(ww)
-        if (idx >= 0) {
-            val command = text.substring(idx + ww.length).trim()
-                .removePrefix(",").trim()
-            XLog.i(TAG, "Wake word detected, command='$command'")
-            if (command.isNotEmpty()) {
-                main.post { onCommand(command) }
+    private fun handleWakeResult(candidates: List<String>, onCommand: (String) -> Unit) {
+        for (text in candidates) {
+            val m = WakeWordMatcher.match(text, wakeWord) ?: continue
+            XLog.i(TAG, "Wake word '${m.matchedVariant}' detected, command='${m.command}'")
+            if (m.command.isNotEmpty()) {
+                main.post { onCommand(m.command) }
             } else {
                 // Just the wake word — acknowledge and listen for the command next.
                 Speaker.speak("Dígame, jefe.")
             }
+            break
         }
         restartWakeAfterDelay(onCommand)
     }
@@ -149,7 +167,9 @@ object VoiceInputManager {
     private fun restartWakeAfterDelay(onCommand: (String) -> Unit) {
         cleanup()
         if (!wakeLoopActive) return
-        main.postDelayed({ listenForWake(onCommand) }, 800)
+        // Short gap — partial results already catch the wake word fast, so we
+        // just need a brief pause to recycle the recognizer cleanly.
+        main.postDelayed({ listenForWake(onCommand) }, 300)
     }
 
     private fun cleanup() {
