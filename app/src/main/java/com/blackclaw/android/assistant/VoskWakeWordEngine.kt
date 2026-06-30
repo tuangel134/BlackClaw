@@ -8,54 +8,53 @@ import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
 
 /**
- * Offline wake-word engine backed by Vosk.
+ * Offline wake-word + command engine backed by Vosk.
  *
- * Why this over the SpeechRecognizer loop:
- *  - 100% on-device, no system "beep" on each cycle, no API key.
- *  - Truly continuous listening (no gaps), low-ish CPU with a restricted grammar.
+ * Design: a SINGLE free-form recognizer runs continuously (no phase switching,
+ * no recognizer restarts mid-utterance — that was dropping commands). On each
+ * recognized phrase we look for the wake word "garra" (BlackClaw = "garra
+ * negra"):
  *
- * How it works:
- *  - Phase 1 (wake): a Recognizer with a small GRAMMAR limited to the wake
- *    phrase variants + "[unk]". Vosk only needs to decide "did they say the
- *    wake word or not", which is cheap and accurate. Wake phrase is "garra" /
- *    "garra negra" — real Spanish words Vosk knows (BlackClaw = "garra negra").
- *  - Phase 2 (command): once woken, we swap to a FREE-FORM recognizer to
- *    capture the arbitrary command, then hand it to the callback and return to
- *    phase 1.
+ *  - "garra pon una alarma a las siete"  → wake + command in one breath → act.
+ *  - "garra"  → acknowledge ("Dígame, jefe") and treat the NEXT phrase as the
+ *    command.
  *
- * Requires [VoskModelManager.isReady]. Falls back gracefully (returns false from
- * [start]) so the caller can use the SpeechRecognizer path instead.
+ * Wake detection is token-exact (not fuzzy) because Vosk emits clean dictionary
+ * words, so we avoid false triggers on near-words like "gorra"/"barra".
+ *
+ * 100% offline, no key, no system beep. Requires [VoskModelManager.isReady].
  */
 class VoskWakeWordEngine {
 
     companion object {
         private const val TAG = "VoskWake"
         private const val SAMPLE_RATE = 16000.0f
-        // Wake variants must be words present in the Spanish model's vocabulary.
-        private const val WAKE_GRAMMAR = "[\"garra\", \"garra negra\", \"oye garra\", \"[unk]\"]"
-        private val WAKE_TOKENS = listOf("garra")
-        // How long to listen for the command after waking before giving up.
-        private const val COMMAND_WINDOW_MS = 6000L
+        // Accept these as the wake token (all real words Vosk knows).
+        private val WAKE_TOKENS = setOf("garra", "guerra", "gara")  // tolerate close hits
+        private const val ACK = "Dígame, jefe."
     }
 
     private var model: Model? = null
     private var speech: SpeechService? = null
     @Volatile private var active = false
-    @Volatile private var capturingCommand = false
+    @Volatile private var awaitingCommand = false
+    @Volatile private var ttsUntilMs = 0L          // ignore mic echo while TTS plays
     private var onCommand: ((String) -> Unit)? = null
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     fun isRunning(): Boolean = active
 
-    /** Returns true if it started; false if the model isn't ready / failed. */
     fun start(onCommand: (String) -> Unit): Boolean {
         if (active) return true
         if (!VoskModelManager.isReady()) return false
         this.onCommand = onCommand
         return try {
             model = Model(VoskModelManager.modelPath())
-            startWakePhase()
+            // Single free-form recognizer, kept running for the whole session.
+            speech = SpeechService(Recognizer(model, SAMPLE_RATE), SAMPLE_RATE)
+            speech?.startListening(listener)
             active = true
+            awaitingCommand = false
             XLog.i(TAG, "Vosk wake engine started")
             true
         } catch (e: Throwable) {
@@ -67,7 +66,7 @@ class VoskWakeWordEngine {
 
     fun stop() {
         active = false
-        capturingCommand = false
+        awaitingCommand = false
         runCatching { speech?.stop() }
         runCatching { speech?.shutdown() }
         speech = null
@@ -76,88 +75,58 @@ class VoskWakeWordEngine {
         XLog.i(TAG, "Vosk wake engine stopped")
     }
 
-    private fun startWakePhase() {
-        capturingCommand = false
-        val m = model ?: return
-        runCatching { speech?.stop() }
-        speech = SpeechService(Recognizer(m, SAMPLE_RATE, WAKE_GRAMMAR), SAMPLE_RATE)
-        speech?.startListening(wakeListener)
-    }
-
-    private fun startCommandPhase() {
-        capturingCommand = true
-        val m = model ?: return
-        runCatching { speech?.stop() }
-        // Free-form recognizer to capture an arbitrary command.
-        speech = SpeechService(Recognizer(m, SAMPLE_RATE), SAMPLE_RATE)
-        speech?.startListening(commandListener)
-        // Safety timeout: if no command is captured, return to wake phase.
-        main.postDelayed({
-            if (capturingCommand && active) {
-                XLog.d(TAG, "Command window timed out, back to wake")
-                startWakePhase()
-            }
-        }, COMMAND_WINDOW_MS)
-    }
-
-    private val wakeListener = object : RecognitionListener {
-        override fun onResult(hypothesis: String?) {
-            val text = extractText(hypothesis)
-            if (text.isNotBlank() && WAKE_TOKENS.any { text.contains(it) }) {
-                XLog.i(TAG, "Wake detected: '$text'")
-                if (active) {
-                    Speaker.speak("Dígame, jefe.")
-                    startCommandPhase()
-                }
-            }
-        }
-        override fun onPartialResult(hypothesis: String?) {
-            // React fast on the partial too.
-            val text = extractPartial(hypothesis)
-            if (text.isNotBlank() && WAKE_TOKENS.any { text.contains(it) } && !capturingCommand && active) {
-                XLog.i(TAG, "Wake (partial): '$text'")
-                Speaker.speak("Dígame, jefe.")
-                startCommandPhase()
-            }
-        }
-        override fun onFinalResult(hypothesis: String?) {}
-        override fun onError(e: Exception?) { XLog.d(TAG, "wake error: ${e?.message}") }
+    private val listener = object : RecognitionListener {
+        override fun onResult(hypothesis: String?) = handlePhrase(extractText(hypothesis))
+        override fun onFinalResult(hypothesis: String?) = handlePhrase(extractText(hypothesis))
+        override fun onPartialResult(hypothesis: String?) { /* wait for full phrase */ }
+        override fun onError(e: Exception?) { XLog.d(TAG, "error: ${e?.message}") }
         override fun onTimeout() {}
     }
 
-    private val commandListener = object : RecognitionListener {
-        override fun onResult(hypothesis: String?) {
-            val text = extractText(hypothesis)
-            if (text.isNotBlank()) {
-                XLog.i(TAG, "Command captured: '$text'")
-                capturingCommand = false
-                onCommand?.let { cb -> main.post { cb(text) } }
-                // Brief pause then resume wake listening.
-                main.postDelayed({ if (active) startWakePhase() }, 500)
-            }
+    private fun handlePhrase(textRaw: String) {
+        if (!active) return
+        val text = textRaw.trim().lowercase()
+        if (text.isBlank()) return
+        // Ignore the mic picking up our own "Dígame, jefe" TTS.
+        if (System.currentTimeMillis() < ttsUntilMs) return
+        if (text.contains("digame") || text.contains("dígame")) return
+
+        if (awaitingCommand) {
+            awaitingCommand = false
+            XLog.i(TAG, "Command (2nd phrase): '$text'")
+            fire(text)
+            return
         }
-        override fun onPartialResult(hypothesis: String?) {}
-        override fun onFinalResult(hypothesis: String?) {
-            // If onResult didn't fire with content, recover to wake phase.
-            if (capturingCommand && active) {
-                val text = extractText(hypothesis)
-                if (text.isNotBlank()) {
-                    capturingCommand = false
-                    onCommand?.let { cb -> main.post { cb(text) } }
-                }
-                main.postDelayed({ if (active) startWakePhase() }, 300)
-            }
+
+        val tokens = text.split(" ").filter { it.isNotBlank() }
+        // Find the LAST wake token, command = everything after it.
+        val wakeIdx = tokens.indexOfLast { it in WAKE_TOKENS }
+        if (wakeIdx < 0) return  // no wake word in this phrase
+
+        var rest = tokens.drop(wakeIdx + 1)
+        // Drop a leading "negra" (from "garra negra").
+        if (rest.firstOrNull() == "negra") rest = rest.drop(1)
+        val command = rest.joinToString(" ").trim()
+
+        if (command.isNotEmpty()) {
+            XLog.i(TAG, "Wake + command (1 breath): '$command'")
+            fire(command)
+        } else {
+            XLog.i(TAG, "Wake only → awaiting command")
+            awaitingCommand = true
+            // Speak the ack and mute mic-echo for its duration.
+            ttsUntilMs = System.currentTimeMillis() + 1800
+            Speaker.speak(ACK)
         }
-        override fun onError(e: Exception?) {
-            XLog.d(TAG, "command error: ${e?.message}")
-            if (active) startWakePhase()
-        }
-        override fun onTimeout() { if (active) startWakePhase() }
+    }
+
+    private fun fire(command: String) {
+        onCommand?.let { cb -> main.post { cb(command) } }
     }
 
     private fun extractText(hypothesis: String?): String =
-        runCatching { JSONObject(hypothesis ?: "{}").optString("text", "").trim() }.getOrDefault("")
-
-    private fun extractPartial(hypothesis: String?): String =
-        runCatching { JSONObject(hypothesis ?: "{}").optString("partial", "").trim() }.getOrDefault("")
+        runCatching {
+            val o = JSONObject(hypothesis ?: "{}")
+            o.optString("text", o.optString("partial", "")).trim()
+        }.getOrDefault("")
 }
