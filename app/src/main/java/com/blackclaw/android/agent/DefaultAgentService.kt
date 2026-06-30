@@ -745,8 +745,9 @@ class DefaultAgentService : AgentService {
                 if (screenTool != null) {
                     val screenResult = screenTool.execute(emptyMap())
                     if (screenResult.isSuccess && !screenResult.data.isNullOrBlank()) {
-                        XLog.i(TAG, "runAgentLoop: pre-warm screen attached (${screenResult.data!!.length} chars)")
-                        "$promptForModel\n\nCurrent screen:\n${screenResult.data}"
+                        val compactScreen = ContextCompactor.collapseRepetitiveLines(screenResult.data!!)
+                        XLog.i(TAG, "runAgentLoop: pre-warm screen attached (${screenResult.data!!.length}→${compactScreen.length} chars)")
+                        "$promptForModel\n\nCurrent screen:\n$compactScreen"
                     } else promptForModel
                 } else promptForModel
             } catch (e: Exception) { promptForModel }
@@ -1042,8 +1043,10 @@ class DefaultAgentService : AgentService {
                     GSON.toJson(result)
                 }
 
-                // Add tool result to messages
-                messages.add(ToolExecutionResultMessage.from(toolRequest, combinedResultData))
+                // Add tool result to messages (compacted to save tokens —
+                // minifies JSON envelope + collapses repetitive screen rows).
+                val compacted = ContextCompactor.compactToolResult(toolName, combinedResultData)
+                messages.add(ToolExecutionResultMessage.from(toolRequest, compacted))
                 XLog.d(TAG, "displayName:$displayName toolName:$toolName")
             }
 

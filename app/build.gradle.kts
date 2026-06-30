@@ -222,6 +222,8 @@ dependencies {
 
 
     testImplementation(libs.junit)
+    // Real org.json for unit tests (Android's is a stub that returns defaults).
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
