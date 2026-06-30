@@ -63,6 +63,7 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
     var modelReady by remember { mutableStateOf(VoskModelManager.isReady()) }
     var preparing by remember { mutableStateOf(VoskModelManager.preparing) }
     var progress by remember { mutableStateOf(0) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     // Poll preparation progress.
     LaunchedEffect(preparing) {
@@ -119,7 +120,13 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                     onCheckedChange = {
                         enabled = it
                         VoiceInputManager.wakeEnabled = it
-                        if (it) onEnable() else VoiceInputManager.stopWakeLoop()
+                        if (it) {
+                            onEnable()
+                            runCatching { com.blackclaw.android.service.VoiceWakeService.start(ctx) }
+                        } else {
+                            VoiceInputManager.stopWakeLoop()
+                            runCatching { com.blackclaw.android.service.VoiceWakeService.stop(ctx) }
+                        }
                     },
                     colors = SwitchDefaults.colors(checkedTrackColor = accent),
                 )

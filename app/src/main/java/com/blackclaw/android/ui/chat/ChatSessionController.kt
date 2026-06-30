@@ -54,6 +54,9 @@ class ChatSessionController(
 
     private var cloudClient: LlmClient? = null
     private var cloudModelName: String? = null
+    /** Optional hook fired when a chat reply (cloud or local) arrives — used to
+     *  speak the answer aloud after a voice command. */
+    var onChatReply: ((String) -> Unit)? = null
     private val cloudHistory = mutableListOf<dev.langchain4j.data.message.ChatMessage>()
     private var localUiGeneration: Long = 0
     private var suppressNextCloudSwitchMessage: Boolean = false
@@ -327,6 +330,7 @@ class ChatSessionController(
                         uiState.sessionTokens.value += inputTokens + outputTokens
                         uiState.sessionCost.value += ModelPricing.estimateCost(modelTag, inputTokens, outputTokens)
                         onPersistConversation()
+                        onChatReply?.invoke(responseText)
                     }
                 } else {
                     val currentConversation = conversation
@@ -344,6 +348,7 @@ class ChatSessionController(
                         uiState.isAwaitingReply.value = false
                         uiState.sessionTokens.value += inputTokensEst + outputTokensEst
                         onPersistConversation()
+                        onChatReply?.invoke(responseText)
                     }
                 }
             } catch (e: Exception) {

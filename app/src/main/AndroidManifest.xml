@@ -37,6 +37,7 @@
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!-- Device features -->
@@ -129,6 +130,10 @@
             android:exported="false"
             android:screenOrientation="portrait" />
         <activity
+            android:name=".ui.guide.FeaturesGuideActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
             android:name=".ui.assistant.AssistantActivity"
             android:exported="false"
             android:screenOrientation="portrait"
@@ -153,6 +158,11 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <service
+            android:name=".service.VoiceWakeService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Shizuku provider — required by Shizuku-API to hand the user's binder
              to BlackClaw. We do NOT enable Shizuku itself here, that's the user's

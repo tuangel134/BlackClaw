@@ -102,6 +102,7 @@ class SettingsActivity : BaseActivity() {
                 onOpenToolBrowser = { startActivity(Intent(this, ToolBrowserActivity::class.java)) },
                 onOpenAutoReplies = { startActivity(Intent(this, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
                 onOpenVoice = { startActivity(Intent(this, VoiceSettingsActivity::class.java)) },
+                onOpenGuide = { startActivity(Intent(this, com.blackclaw.android.ui.guide.FeaturesGuideActivity::class.java)) },
                 onOpenProactive = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
                 onOpenShizuku = { startActivity(Intent(this, com.blackclaw.android.ui.shizuku.ShizukuSetupActivity::class.java)) },
                 onOpenAdbPro = { startActivity(Intent(this, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
@@ -171,6 +172,7 @@ private fun ModernSettingsScreen(
     onOpenToolBrowser: () -> Unit,
     onOpenAutoReplies: () -> Unit,
     onOpenVoice: () -> Unit,
+    onOpenGuide: () -> Unit,
     onOpenProactive: () -> Unit,
     onOpenShizuku: () -> Unit,
     onOpenAdbPro: () -> Unit,
@@ -228,6 +230,19 @@ private fun ModernSettingsScreen(
             HeroCard(colors = colors, caps = caps)
 
             Spacer(Modifier.height(8.dp))
+
+            // ── Quick guide ────────────────────────────────────────────────────
+            SettingsSection(title = "Empezar", colors = colors) {
+                NavRow(
+                    icon = Icons.Outlined.Lightbulb,
+                    title = "¿Qué puede hacer BlackClaw?",
+                    subtitle = "Guía de funciones con ejemplos",
+                    trailing = "Ver",
+                    trailingHighlight = true,
+                    colors = colors,
+                    onClick = onOpenGuide,
+                )
+            }
 
             // ── Permisos ───────────────────────────────────────────────────────
             SettingsSection(title = "Permisos", colors = colors) {

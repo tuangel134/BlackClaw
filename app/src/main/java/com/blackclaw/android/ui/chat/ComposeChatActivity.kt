@@ -77,7 +77,7 @@ class ComposeChatActivity : ComponentActivity() {
             onPersistConversation = { saveChat() },
             onRefreshSidebarHistory = { refreshSidebarHistory() },
             isTaskRunning = { appViewModel.isTaskRunning() },
-        )
+        ).also { it.onChatReply = { /* spoken by VoiceWakeService when from voice */ } }
     }
 
     private val taskFlowController by lazy {
@@ -95,7 +95,9 @@ class ComposeChatActivity : ComponentActivity() {
             ),
             onPersistConversation = { saveChat() },
             onTaskSettled = { deferLocalChatBootstrapForAutoTask = false },
-            onTaskTerminal = { sendExternalAutomationTerminalCallback(it) },
+            onTaskTerminal = {
+                sendExternalAutomationTerminalCallback(it)
+            },
         )
     }
 
@@ -267,8 +269,8 @@ class ComposeChatActivity : ComponentActivity() {
 
     /**
      * Hands-free mode: if the user enabled the wake word and granted mic
-     * permission, listen continuously while the app is in the foreground.
-     * Detected commands ("Hey BlackClaw, ...") are routed as tasks.
+     * permission, run the always-listening foreground service (works in
+     * background and releases the mic during phone calls).
      */
     private fun maybeStartVoiceWakeLoop() {
         if (!com.blackclaw.android.assistant.VoiceInputManager.wakeEnabled) return
@@ -282,20 +284,7 @@ class ComposeChatActivity : ComponentActivity() {
             }
             return
         }
-        com.blackclaw.android.assistant.VoiceInputManager.startWakeLoop(
-            onCommand = { command ->
-                runOnUiThread {
-                    com.blackclaw.android.assistant.Speaker.speak(
-                        com.blackclaw.android.assistant.JarvisVoice.commandAck())
-                    if (com.blackclaw.android.agent.DefaultAgentService.isTaskLike(command)) {
-                        taskFlowController.sendTask(command)
-                    } else {
-                        sendChat(command)
-                    }
-                }
-            },
-            onError = { XLog.d(TAG, "Voice wake: $it") },
-        )
+        runCatching { com.blackclaw.android.service.VoiceWakeService.start(this) }
     }
 
     override fun onPause() {
@@ -304,7 +293,8 @@ class ComposeChatActivity : ComponentActivity() {
         permHandler.removeCallbacks(permPoller)
         activeTaskShellController.onPause()
         chatSessionController.onPause(conversationStore.currentConversationId)
-        runCatching { com.blackclaw.android.assistant.VoiceInputManager.stopWakeLoop() }
+        // Note: do NOT stop the voice wake service here — it intentionally keeps
+        // listening in the background (it's a foreground service).
     }
 
     override fun onDestroy() {

@@ -46,8 +46,9 @@ class VoiceModeTool : BaseTool() {
             }
             "on" -> {
                 VoiceInputManager.wakeEnabled = true
+                runCatching { com.blackclaw.android.service.VoiceWakeService.start(com.blackclaw.android.ClawApplication.instance) }
                 val backend = if (VoskModelManager.isReady())
-                    "offline (di 'garra' + tu orden, sin beep ni internet)"
+                    "offline (di 'garra' + tu orden, sin beep ni internet, funciona en segundo plano)"
                 else
                     "online (di '${VoiceInputManager.wakeWord}' + tu orden). Para el modo offline sin beep, usa download_offline."
                 ToolResult.success("🎤 Modo voz activado — $backend")
@@ -55,6 +56,7 @@ class VoiceModeTool : BaseTool() {
             "off" -> {
                 VoiceInputManager.wakeEnabled = false
                 VoiceInputManager.stopWakeLoop()
+                runCatching { com.blackclaw.android.service.VoiceWakeService.stop(com.blackclaw.android.ClawApplication.instance) }
                 ToolResult.success("🔇 Modo voz desactivado.")
             }
             else -> ToolResult.error("action: on | off | download_offline | status.")
