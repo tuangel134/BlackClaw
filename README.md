@@ -478,7 +478,7 @@ PR guidelines, and conventions.
 
 ## Changelog
 
-### Unreleased (dev)
+### v1.1.0
 
 - **Internal terminal (Termux-like):** BlackClaw now ships its own persistent
   shell session shared between the user (new Terminal screen) and the AI (the
