@@ -42,9 +42,25 @@ object ToolSelector {
 
     private val CATEGORIES: List<Category> = listOf(
         Category(
+            triggers = listOf("uber", "ubereats", "uber eats", "didi", "rappi", "lyft", "cabify",
+                "bolt", "free now", "indrive", "moovit", "doordash", "glovo", "deliveroo", "wolt",
+                "ifood", "pedidos ya", "dominos", "taxi", "viaje", "ride", "pide un", "pedir un",
+                "comida", "delivery", "domicilio", "pedir comida", "spotify", "musica", "música",
+                "reproduce", "pon ", "netflix", "disney", "hbo", "max", "prime video", "twitch",
+                "tiktok", "crunchyroll", "facebook", "messenger", "twitter", "snapchat", "reddit",
+                "discord", "pinterest", "linkedin", "mercado libre", "aliexpress", "ebay", "shein",
+                "temu", "walmart", "amazon", "booking", "airbnb", "expedia", "skyscanner", "vuelos",
+                "paypal", "mercado pago", "cash app", "gmail", "correo", "traduce", "traductor",
+                "chrome", "yelp", "tripadvisor", "tinder", "bumble", "duolingo", "waze", "navega",
+                "llévame", "llevame", "como llego", "cómo llego", "maps", "mapa", "hotel", "vuelo"),
+            tools = listOf("open_app_action", "open_app", "open_url", "get_installed_apps", "tap_ocr",
+                "discover_app_actions"),
+        ),
+        Category(
             triggers = listOf("mensaje", "whatsapp", "telegram", "responde", "contesta",
                 "message", "reply", "send", "envia", "manda", "escribe a", "auto"),
-            tools = listOf("send_message", "auto_reply", "find_contact", "get_notifications"),
+            tools = listOf("send_message", "auto_reply", "find_contact", "get_notifications",
+                "reply_notification"),
         ),
         Category(
             triggers = listOf("sms", "texto", "mensaje de texto", "llama", "llamada",
@@ -56,13 +72,16 @@ object ToolSelector {
             tools = listOf("find_contact"),
         ),
         Category(
-            triggers = listOf("calendario", "evento", "cita", "calendar", "event", "reunion", "reunión"),
-            tools = listOf("assistant_event", "assistant_list", "get_calendar_events", "create_calendar_event"),
+            triggers = listOf("calendario", "evento", "cita", "calendar", "event", "reunion", "reunión",
+                "junta", "appointment", "meeting", "agenda"),
+            tools = listOf("assistant_appointment", "assistant_event", "assistant_list",
+                "assistant_agenda", "get_calendar_events", "create_calendar_event"),
         ),
         Category(
             triggers = listOf("alarma", "alarm", "recordatorio", "reminder", "despierta", "timer", "temporizador",
                 "avisame", "avísame", "recuerdame", "recuérdame"),
-            tools = listOf("assistant_alarm", "assistant_reminder", "assistant_list", "assistant_remove",
+            tools = listOf("assistant_alarm", "assistant_reminder", "assistant_appointment",
+                "assistant_list", "assistant_remove", "undo_last",
                 "set_alarm", "schedule_task"),
         ),
         Category(
@@ -81,8 +100,8 @@ object ToolSelector {
         ),
         Category(
             triggers = listOf("musica", "música", "reproduce", "play", "pausa", "media", "cancion",
-                "canción", "spotify", "siguiente", "anterior"),
-            tools = listOf("media_control"),
+                "canción", "spotify", "siguiente", "anterior", "pon ", "youtube music", "reproductor"),
+            tools = listOf("play_music", "media_control", "open_app_action", "set_music_player"),
         ),
         Category(
             triggers = listOf("habla", "di ", "lee en voz", "speak", "voz", "pronuncia", "tts"),
@@ -203,8 +222,11 @@ object ToolSelector {
         ),
         Category(
             triggers = listOf("aprende", "recuerda que", "mi nombre", "vivo en", "trabajo",
-                "me gusta", "prefiero", "suelo", "siempre", "perfil", "conóceme"),
-            tools = listOf("learn_user", "remember_fact", "recall_facts"),
+                "me gusta", "prefiero", "suelo", "siempre", "perfil", "conóceme",
+                "guarda lo que hiciste", "guarda lo último", "guarda lo ultimo", "repite esto",
+                "aprende esto", "mira cómo", "graba esto"),
+            tools = listOf("learn_user", "remember_fact", "recall_facts",
+                "save_last_as_routine", "start_demo", "save_demo"),
         ),
         Category(
             triggers = listOf("smart home", "casa", "hogar", "luz", "luces", "light",
@@ -272,7 +294,7 @@ object ToolSelector {
         Category(
             triggers = listOf("salir", "salgo", "cita", "reunion", "reunión", "llegar a tiempo",
                 "avisame para salir", "trafico", "tráfico", "leave", "appointment"),
-            tools = listOf("assistant_leave_reminder", "assistant_event", "assistant_reminder"),
+            tools = listOf("assistant_leave_reminder", "assistant_appointment", "assistant_event", "assistant_reminder"),
         ),
     )
 

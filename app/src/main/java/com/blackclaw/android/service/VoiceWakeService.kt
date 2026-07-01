@@ -42,6 +42,8 @@ class VoiceWakeService : Service() {
         private const val TAG = "VoiceWakeService"
         private const val CHANNEL_ID = "voice_wake"
         private const val NOTIF_ID = 73010
+        /** Resume the wake loop after the assist panel closes. */
+        const val ACTION_RESUME_WAKE = "com.blackclaw.android.RESUME_WAKE"
 
         fun start(ctx: Context) {
             val i = Intent(ctx, VoiceWakeService::class.java)
@@ -75,6 +77,11 @@ class VoiceWakeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Resume the wake loop after the assist panel handed the mic back.
+        if (intent?.action == ACTION_RESUME_WAKE) {
+            runningTask = false
+            runCatching { startListening() }
+        }
         // Sticky so the OS restarts it if killed while voice mode is on.
         return START_STICKY
     }
@@ -146,8 +153,27 @@ class VoiceWakeService : Service() {
         }
 
         say(if (whisper) JarvisVoice.wakeAck() else JarvisVoice.commandAck(), whisper)
+        // Visual panel: open the full-screen assist UI and let it run the command
+        // (and continue the conversation). Hands the mic to the panel. Falls back
+        // to the background flow if the panel can't be launched.
+        if (VoiceInputManager.panelOnWake && !whisper && launchAssistPanel(command)) {
+            runCatching { VoiceInputManager.stopWakeLoop() }
+            runningTask = false
+            updateNotif("idle")
+            return
+        }
         runCommand(command, whisper)
     }
+
+    /** Launch the full-screen assist panel pre-loaded with [command]. */
+    private fun launchAssistPanel(command: String): Boolean = runCatching {
+        val i = Intent(this, com.blackclaw.android.ui.assist.QuickAssistActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(com.blackclaw.android.ui.assist.QuickAssistActivity.EXTRA_COMMAND, command)
+        }
+        startActivity(i)
+        true
+    }.getOrElse { XLog.w(TAG, "launchAssistPanel failed: ${it.message}"); false }
 
     private fun runCommand(command: String, whisper: Boolean) {
         runningTask = true

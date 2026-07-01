@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -117,6 +118,12 @@ private fun AssistantScreen(
                             Text("Presupuesto", color = colors.accent, fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold)
                         }
+                    }
+                    IconButton(onClick = {
+                        ctx.startActivity(android.content.Intent(
+                            ctx, com.blackclaw.android.ui.assistant.CalendarActivity::class.java))
+                    }) {
+                        Icon(Icons.Default.CalendarMonth, "Calendario", tint = colors.textPrimary)
                     }
                     Surface(
                         color = colors.accent.copy(alpha = 0.14f),

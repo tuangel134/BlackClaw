@@ -23,7 +23,26 @@ class ScreenCapturePermissionActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ScreenCapturePerm"
 
+        // Anti-spam guard: avoid stacking consent dialogs when the agent calls
+        // OCR/screenshot tools repeatedly. Only one request in flight, and a
+        // cooldown after the user declines so we don't nag.
+        @Volatile private var requesting = false
+        @Volatile private var lastDeclineMs = 0L
+        private const val DECLINE_COOLDOWN_MS = 60_000L
+
+        /** True if a consent dialog is currently showing or recently declined. */
+        fun isBusyOrCoolingDown(): Boolean =
+            requesting || (System.currentTimeMillis() - lastDeclineMs < DECLINE_COOLDOWN_MS)
+
         fun start(context: Context) {
+            // Don't fire another dialog if one is pending or the user just said no,
+            // or if capture is already running.
+            if (requesting || ScreenCaptureService.isRunning()) return
+            if (System.currentTimeMillis() - lastDeclineMs < DECLINE_COOLDOWN_MS) {
+                XLog.i(TAG, "Skipping consent — recently declined")
+                return
+            }
+            requesting = true
             val i = Intent(context, ScreenCapturePermissionActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
@@ -34,6 +53,7 @@ class ScreenCapturePermissionActivity : AppCompatActivity() {
     private val launcher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        requesting = false
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             val svc = Intent(this, ScreenCaptureService::class.java).apply {
                 putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
@@ -47,9 +67,15 @@ class ScreenCapturePermissionActivity : AppCompatActivity() {
             Toast.makeText(this, "Captura de pantalla activada", Toast.LENGTH_SHORT).show()
         } else {
             XLog.i(TAG, "User declined MediaProjection consent")
+            lastDeclineMs = System.currentTimeMillis()
             Toast.makeText(this, "Captura de pantalla rechazada", Toast.LENGTH_SHORT).show()
         }
         finish()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        requesting = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

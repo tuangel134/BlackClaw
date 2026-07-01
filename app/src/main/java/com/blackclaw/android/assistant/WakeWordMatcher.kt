@@ -28,6 +28,12 @@ object WakeWordMatcher {
         "blackcla", "blakla", "garra", "garra negra",
     )
 
+    /** Common mishearings for the "garra" wake word (es-ES recognizer). */
+    private val GARRA_VARIANTS = listOf(
+        "garra", "gara", "garrá", "agarra", "agara", "garda", "garras",
+        "gará", "gadra", "graga", "garro", "carra", "garrar",
+    )
+
     /** Max Levenshtein distance for a fuzzy token match (scales with length).
      *  Kept tight for short words to avoid false triggers on common Spanish
      *  words (e.g. "blanco" must NOT match "blaclo"). Known mishearings are
@@ -57,7 +63,11 @@ object WakeWordMatcher {
             // naive split near the middle to add a spaced variant
             base.add(w)
         }
-        return if (w == "blackclaw") (DEFAULT_VARIANTS + base).distinct() else base.distinct()
+        return when (w) {
+            "blackclaw" -> (DEFAULT_VARIANTS + base).distinct()
+            "garra" -> (GARRA_VARIANTS + base).distinct()
+            else -> base.distinct()
+        }
     }
 
     /**
@@ -88,6 +98,28 @@ object WakeWordMatcher {
             if (singleVariants.any { fuzzyEq(tokens[i], it) }) {
                 val command = tokens.drop(i + 1).joinToString(" ").trim().removePrefix(",").trim()
                 return MatchResult(command, tokens[i])
+            }
+            // glued token: recognizer merged wake word + command ("garrapon una alarma").
+            val glued = gluedCommand(tokens[i], singleVariants)
+            if (glued != null) {
+                val rest = tokens.drop(i + 1).joinToString(" ").trim()
+                val command = (glued.first + " " + rest).trim().removePrefix(",").trim()
+                return MatchResult(command, glued.second)
+            }
+        }
+        return null
+    }
+
+    /**
+     * If [token] starts with a wake variant followed by real command text
+     * ("garrapon" → "pon"), return the split command + matched variant.
+     * Requires the remainder to be ≥2 chars so plurals like "garras" don't fire.
+     */
+    private fun gluedCommand(token: String, singleVariants: List<String>): Pair<String, String>? {
+        for (v in singleVariants) {
+            if (v.length < 4) continue
+            if (token.startsWith(v) && token.length - v.length >= 2) {
+                return token.substring(v.length) to v
             }
         }
         return null

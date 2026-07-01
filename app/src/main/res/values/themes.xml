@@ -64,8 +64,7 @@
     </style>
 
     <!-- 透明 Activity（用于剪贴板读取等需要前台焦点的操作） -->
-    <style name="Theme.Transparent" parent="android:Theme">
-        <item name="android:windowIsTranslucent">true</item>
+    <style name="Theme.Transparent" parent="android:Theme">        <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowContentOverlay">@null</item>
@@ -74,8 +73,7 @@
     </style>
 
     <!-- 对话框样式 -->
-    <style name="DialogStyle" parent="android:style/Theme.Dialog">
-        <item name="android:windowBackground">@android:color/transparent</item>
+    <style name="DialogStyle" parent="android:style/Theme.Dialog">        <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowFrame">@null</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowIsFloating">true</item>
@@ -101,5 +99,16 @@
     <style name="UpdateDialogAnimation">
         <item name="android:windowEnterAnimation">@anim/slide_up</item>
         <item name="android:windowExitAnimation">@anim/slide_down</item>
+    </style>
+
+    <!-- Quick Assist overlay: translucent, no title, shows over lock screen -->
+    <style name="Theme.BlackClaw.Assist" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

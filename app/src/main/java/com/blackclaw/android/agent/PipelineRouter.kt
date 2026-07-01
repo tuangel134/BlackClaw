@@ -42,6 +42,11 @@ class PipelineRouter(private val context: Context) {
      * @return the routing decision
      */
     fun route(task: String): Route {
+        // Deterministic fast-path can be disabled from Settings (always use the LLM).
+        if (!com.blackclaw.android.utils.KVUtils.getBoolean(KEY_FAST_PATH, true)) {
+            XLog.i(TAG, "Fast-path disabled in settings → agent loop")
+            return Route.AgentLoop(task)
+        }
         // Compound tasks (containing "and", "then", "after") should go to agent loop,
         // not be partially handled by Tier 1 deterministic matching.
         val lower = task.lowercase()
@@ -125,5 +130,7 @@ class PipelineRouter(private val context: Context) {
 
     companion object {
         private const val TAG = "PipelineRouter"
+        /** Settings flag: deterministic fast-path (skip LLM for simple commands). */
+        const val KEY_FAST_PATH = "cfg_fast_path"
     }
 }

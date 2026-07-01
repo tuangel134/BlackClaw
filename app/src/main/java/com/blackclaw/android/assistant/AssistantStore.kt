@@ -35,6 +35,12 @@ data class AssistantItem(
     val category: String = "",
     /** Alarm challenge to dismiss: none|math|memory|type. Empty = normal alarm. */
     val challenge: String = "none",
+    /**
+     * When true this item RINGS like a full alarm (full-screen + sound loop)
+     * even if its type is EVENT/REMINDER. Lets a single calendar appointment
+     * both show on the calendar AND wake the user. Default false.
+     */
+    val ring: Boolean = false,
     /** Geofence (location reminder): target lat/lon and radius (m). 0 = none. */
     val lat: Double = 0.0,
     val lon: Double = 0.0,
@@ -56,6 +62,7 @@ data class AssistantItem(
         put("amount", amount)
         put("category", category)
         put("challenge", challenge)
+        put("ring", ring)
         put("lat", lat)
         put("lon", lon)
         put("radiusM", radiusM)
@@ -77,6 +84,7 @@ data class AssistantItem(
             amount = o.optDouble("amount", 0.0),
             category = o.optString("category", ""),
             challenge = o.optString("challenge", "none"),
+            ring = o.optBoolean("ring", false),
             lat = o.optDouble("lat", 0.0),
             lon = o.optDouble("lon", 0.0),
             radiusM = o.optInt("radiusM", 0),
@@ -146,6 +154,7 @@ object AssistantStore {
         amount: Double = 0.0,
         category: String = "",
         challenge: String = "none",
+        ring: Boolean = false,
         lat: Double = 0.0,
         lon: Double = 0.0,
         radiusM: Int = 0,
@@ -156,7 +165,7 @@ object AssistantStore {
             id = UUID.randomUUID().toString().take(8),
             type = type, title = title, body = body,
             triggerAtMs = triggerAtMs, repeat = repeat,
-            amount = amount, category = category, challenge = challenge,
+            amount = amount, category = category, challenge = challenge, ring = ring,
             lat = lat, lon = lon, radiusM = radiusM, geoTrigger = geoTrigger, source = source,
         )
         upsert(item)
@@ -284,4 +293,33 @@ object AssistantStore {
 
     fun countPending(type: AssistantItemType): Int =
         byType(type).count { !it.done }
+
+    /** Item types that belong on a calendar / agenda (have a meaningful time). */
+    private val TIMED_TYPES = setOf(
+        AssistantItemType.ALARM, AssistantItemType.REMINDER, AssistantItemType.EVENT)
+
+    /**
+     * Upcoming timed items (alarms/reminders/events) from now forward, sorted
+     * chronologically. Powers the agenda view and the widget.
+     */
+    fun upcoming(limit: Int = 50, fromMs: Long = System.currentTimeMillis()): List<AssistantItem> =
+        all().filter { it.type in TIMED_TYPES && it.triggerAtMs >= fromMs && !it.done }
+            .sortedBy { it.triggerAtMs }
+            .take(limit)
+
+    /** The single next upcoming timed item, or null. */
+    fun next(fromMs: Long = System.currentTimeMillis()): AssistantItem? =
+        upcoming(1, fromMs).firstOrNull()
+
+    /**
+     * Returns existing timed items whose trigger is within [windowMin] minutes
+     * of [ms] — used to warn about scheduling conflicts. Excludes [excludeId].
+     */
+    fun conflictsAt(ms: Long, windowMin: Int = 30, excludeId: String? = null): List<AssistantItem> {
+        val window = windowMin * 60_000L
+        return all().filter {
+            it.id != excludeId && it.type in TIMED_TYPES && !it.done &&
+                it.triggerAtMs > 0 && kotlin.math.abs(it.triggerAtMs - ms) < window
+        }.sortedBy { it.triggerAtMs }
+    }
 }

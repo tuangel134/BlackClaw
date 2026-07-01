@@ -44,6 +44,7 @@ object ToolRegistry {
         register(SendFileTool())
         register(GetDeviceInfoTool())
         register(GetNotificationsTool())
+        register(ReplyNotificationTool())
         register(MakeCallTool())
         register(FinishTool())
 
@@ -70,6 +71,8 @@ object ToolRegistry {
         register(AssistantAlarmTool())
         register(AssistantNoteTool())
         register(AssistantEventTool())
+        register(AssistantAppointmentTool())
+        register(AssistantAgendaTool())
         register(AssistantAlertTool())
         register(AssistantFinanceTool())
         register(AssistantListTool())
@@ -84,6 +87,7 @@ object ToolRegistry {
         register(AssistantRecurringBillTool())
         register(AssistantSavingsGoalTool())
         register(AssistantExportFinanceTool())
+        register(UndoLastTool())
 
         // Routines — multi-step automated sequences
         register(RunRoutineTool())
@@ -130,6 +134,7 @@ object ToolRegistry {
         register(StartDemoTool())
         register(SaveDemoTool())
         register(CancelDemoTool())
+        register(SaveLastAsRoutineTool())
 
         // Hands-free voice mode (wake word + STT)
         register(VoiceModeTool())
@@ -144,6 +149,10 @@ object ToolRegistry {
         register(CloseAppTool())
         register(ShowRecentsTool())
         register(OpenUrlTool())
+        register(OpenAppActionTool())
+        register(DiscoverAppActionsTool())
+        register(PlayMusicTool())
+        register(SetMusicPlayerTool())
         register(WebSearchTool())
         register(WebAnswerTool())
         register(ShareTextTool())

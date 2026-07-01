@@ -180,4 +180,75 @@ class AssistantTimeTest {
         val out = AssistantTime.format(tomorrow)
         assertTrue("Tomorrow should show 'mañana'", out.contains("mañana"))
     }
+
+    @Test
+    fun spokenHourALas7() {
+        val r = AssistantTime.parse("a las 7")
+        assertTrue("'a las 7' should resolve to a future instant", r > System.currentTimeMillis())
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(7, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, cal.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun spokenHourTardeAddsTwelve() {
+        val r = AssistantTime.parse("reunión a las 7 de la tarde")
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals("'7 de la tarde' should be 19h", 19, cal.get(Calendar.HOUR_OF_DAY))
+    }
+
+    @Test
+    fun spokenHourYMedia() {
+        val r = AssistantTime.parse("a las 7 y media")
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(7, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(30, cal.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun spokenHourYCuarto() {
+        val r = AssistantTime.parse("las 9 y cuarto de la mañana")
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(9, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(15, cal.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun spokenPm() {
+        val r = AssistantTime.parse("8 pm")
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(20, cal.get(Calendar.HOUR_OF_DAY))
+    }
+
+    @Test
+    fun relativeWeeks() {
+        val before = System.currentTimeMillis()
+        val r = AssistantTime.parse("en 3 semanas")
+        assertTrue("'en 3 semanas' should be ~3 weeks ahead",
+            r >= before + 20L * 86_400_000)
+    }
+
+    @Test
+    fun relativeWeeksWithSpokenHour() {
+        val r = AssistantTime.parse("en 3 semanas a las 5 de la tarde")
+        assertTrue(r > System.currentTimeMillis() + 19L * 86_400_000)
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals("should keep 17h", 17, cal.get(Calendar.HOUR_OF_DAY))
+    }
+
+    @Test
+    fun relativeMonths() {
+        val before = System.currentTimeMillis()
+        val r = AssistantTime.parse("dentro de 2 meses")
+        assertTrue("'dentro de 2 meses' should be well in the future",
+            r >= before + 50L * 86_400_000)
+    }
+
+    @Test
+    fun mediodia() {
+        val r = AssistantTime.parse("mañana al mediodia")
+        val cal = Calendar.getInstance().apply { timeInMillis = r }
+        assertEquals(12, cal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, cal.get(Calendar.MINUTE))
+    }
 }

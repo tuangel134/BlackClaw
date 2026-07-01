@@ -80,7 +80,9 @@ data class ResolvedModelConfig(
                 maxIterations = maxIterations,
                 temperature = temperature,
                 provider = activeCloud.agentProvider,
-                streaming = streaming
+                // Cloud models stream real tokens (tool-calls are still delivered in
+                // the final response), enabling live text + speak-as-it-generates.
+                streaming = true
             )
         }
     }

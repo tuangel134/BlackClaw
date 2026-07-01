@@ -41,6 +41,18 @@ private data class Feature(
 )
 
 private val FEATURES = listOf(
+    Feature("📲", "Controla tus apps",
+        "Pídele acciones en apps populares y las hace al instante saltando directo a la pantalla útil (deep links) y completando el resto. Soporta +60 apps: Uber, DiDi, Cabify, Uber Eats, Rappi, DoorDash, Glovo, Spotify, YouTube, Maps, Waze, WhatsApp, Telegram, Instagram, X, Amazon, Mercado Libre, AliExpress, eBay, Netflix, Disney+, Booking, Airbnb, Gmail y más. Además, por accesibilidad puede operar CUALQUIER app en pantalla.",
+        listOf("\"pídeme un Uber al aeropuerto\"", "\"pide sushi en Uber Eats\"", "\"busca un teclado en Amazon\"", "\"navega a casa\"")),
+    Feature("🐾", "Asistente del teléfono",
+        "Ponlo como asistente por defecto (Ajustes → Modo voz → Asistente del teléfono) e invócalo con el gesto/botón de inicio, incluso sobre la pantalla bloqueada. Aparece una pantalla flotante con animación y puedes conversar de ida y vuelta sin repetir la palabra de activación. Toca el orbe para interrumpirlo.",
+        listOf("Mantén el botón de inicio → habla", "\"¿qué hora es?\" → \"¿y mañana llueve?\"", "Di \"gracias\" para cerrar")),
+    Feature("📅", "Calendario y agenda",
+        "Dile una cita y la pone en el calendario, suena como alarma a su hora y la ves en la agenda — ahora o dentro de semanas. Mira todo en la vista de Calendario (Mes/Agenda) y reprograma tocando.",
+        listOf("\"tengo una reunión a las 7\"", "\"en 3 semanas tengo médico a las 5 de la tarde\"", "\"¿qué tengo hoy?\"")),
+    Feature("🎵", "Música en tu reproductor",
+        "Reproduce en el reproductor que tú uses (Musicolet, Spotify, YouTube Music, Poweramp…), no solo en uno. Funciona offline con tu música local.",
+        listOf("\"pon Bad Bunny\"", "\"reproduce lofi en YouTube Music\"", "\"usa Musicolet para la música\"")),
     Feature("🎤", "Modo voz manos libres",
         "Activa el modo voz en Ajustes. Di la palabra de activación y tu orden. Funciona en segundo plano y sin internet (modelo offline incluido).",
         listOf("\"garra, pon una alarma a las 7\"", "\"garra, ¿cuánta batería tengo?\"", "\"garra, manda un mensaje a mamá\"")),

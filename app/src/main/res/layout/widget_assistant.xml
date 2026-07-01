@@ -4,10 +4,10 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@drawable/bg_widget"
-    android:padding="16dp"
-    android:gravity="center_vertical">
+    android:background="@drawable/bg_widget_grad"
+    android:padding="16dp">
 
+    <!-- Header: brand + pending count pill -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -15,42 +15,155 @@
         android:gravity="center_vertical">
 
         <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🐾"
+            android:textSize="14sp" />
+
+        <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="BlackClaw"
+            android:layout_marginStart="6dp"
+            android:text="Agenda"
             android:textColor="#A78BFA"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.02" />
 
         <TextView
             android:id="@+id/widget_count"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:background="@drawable/bg_count_pill"
+            android:paddingStart="9dp"
+            android:paddingEnd="9dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
             android:text=""
-            android:textColor="#8B7BB0"
-            android:textSize="11sp" />
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
+    <!-- Empty state -->
     <TextView
-        android:id="@+id/widget_next_title"
+        android:id="@+id/widget_empty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="Sin pendientes"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:maxLines="1"
-        android:ellipsize="end" />
-
-    <TextView
-        android:id="@+id/widget_next_time"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:text=""
+        android:layout_marginTop="14dp"
+        android:text="Todo al día ✨"
         android:textColor="#C4B5E0"
-        android:textSize="13sp" />
+        android:textSize="14sp"
+        android:visibility="gone" />
+
+    <!-- Agenda rows (up to 4) -->
+    <LinearLayout
+        android:id="@+id/widget_row_0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <TextView
+            android:id="@+id/widget_time_0"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_time_pill"
+            android:paddingStart="8dp" android:paddingEnd="8dp"
+            android:paddingTop="3dp" android:paddingBottom="3dp"
+            android:minWidth="54dp" android:gravity="center"
+            android:text="" android:textColor="#C4B5E0" android:textSize="12sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/widget_title_0"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:text="" android:textColor="#FFFFFF" android:textSize="14sp"
+            android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="9dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <TextView
+            android:id="@+id/widget_time_1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_time_pill"
+            android:paddingStart="8dp" android:paddingEnd="8dp"
+            android:paddingTop="3dp" android:paddingBottom="3dp"
+            android:minWidth="54dp" android:gravity="center"
+            android:text="" android:textColor="#C4B5E0" android:textSize="12sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/widget_title_1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:text="" android:textColor="#FFFFFF" android:textSize="14sp"
+            android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="9dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <TextView
+            android:id="@+id/widget_time_2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_time_pill"
+            android:paddingStart="8dp" android:paddingEnd="8dp"
+            android:paddingTop="3dp" android:paddingBottom="3dp"
+            android:minWidth="54dp" android:gravity="center"
+            android:text="" android:textColor="#C4B5E0" android:textSize="12sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/widget_title_2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:text="" android:textColor="#FFFFFF" android:textSize="14sp"
+            android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="9dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <TextView
+            android:id="@+id/widget_time_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_time_pill"
+            android:paddingStart="8dp" android:paddingEnd="8dp"
+            android:paddingTop="3dp" android:paddingBottom="3dp"
+            android:minWidth="54dp" android:gravity="center"
+            android:text="" android:textColor="#C4B5E0" android:textSize="12sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/widget_title_3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:text="" android:textColor="#FFFFFF" android:textSize="14sp"
+            android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
 
 </LinearLayout>

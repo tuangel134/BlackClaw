@@ -432,6 +432,21 @@ private fun ModernSettingsScreen(
                     colors = colors,
                     onClick = onOpenAdbPro,
                 )
+                Divider(colors)
+                var fastPath by remember {
+                    mutableStateOf(KVUtils.getBoolean("cfg_fast_path", true))
+                }
+                SwitchRow(
+                    icon = Icons.Outlined.Bolt,
+                    title = "Atajos rápidos (sin IA)",
+                    subtitle = "Ejecuta comandos simples (abrir app, poner música, navegar) al " +
+                        "instante sin usar el modelo. Apágalo para que todo pase por la IA.",
+                    checked = fastPath,
+                    colors = colors,
+                ) { on ->
+                    fastPath = on
+                    KVUtils.putBoolean("cfg_fast_path", on); KVUtils.sync()
+                }
             }
 
             // ── Control remoto ─────────────────────────────────────────────────
@@ -684,6 +699,46 @@ private fun NavRow(
             contentDescription = null,
             tint = colors.textTertiary,
             modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    colors: BlackClawColors,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(colors.accent.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = colors.textPrimary)
+            if (subtitle != null) {
+                Text(subtitle, fontSize = 11.sp, color = colors.textTertiary, lineHeight = 15.sp)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = colors.accent),
         )
     }
 }

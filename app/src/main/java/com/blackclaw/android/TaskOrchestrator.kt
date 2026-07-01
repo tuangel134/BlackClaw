@@ -138,6 +138,9 @@ class TaskOrchestrator(
         when (route) {
             is PipelineRouter.Route.DirectIntent -> {
                 XLog.i(TAG, "Pipeline Tier 1: DirectIntent — ${route.description}")
+                // Signal that we're launching/handing off to another app so voice
+                // UIs (assist panel) close instead of listening over that app.
+                taskEventCallback?.invoke(TaskEvent.ToolAction("open_app"))
                 pipelineRouter.executeIntent(route.intent)
                 XLog.i(TAG, "onComplete: rounds=0, totalTokens=0, model=direct, answer=${route.description}")
                 taskEventCallback?.invoke(TaskEvent.Completed(route.description))
@@ -150,6 +153,9 @@ class TaskOrchestrator(
             }
             is PipelineRouter.Route.DirectTool -> {
                 XLog.i(TAG, "Pipeline Tier 1: DirectTool — ${route.toolName}")
+                // Signal the tool being run (so the assist panel treats app-launch
+                // tools as a hand-off and closes rather than re-listening).
+                taskEventCallback?.invoke(TaskEvent.ToolAction(route.toolName))
                 Thread({
                     var success = false
                     val answer = try {

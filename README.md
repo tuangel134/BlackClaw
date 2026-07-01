@@ -52,9 +52,16 @@ rather than relying on per-app integrations.
   screen content and messages never leave the phone.
 - **Cloud-optional.** Bring your own key for a frontier model when you want more
   reasoning power. The key is stored only in local app storage.
+- **Hands-free voice.** A wake word ("garra"/"BlackClaw") and an offline speech
+  engine let you talk to it; set BlackClaw as the phone's assistant and invoke it
+  with the power button — even over the lock screen — with a full-screen animated
+  panel that streams the answer and speaks it back.
+- **Fast app control.** ~65 popular apps (Uber, Uber Eats, Spotify, Maps,
+  WhatsApp, Amazon…) are driven straight to the right screen via deep links, and
+  a deterministic fast-path runs common commands instantly with zero LLM calls.
 - **Remote-controllable.** Drive the phone by messaging it from Telegram,
   Discord, or WeChat — useful for an agent that runs while the device is away.
-- **Broad reach.** ~85 built-in tools spanning UI control, device settings,
+- **Broad reach.** 100+ built-in tools spanning UI control, device settings,
   messaging, files, network, perception, and automation.
 
 ---
@@ -66,6 +73,8 @@ Plain-language examples — BlackClaw figures out the steps:
 - *"Open WhatsApp and tell Mom I'll be 20 minutes late."*
 - *"Check my notifications and summarize anything important."*
 - *"How much battery do I have, and turn on battery saver if it's under 20%."*
+- *"Order me an Uber to the airport."* / *"Play Bad Bunny."* / *"Take me to the nearest Walmart."*
+- *"I have a meeting at 7"* → sets an alarm, adds it to your calendar and agenda.
 - *"Search YouTube for lo-fi beats and play the first result."*
 - *"Read the text on screen and tap the Continue button"* (works in games via OCR).
 - *"Every weekday at 8am, read me the weather out loud."* (scheduled task).
@@ -83,6 +92,8 @@ touching the phone.
 |---|---|
 | **UI control** | tap · long-press · swipe · pinch · drag-and-drop · path trace · type · scroll-to-find |
 | **Navigation** | open app · switch app · back/home/recents · find & tap by text |
+| **App shortcuts** | deep-link ~65 apps (Uber · Uber Eats · Spotify · Maps · Amazon…) · play music in any player · discover installed-app actions |
+| **Voice** | wake word · offline STT (Vosk) · system-assistant panel · streaming TTS · continuous conversation |
 | **Privileged (ADB/Shizuku)** | fast tap/swipe in games · force-stop · arbitrary shell · burst tap |
 | **Perception** | read screen (accessibility tree) · OCR over screen capture · screenshot |
 | **Device** | battery · memory · network · volume · brightness · WiFi/BT/flashlight toggles |
@@ -102,6 +113,35 @@ touching the phone.
 - Tap, long-press, swipe, pinch, drag-and-drop, multi-point path tracing
 - Type into any field, scroll-to-find, open and switch apps
 - Handles popups, permission dialogs, and paywalls intelligently
+
+### Voice & system assistant
+- **Hands-free wake word** ("garra" or "BlackClaw") with an **offline** speech
+  engine (Vosk) — no internet, no key. Fuzzy matching tuned for how the
+  recognizer mishears the word.
+- **Set BlackClaw as the phone's assistant** and summon it with the power-button
+  gesture — it appears in a **full-screen animated panel** (an audio-reactive
+  claw orb) **even over the lock screen**, like Gemini/Assistant.
+- **Streaming replies:** the answer types out live and is **spoken sentence by
+  sentence as it generates** (cloud models); tap the orb to interrupt.
+- **Continuous conversation:** it re-listens after answering so you can go back
+  and forth without repeating the wake word. Rich answers render **links and
+  images inline**. Suggestion chips hint what to say.
+- Whisper mode (Alexa-style), voice activity detection, and phone-call mic
+  handling so it yields the microphone during calls.
+
+### App control via deep links
+- **~65 popular apps** open straight to the useful screen via deep links —
+  ride-hailing (Uber, DiDi, Cabify, Lyft, Bolt), food (Uber Eats, Rappi,
+  DoorDash, Glovo), music, maps, shopping (Amazon, Mercado Libre, AliExpress),
+  streaming, social, travel and more — far faster than tapping through the UI.
+- **Play music in any player** via Android's universal play-from-search
+  (Spotify, YouTube Music, Musicolet, Poweramp…), with a preferred-player setting.
+- **Auto-discovery:** BlackClaw asks the system which installed apps can handle
+  each capability (music, navigation, email, calling…), so it adapts to *your*
+  app set instead of a hardcoded list.
+- **Deterministic fast-path:** common commands ("open X", "play Y", "navigate to
+  Z", "get me an Uber") run **instantly with zero LLM calls** — toggle it in
+  Settings → Advanced.
 
 ### Privileged control (no PC, no root)
 - **Built-in self-ADB pairing.** BlackClaw can pair with its own `adbd` over the
@@ -126,12 +166,18 @@ touching the phone.
 - Time-based items fire **native push notifications** and survive reboots
 - A modern, color-coded UI (gradient header, native clock time picker, swipe-in
   access from the chat drawer) with manual add / complete / delete
+- **Calendar & agenda view:** a month grid marks days with scheduled items and a
+  chronological agenda lists what's coming up; tap any item to reschedule, and
+  optionally overlay your **system (Google) calendar**
+- **Voice appointments:** *"I have a meeting at 7"* creates one entry that shows
+  on the calendar/agenda **and** rings like an alarm — now or weeks out — plus an
+  optional early heads-up; conflict warnings included
 - The AI manages the hub end-to-end: *"remind me to call the dentist tomorrow
   at 5"*, *"what reminders do I have?"*, *"cancel the 7am alarm"*, *"log that I
-  spent 200 on food"* all read and write the native hub
+  spent 200 on food"*, *"undo that"* all read and write the native hub
 - **Important alarms with challenges:** mark an alarm as critical and it won't
-  dismiss until you solve a quick math, memory, or typing challenge — so you
-  actually wake up
+  dismiss until you solve a quick math, **memory** (digits shown briefly then
+  hidden), or typing challenge — so you actually wake up
 - **Shopping list, monthly budget, location reminders** (geofence, no constant
   GPS), **home-screen widget** and a **Quick Settings tile** showing your next item
 - **Draft replies:** the assistant can draft a suggested answer to a message and
@@ -391,6 +437,25 @@ PR guidelines, and conventions.
 ---
 
 ## Changelog
+
+### Unreleased (dev)
+
+- **Voice & system assistant:** hands-free wake word with offline STT, set as the
+  phone's default assistant, full-screen animated panel (audio-reactive claw orb)
+  over the lock screen, **streaming replies** (live text + speak-as-it-generates
+  on cloud models), continuous conversation, tap-to-interrupt, and rich answers
+  that render links/images inline
+- **App control via deep links:** ~65 popular apps opened straight to the right
+  screen; play music in any player (universal play-from-search); auto-discovery
+  of installed-app capabilities; **deterministic fast-path** for common commands
+  (zero LLM calls) with a Settings toggle
+- **Calendar & agenda view:** month + agenda, tap-to-reschedule, optional system
+  calendar overlay, and voice appointments that ring like alarms and land on the
+  calendar
+- Redesigned home-screen **agenda widget**, fixed memory-challenge alarm,
+  reinforced bilingual wake-word matching, cancel/undo, per-provider streaming,
+  self-healing free-model list, and more playbooks (email, WhatsApp media,
+  shopping, maps, banking, camera, device settings)
 
 ### v1.0.0 (beta)
 

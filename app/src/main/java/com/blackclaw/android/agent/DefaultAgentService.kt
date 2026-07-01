@@ -83,6 +83,8 @@ class DefaultAgentService : AgentService {
 - Go home / leave app → close_app() (issues HOME)
 - Switch between recent apps → show_recents()
 - Open URL or deep link → open_url(url="https://...") (also tel:, mailto:, geo:, sms:)
+- Pedir Uber/DiDi, comida (Uber Eats/Rappi), música (Spotify), navegar (Maps/Waze), etc → open_app_action(app="uber", query="destino") — abre la app DIRECTO a la pantalla útil vía deep link, mucho más rápido que tap por tap. Luego get_screen_info y completa el flujo (confirmar viaje, elegir, pagar) con taps. Apps: uber, uber_eats, didi, rappi, lyft, cabify, doordash, glovo, spotify, maps, waze, youtube, whatsapp, telegram, instagram, amazon, playstore, netflix.
+- "¿qué apps puedes controlar?", "¿con qué apps funcionas?" → discover_app_actions() detecta por sí solo qué apps instaladas soportan música, mapas, correo, llamadas, etc. en ESTE teléfono.
 - Search the web → web_search(query="...", engine="google")
 - Share text via system share sheet → share_text(text="...")
 - Set volume directly → set_volume(level=50, stream="media")
@@ -103,6 +105,7 @@ class DefaultAgentService : AgentService {
 - Open the camera → open_camera(mode="photo|video")
 - Speak text aloud (TTS) → speak_text(text="...", language="en-US")
 - Control media playback → media_control(action="play|pause|toggle|next|previous|stop")
+- Reproducir una canción/artista en CUALQUIER reproductor (no solo Spotify) → play_music(query="Bad Bunny", app="youtube_music"|"spotify"|"amazon_music"|"deezer"|… o sin app para el predeterminado). Usa el intent universal de Android; prefiérelo sobre open_app_action para "pon música".
 - Flashlight → flashlight(action="on|off|toggle")
 - Vibrate → vibrate(pattern="short|medium|long|double|triple")
 - Show system notification → system_notify(title="...", body="...")
@@ -136,6 +139,17 @@ class DefaultAgentService : AgentService {
 - When the user reveals a stable preference about themselves (name, city, work email, default browser, time zone) you may proactively call remember_fact. Reuse the same key to update.
 - For volume / brightness / wifi / bluetooth / dnd / airplane → prefer set_volume / set_brightness / toggle_setting over navigating Settings.
 - For "set alarm at 7", "10 minute timer" → use set_alarm. For "what's on my calendar" → get_calendar_events.
+- IMPORTANTE — citas/reuniones por voz: cuando el usuario MENCIONE un compromiso con hora ("tengo una reunión a las 7", "cita el viernes 10:00", "en 3 semanas tengo médico"), usa assistant_appointment(title, when). Eso crea UN evento que se ve en el calendario/agenda Y suena como alarma a su hora, ahora o dentro de semanas. Si pide aviso previo, añade remind_before_min. No uses assistant_event a secas para esto.
+- Para "qué tengo hoy/mañana/esta semana", "mi agenda", "qué sigue" → usa assistant_agenda(range="today|tomorrow|week|all") y lee el resultado.
+- Para "deshaz eso", "cancela lo que creaste", "quita esa alarma" → usa undo_last() (elimina lo último que creaste y cancela su notificación).
+
+## Completar acciones DENTRO de las apps (no solo abrirlas)
+- Abrir la app es solo el primer paso. Tras open_app_action / open_app: SIEMPRE get_screen_info (o read_screen_ocr si es un lienzo/mapa) para VER qué hay antes de tocar nada.
+- "El más cercano / mejor / primero": abre la búsqueda (no navegación directa), lee la lista y toca el PRIMER resultado (es el más cercano). Nunca asumas cuál es sin leer la pantalla.
+- Si el elemento que esperas no está: haz scroll_to_find o find_and_tap por su texto; si sigue sin aparecer, reintenta una vez con otra pista antes de rendirte.
+- Tras una acción crítica (enviar, confirmar, iniciar ruta), verify_screen(expect="...") para confirmar que PASÓ. Si NOT_FOUND, no digas que lo lograste: revisa la pantalla y corrige.
+- Si algo cuesta dinero o es irreversible (pagar, pedir viaje, publicar), DETENTE antes de confirmar salvo que el usuario lo haya autorizado explícitamente.
+- Si de verdad no puedes, en finish() di el MOTIVO concreto (app no instalada, no encontré el botón, hace falta login/permiso), no un "no pude" genérico.
 - When the user says a name (e.g. "call Mom") and you don't know the number, call find_contact first.
 - For SMS prefer mode='compose' (user taps Send) unless the user explicitly asks to send silently.
 - Do NOT auto-fill passwords, confirm payments, or delete data.
@@ -154,9 +168,24 @@ class DefaultAgentService : AgentService {
 - If verify_screen returns NOT_FOUND, the action likely failed — check get_screen_info and retry, don't claim success.
 - Example: after send_message → verify_screen(expect="Enviado") or check the message appears in the chat."""
 
+        /** Reinforces reliable in-app execution — appended for ALL providers. */
+        private const val IN_APP_EXECUTION_RULES = """
+
+## Completar acciones dentro de apps (IMPORTANTE)
+- Tras abrir una app (open_app / open_app_action), SIEMPRE llama get_screen_info antes de tocar. No asumas dónde están los botones.
+- Para "el más cercano / el mejor / el primero": tras una búsqueda, el PRIMER resultado de la lista es el correcto (el más cercano o más relevante). Tócalo; NO elijas al azar ni por reconocer un nombre.
+- Si no ves el elemento, usa read_screen_ocr (apps tipo mapa/juego/canvas) o scroll_to_find. No te rindas en silencio.
+- Verifica los pasos críticos con verify_screen(expect="...") antes de decir que lo lograste. Si no aparece lo esperado, reintenta una vez o reporta el bloqueo real.
+- NUNCA afirmes éxito sin confirmarlo en pantalla. Si algo bloquea (app no instalada, falta permiso, no se encontró el elemento), dilo claro en finish; no inventes.
+- Acciones que gastan dinero o publican (pagar, enviar dinero, comprar, postear): prepáralas y DETENTE para confirmación, salvo permiso explícito del usuario.
+
+## Velocidad al controlar apps (reduce latencia)
+- Si ya conoces 2-5 pasos seguidos que NO dependen de leer la pantalla entre medias, mándalos en UNA sola llamada con execute_plan(steps=[...]) en vez de uno por uno. Es MUCHO más rápido.
+- Si el "Ambient state" dice que hay shell privilegiado (Shizuku o ADB), prefiere fast_tap/fast_swipe (instantáneos) sobre tap/swipe normales.
+- No llames get_screen_info de más: si por la última lectura ya sabes dónde está el elemento, actúa directo (find_and_tap por texto) sin re-leer."""
+
         /** Maximum number of retries on LLM API call failure */
         private const val MAX_API_RETRIES = 3
-
         /** Rate-limit retries are separate and more generous — on the free tier
          *  these are expected and we just wait out the window the API tells us. */
         private const val MAX_RATE_LIMIT_RETRIES = 6
@@ -383,15 +412,22 @@ class DefaultAgentService : AgentService {
             if (cancelled.get()) throw RuntimeException(ClawApplication.instance.getString(R.string.agent_task_cancelled))
             try {
                 return if (config.streaming) {
-                    val textBuilder = StringBuilder()
-                    llmClient.chatStreaming(messages, toolSpecs, object : StreamingListener {
-                        override fun onPartialText(token: String) {
-                            textBuilder.append(token)
-                            callback.onContent(iteration, token)
-                        }
-                        override fun onComplete(response: LlmResponse) {}
-                        override fun onError(error: Throwable) {}
-                    })
+                    try {
+                        val textBuilder = StringBuilder()
+                        llmClient.chatStreaming(messages, toolSpecs, object : StreamingListener {
+                            override fun onPartialText(token: String) {
+                                textBuilder.append(token)
+                                callback.onContent(iteration, token)
+                            }
+                            override fun onComplete(response: LlmResponse) {}
+                            override fun onError(error: Throwable) {}
+                        })
+                    } catch (se: Exception) {
+                        // Provider may not support streaming (SSE) or tool-call streaming.
+                        // Degrade gracefully to a blocking call so the task never breaks.
+                        XLog.w(TAG, "Streaming failed, falling back to non-streaming: ${se.message}")
+                        llmClient.chat(messages, toolSpecs)
+                    }
                 } else {
                     llmClient.chat(messages, toolSpecs)
                 }
@@ -401,6 +437,14 @@ class DefaultAgentService : AgentService {
                 // Do not retry on auth failure or true token exhaustion (context too big)
                 if (msg.contains("401") || msg.contains("403") ||
                     (msg.contains("insufficient") && !msg.contains("rate"))) {
+                    // Self-healing: a "free" model that returns auth errors has likely
+                    // stopped being free. Re-verify the OpenCode Zen list in the
+                    // background so the dead model is dropped and the picker updates.
+                    if (config.baseUrl.contains("opencode.ai/zen", ignoreCase = true) &&
+                        (msg.contains("401") || msg.contains("403"))) {
+                        XLog.w(TAG, "OpenCode Zen auth failure on '${config.modelName}' — re-verifying free models")
+                        runCatching { OpenCodeZenModels.refreshNow() }
+                    }
                     throw e
                 }
 
@@ -676,6 +720,7 @@ class DefaultAgentService : AgentService {
         val fullSystemPrompt = buildString {
             append(basePrompt)
             append(playbookSection)
+            append(IN_APP_EXECUTION_RULES)
             append(LanguageDetector.getLanguageInstruction(rawUserRequest))
             append(inAppSearchGuard.buildPromptSection())
             append(emailComposeGuard.buildPromptSection())
@@ -691,6 +736,8 @@ class DefaultAgentService : AgentService {
 
         // Each task starts with a fresh tool cache so we never serve stale state.
         ToolRegistry.getInstance().clearCache()
+        // Reset the passive demonstration buffer so "guarda lo último" maps to THIS task.
+        runCatching { com.blackclaw.android.agent.DemonstrationRecorder.noteTaskStart() }
 
         val messages = mutableListOf<ChatMessage>()
         messages.add(SystemMessage.from(fullSystemPrompt))

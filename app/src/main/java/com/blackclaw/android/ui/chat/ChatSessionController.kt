@@ -315,17 +315,35 @@ class ChatSessionController(
                 if (cloudClient != null) {
                     ensureCloudHistoryInitialized()
                     cloudHistory.add(UserMessage.from(text))
-                    val llmResponse = cloudClient!!.chat(cloudHistory, emptyList())
-                    val responseText = llmResponse.text ?: "(no response)"
+                    val fallbackModelName = cloudModelName ?: ModelConfigRepository.snapshot().activeCloud.modelName
+                    // Index of the "..." placeholder we stream into.
+                    val streamIdx = uiState.messages.indexOfLast {
+                        it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+                    val sb = StringBuilder()
+                    val llmResponse = try {
+                        cloudClient!!.chatStreaming(cloudHistory, emptyList(),
+                            object : com.blackclaw.android.agent.llm.StreamingListener {
+                                override fun onPartialText(token: String) {
+                                    sb.append(token)
+                                    val soFar = sb.toString()
+                                    postToMain { setStreamingText(streamIdx, soFar, fallbackModelName) }
+                                }
+                                override fun onComplete(response: com.blackclaw.android.agent.llm.LlmResponse) {}
+                                override fun onError(error: Throwable) {}
+                            })
+                    } catch (e: Exception) {
+                        XLog.w(TAG, "cloud streaming failed, falling back: ${e.message}")
+                        cloudClient!!.chat(cloudHistory, emptyList())
+                    }
+                    val responseText = llmResponse.text?.takeIf { it.isNotBlank() }
+                        ?: sb.toString().ifBlank { "(no response)" }
                     cloudHistory.add(AiMessage.from(responseText))
                     val usage = llmResponse.tokenUsage
                     val inputTokens = usage?.inputTokenCount() ?: (text.length / 4 + 1)
                     val outputTokens = usage?.outputTokenCount() ?: (responseText.length / 4 + 1)
-                    val fallbackModelName = cloudModelName ?: ModelConfigRepository.snapshot().activeCloud.modelName
                     val modelTag = llmResponse.modelName ?: fallbackModelName
-                    XLog.d(TAG, "sendChat: cloud response modelName='${llmResponse.modelName}', fallback='$fallbackModelName'")
                     postToMain {
-                        replaceTypingIndicator(responseText, modelTag)
+                        setStreamingText(streamIdx, responseText, modelTag)
                         uiState.isAwaitingReply.value = false
                         uiState.sessionTokens.value += inputTokens + outputTokens
                         uiState.sessionCost.value += ModelPricing.estimateCost(modelTag, inputTokens, outputTokens)
@@ -603,8 +621,18 @@ class ChatSessionController(
         }
     }
 
-    private fun replaceTypingIndicator(text: String, actualModelName: String? = null) {
-        val modelTag = actualModelName
+    /** Update the streaming assistant message at [idx] with the text so far. */
+    private fun setStreamingText(idx: Int, text: String, modelTag: String?) {
+        if (idx in uiState.messages.indices &&
+            uiState.messages[idx].role == ChatMessage.Role.ASSISTANT) {
+            uiState.messages[idx] = ChatMessage(
+                ChatMessage.Role.ASSISTANT, text.ifBlank { "…" }, modelName = modelTag ?: "")
+        } else {
+            uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag ?: ""))
+        }
+    }
+
+    private fun replaceTypingIndicator(text: String, actualModelName: String? = null) {        val modelTag = actualModelName
             ?: uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim()
             ?: ""
         val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }

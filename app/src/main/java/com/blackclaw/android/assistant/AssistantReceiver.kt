@@ -86,8 +86,9 @@ class AssistantReceiver : BroadcastReceiver() {
         }
 
         // Alarms ring full-screen (sound loop + vibration + dismiss/snooze),
-        // not a passive notification.
-        if (item.type == AssistantItemType.ALARM) {
+        // not a passive notification. Events/reminders flagged ring=true also
+        // ring (a calendar appointment that should wake the user).
+        if (item.type == AssistantItemType.ALARM || item.ring) {
             ringAlarm(context, item)
             rescheduleIfRepeating(context, item)
             return
@@ -167,21 +168,28 @@ class AssistantReceiver : BroadcastReceiver() {
 
     private fun nextOccurrence(item: AssistantItem): Long? {
         val cal = Calendar.getInstance().apply { timeInMillis = item.triggerAtMs }
-        when (item.repeat.lowercase()) {
-            "daily" -> cal.add(Calendar.DAY_OF_YEAR, 1)
-            "weekly" -> cal.add(Calendar.WEEK_OF_YEAR, 1)
-            "monthly" -> cal.add(Calendar.MONTH, 1)
-            else -> return null
-        }
-        // Skip past slots if the device was off.
-        val now = System.currentTimeMillis()
-        while (cal.timeInMillis <= now) {
-            when (item.repeat.lowercase()) {
-                "daily" -> cal.add(Calendar.DAY_OF_YEAR, 1)
+        val rep = item.repeat.lowercase()
+        fun stepOnce() {
+            when (rep) {
+                "daily", "weekdays", "weekends" -> cal.add(Calendar.DAY_OF_YEAR, 1)
                 "weekly" -> cal.add(Calendar.WEEK_OF_YEAR, 1)
                 "monthly" -> cal.add(Calendar.MONTH, 1)
             }
         }
+        fun valid(): Boolean {
+            val dow = cal.get(Calendar.DAY_OF_WEEK)
+            val isWeekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
+            return when (rep) {
+                "weekdays" -> !isWeekend
+                "weekends" -> isWeekend
+                else -> true
+            }
+        }
+        if (rep !in setOf("daily", "weekly", "monthly", "weekdays", "weekends")) return null
+        // Advance at least once, then keep going until it's in the future AND
+        // matches the recurrence constraint (weekday/weekend filter).
+        val now = System.currentTimeMillis()
+        do { stepOnce() } while (cal.timeInMillis <= now || !valid())
         return cal.timeInMillis
     }
 }

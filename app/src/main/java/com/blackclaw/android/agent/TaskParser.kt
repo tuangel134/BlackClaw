@@ -41,7 +41,120 @@ object TaskParser {
             ?: matchBackHome(lower)
             ?: matchOpenUrl(lower, task)
             ?: matchOpenSettings(lower)
+            ?: matchPlayMusicEs(esn(lower), task)
+            ?: matchNavigateEs(esn(lower), task)
+            ?: matchRideEs(esn(lower), task)
+            ?: matchOpenAppEs(esn(lower), task)
             ?: matchOpenApp(lower, task, installedPackages)
+    }
+
+    /** Strip Spanish accents so tildes/typos don't break fast-path matching. */
+    private fun esn(s: String): String {
+        val sb = StringBuilder(s.length)
+        for (c in s) sb.append(when (c) {
+            'á' -> 'a'; 'é' -> 'e'; 'í' -> 'i'; 'ó' -> 'o'; 'ú' -> 'u'; 'ü' -> 'u'; 'ñ' -> 'n'
+            else -> c
+        })
+        return sb.toString()
+    }
+
+    // ── Spanish fast-paths (0 LLM calls) ──
+
+    /** Compound tasks (2+ actions) must go to the agent, not a single fast action. */
+    private fun isCompoundEs(lower: String): Boolean =
+        lower.contains(" y luego ") || lower.contains(" y despues ") ||
+        lower.contains(" y después ") || lower.contains(" luego ") ||
+        lower.contains(" después ") || lower.contains(" despues ") ||
+        lower.contains(" and ") || lower.contains(" then ")
+
+    private val MUSIC_EXCLUDE = listOf(
+        "alarma", "recordatorio", "recuerdame", "recuérdame", "avisame", "avísame",
+        "temporizador", "timer", "nota", "evento", "cita", "reunion", "reunión",
+        "brillo", "volumen", "wifi", "bluetooth", "linterna", "modo", "no molestar",
+        "atencion", "atención",
+    )
+
+    private val PLAY_MUSIC_PATTERN = Regex(
+        """^(?:reproduce|pon\s+música|pon\s+musica|ponme\s+música|ponme\s+musica|""" +
+        """pon\s+la\s+canción|pon\s+la\s+cancion|pon\s+algo\s+de|pon)\s+(.+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun matchPlayMusicEs(lower: String, original: String): ParseResult? {
+        if (isCompoundEs(lower)) return null
+        if (MUSIC_EXCLUDE.any { lower.contains(it) }) return null
+        val m = PLAY_MUSIC_PATTERN.find(lower) ?: return null
+        var q = m.groupValues[1].trim()
+        // Strip leftover leaders ("música de X" → "X").
+        q = q.removePrefix("música de ").removePrefix("musica de ")
+            .removePrefix("la canción ").removePrefix("la cancion ")
+            .removePrefix("música ").removePrefix("musica ").trim()
+        if (q.isBlank() || q.length < 2) return null
+        return ParseResult(
+            action = "play_music", intent = null,
+            toolName = "play_music", toolParams = mapOf("query" to q),
+            description = "Reproduciendo '$q'"
+        )
+    }
+
+    private val NAVIGATE_PATTERN = Regex(
+        """^(?:llévame|llevame|navega\s+a|navégame\s+a|navegame\s+a|cómo\s+llego\s+a|""" +
+        """como\s+llego\s+a|ruta\s+a|indícame\s+cómo\s+llegar\s+a)\s+(?:al?\s+|la\s+|los\s+)?(.+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun matchNavigateEs(lower: String, original: String): ParseResult? {
+        if (isCompoundEs(lower)) return null
+        val m = NAVIGATE_PATTERN.find(lower) ?: return null
+        val dest = m.groupValues[1].trim()
+        if (dest.isBlank() || dest.length < 2) return null
+        val app = if (lower.contains("waze")) "waze" else "maps"
+        return ParseResult(
+            action = "navigate", intent = null,
+            toolName = "open_app_action", toolParams = mapOf("app" to app, "query" to dest),
+            description = "Navegando a $dest"
+        )
+    }
+
+    private val RIDE_PATTERN = Regex(
+        """(?:pídeme|pideme|pide|consígueme|consigueme|solicita)\s+un\s+""" +
+        """(uber|taxi|didi|cabify|bolt|lyft)\s*(?:a|hasta|para|al|hacia)?\s*(.*)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun matchRideEs(lower: String, original: String): ParseResult? {
+        if (isCompoundEs(lower)) return null
+        val m = RIDE_PATTERN.find(lower) ?: return null
+        val kind = m.groupValues[1].lowercase()
+        val app = if (kind == "taxi") "uber" else kind
+        val dest = m.groupValues[2].trim().trim('.', ',')
+        val params = if (dest.isNotBlank() && dest.length >= 2)
+            mapOf("app" to app, "query" to dest) else mapOf("app" to app)
+        return ParseResult(
+            action = "ride", intent = null,
+            toolName = "open_app_action", toolParams = params,
+            description = if (dest.isNotBlank()) "Pidiendo $app a $dest" else "Abriendo $app"
+        )
+    }
+
+    private val OPEN_APP_ES_PATTERN = Regex(
+        """^(?:abre|abrir|ábreme|abreme|inicia|arranca)\s+(?:la\s+|el\s+)?(?:app\s+|aplicación\s+)?(.+?)(?:\s+app)?$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun matchOpenAppEs(lower: String, original: String): ParseResult? {
+        if (isCompoundEs(lower)) return null
+        // "abre los ajustes/configuración" handled by matchOpenSettings already.
+        if (lower.contains("ajuste") || lower.contains("configuracion") ||
+            lower.contains("configuración")) return null
+        val m = OPEN_APP_ES_PATTERN.find(lower) ?: return null
+        val appName = m.groupValues[1].trim()
+        if (appName.isBlank() || appName.length < 2) return null
+        return ParseResult(
+            action = "open_app", intent = null,
+            toolName = "open_app", toolParams = mapOf("app_name" to appName),
+            description = "Abriendo $appName"
+        )
     }
 
     // ==================== Pattern Matchers ====================

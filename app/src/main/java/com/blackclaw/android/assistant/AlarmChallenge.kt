@@ -12,11 +12,20 @@ import kotlin.random.Random
  */
 sealed class AlarmChallenge {
 
-    /** Prompt shown to the user. */
+    /** Prompt shown to the user during the answer phase. */
     abstract val prompt: String
 
     /** Returns true if [answer] solves the challenge. */
     abstract fun check(answer: String): Boolean
+
+    /**
+     * Optional content the user must memorise. When non-null the UI shows
+     * [memorizeText] for [memorizeSeconds] seconds, then HIDES it and asks the
+     * user to reproduce it from memory. Null for challenges with nothing to
+     * hide (math/type, where the prompt stays visible).
+     */
+    open val memorizeText: String? = null
+    open val memorizeSeconds: Int = 0
 
     /** Math: solve a × b + c style problem. */
     data class Math(val a: Int, val b: Int, val c: Int) : AlarmChallenge() {
@@ -25,9 +34,14 @@ sealed class AlarmChallenge {
         override fun check(answer: String) = answer.trim().toIntOrNull() == solution
     }
 
-    /** Memory: repeat a digit sequence shown briefly. */
+    /**
+     * Memory: a digit sequence is shown briefly, then hidden. The user must
+     * type it back from memory — a genuine recall test, not a copy task.
+     */
     data class Memory(val digits: String) : AlarmChallenge() {
-        override val prompt = "Memoriza y escribe: $digits"
+        override val prompt = "¿Qué dígitos viste? Escríbelos de memoria"
+        override val memorizeText = digits
+        override val memorizeSeconds = 4
         override fun check(answer: String) = answer.trim().filter { it.isDigit() } == digits
     }
 

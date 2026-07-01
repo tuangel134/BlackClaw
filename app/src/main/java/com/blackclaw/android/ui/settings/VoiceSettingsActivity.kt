@@ -99,7 +99,39 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Enable toggle
+            // Set BlackClaw as the phone's default assistant (assist gesture).
+            var isAssistant by remember {
+                mutableStateOf(com.blackclaw.android.ui.assist.AssistantRole.isDefault(ctx))
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(surface, RoundedCornerShape(14.dp))
+                    .clickable {
+                        com.blackclaw.android.ui.assist.AssistantRole.openSettings(ctx)
+                    }
+                    .padding(16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🐾", fontSize = 24.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Asistente del teléfono", color = textPrimary, fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (isAssistant) "BlackClaw es tu asistente por defecto ✓"
+                            else "Ponlo por defecto para invocarlo con el gesto/botón",
+                            color = if (isAssistant) accent else textSecondary, fontSize = 12.sp,
+                            lineHeight = 16.sp)
+                    }
+                    Text("Configurar", color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Cuando lo invoques (mantén el botón de inicio o desliza desde la esquina), " +
+                    "BlackClaw aparece incluso sobre la pantalla bloqueada y escucha tu orden.",
+                    color = textSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -130,6 +162,31 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                             runCatching { com.blackclaw.android.service.VoiceWakeService.stop(ctx) }
                         }
                     },
+                    colors = SwitchDefaults.colors(checkedTrackColor = accent),
+                )
+            }
+
+            // Show the full-screen panel when invoked by voice.
+            var panelOnWake by remember { mutableStateOf(VoiceInputManager.panelOnWake) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(surface, RoundedCornerShape(14.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🪟", fontSize = 22.sp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Mostrar panel al hablar", color = textPrimary,
+                        fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Al decir la palabra de activación, abre la pantalla flotante con animación. " +
+                        "Si lo apagas, responde solo en segundo plano.",
+                        color = textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                }
+                Switch(
+                    checked = panelOnWake,
+                    onCheckedChange = { panelOnWake = it; VoiceInputManager.panelOnWake = it },
                     colors = SwitchDefaults.colors(checkedTrackColor = accent),
                 )
             }

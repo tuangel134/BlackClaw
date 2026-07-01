@@ -32,6 +32,13 @@ object DemonstrationRecorder {
     @Volatile private var label: String = ""
     private val steps = CopyOnWriteArrayList<RecordedStep>()
 
+    /**
+     * Passive buffer of the CURRENT task's replayable steps, captured ALWAYS
+     * (even without an explicit "aprende esto"). Lets the user say afterwards
+     * "guarda lo último como rutina X" with zero setup. Reset at task start.
+     */
+    private val passive = CopyOnWriteArrayList<RecordedStep>()
+
     /** Tools that are NOT worth replaying (observation / perception / control). */
     private val NON_REPLAYABLE = setOf(
         "get_screen_info", "find_node_info", "read_screen_ocr", "take_screenshot",
@@ -52,11 +59,30 @@ object DemonstrationRecorder {
 
     /** Record a successful tool call. Called by the agent loop after execution. */
     fun record(toolName: String, params: Map<String, Any>, success: Boolean) {
-        if (!recording || !success) return
+        if (!success) return
         if (toolName in NON_REPLAYABLE) return
-        val desc = buildDescription(toolName, params)
-        steps.add(RecordedStep(toolName, params, desc))
-        XLog.d(TAG, "Recorded step: $toolName")
+        val step = RecordedStep(toolName, params, buildDescription(toolName, params))
+        // Always feed the passive buffer (frictionless learning).
+        passive.add(step)
+        // And the explicit recording buffer when the user asked to "learn this".
+        if (recording) {
+            steps.add(step)
+            XLog.d(TAG, "Recorded step: $toolName")
+        }
+    }
+
+    /** Call at the start of each task to reset the passive buffer. */
+    fun noteTaskStart() {
+        if (!recording) passive.clear()
+    }
+
+    fun lastTaskSteps(): List<RecordedStep> = passive.toList()
+
+    /** Save the LAST task's passively-captured steps as a routine. */
+    fun saveLastAsRoutine(name: String, icon: String = "🐾", triggerTime: String = ""): String? {
+        val captured = passive.toList()
+        if (captured.isEmpty()) return null
+        return persistRoutine(captured, name, icon, triggerTime)
     }
 
     fun stop(): List<RecordedStep> {
@@ -76,6 +102,12 @@ object DemonstrationRecorder {
             XLog.w(TAG, "saveAsRoutine: nothing recorded")
             return null
         }
+        return persistRoutine(captured, name, icon, triggerTime)
+    }
+
+    private fun persistRoutine(
+        captured: List<RecordedStep>, name: String, icon: String, triggerTime: String,
+    ): String {
         val routineSteps = captured.map {
             RoutineEngine.RoutineStep(
                 toolName = it.toolName,

@@ -90,6 +90,7 @@ object OpenCodeZenModels {
             val fresh = runCatching { fetchAndVerify() }.getOrNull()
             if (!fresh.isNullOrEmpty()) {
                 writeCache(fresh)
+                maybeAutoSwitchActive(fresh)
                 XLog.i(TAG, "Refreshed free models: ${fresh.joinToString()}")
                 onDone?.invoke(fresh)
             } else {
@@ -168,6 +169,23 @@ object OpenCodeZenModels {
     }
 
     // ── Cache ──
+
+    /**
+     * If the user's ACTIVE model is an OpenCode Zen free model that just dropped
+     * out of the verified list (stopped being free), auto-switch to a still-free
+     * one so they're never stuck on a dead model. No-op otherwise.
+     */
+    private fun maybeAutoSwitchActive(fresh: List<String>) {
+        val provider = KVUtils.getLlmProvider()
+        if (!provider.equals("OPENCODE_ZEN", ignoreCase = true)) return
+        val active = KVUtils.getLlmModelName()
+        if (active.isBlank() || active in fresh) return
+        val replacement = fresh.firstOrNull { it == "deepseek-v4-flash-free" }
+            ?: fresh.firstOrNull() ?: return
+        KVUtils.setLlmModelName(replacement)
+        KVUtils.sync()
+        XLog.i(TAG, "Active free model '$active' no longer free — auto-switched to '$replacement'")
+    }
 
     private fun readCache(): List<String> {
         val raw = KVUtils.getString(KEY_CACHE, "")

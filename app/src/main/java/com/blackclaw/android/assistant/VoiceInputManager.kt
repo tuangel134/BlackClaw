@@ -54,46 +54,109 @@ object VoiceInputManager {
         get() = KVUtils.getString(KEY_LANG, "es-ES")
         set(v) { KVUtils.putString(KEY_LANG, v); KVUtils.sync() }
 
+    /** Show the full-screen assist panel when the wake word fires (vs background-only). */
+    var panelOnWake: Boolean
+        get() = KVUtils.getBoolean("voice_panel_on_wake", true)
+        set(v) { KVUtils.putBoolean("voice_panel_on_wake", v); KVUtils.sync() }
+
     fun isAvailable(): Boolean =
         SpeechRecognizer.isRecognitionAvailable(ClawApplication.instance)
 
-    private fun buildIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-        // Partial results let us catch the wake word mid-utterance (faster, and
-        // recovers cases where the full result is truncated).
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        // Prefer on-device recognition when the OEM supports it (privacy + offline).
-        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-    }
+    private fun buildIntent(preferOffline: Boolean = true, lang: String = language): Intent =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            // Prefer on-device recognition when the OEM supports it (privacy + offline).
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ClawApplication.instance.packageName)
+        }
 
     /**
      * Listen once and return the transcript via [onResult]. [onError] gets a
-     * human-readable reason. Must be called from the main thread.
+     * human-readable reason. [onRms] streams mic loudness (dB) for UI animation,
+     * [onPartial] streams interim transcripts. Must be called from the main thread.
+     *
+     * Robust against the Google recognizer's flaky transient errors (CLIENT/BUSY/
+     * SERVER) by retrying a couple of times, and falls back to the device's
+     * default language if es-ES isn't available on-device.
      */
-    fun listenOnce(onResult: (String) -> Unit, onError: (String) -> Unit = {}) {
-        main.post { startSingle(onResult, onError) }
+    fun listenOnce(
+        onResult: (String) -> Unit,
+        onError: (String) -> Unit = {},
+        onRms: (Float) -> Unit = {},
+        onPartial: (String) -> Unit = {},
+    ) {
+        main.post { startSingle(onResult, onError, onRms, onPartial, attempt = 0, preferOffline = false, lang = language) }
     }
 
-    private fun startSingle(onResult: (String) -> Unit, onError: (String) -> Unit) {
+    private fun startSingle(
+        onResult: (String) -> Unit,
+        onError: (String) -> Unit,
+        onRms: (Float) -> Unit,
+        onPartial: (String) -> Unit,
+        attempt: Int,
+        preferOffline: Boolean,
+        lang: String,
+    ) {
         if (!isAvailable()) { onError("Reconocimiento de voz no disponible en este dispositivo."); return }
+        runCatching { recognizer?.destroy() }
         val sr = SpeechRecognizer.createSpeechRecognizer(ClawApplication.instance)
         recognizer = sr
+        var done = false
         sr.setRecognitionListener(object : SimpleRecognition() {
+            override fun onRmsChanged(rmsdB: Float) { onRms(rmsdB) }
+            override fun onPartialResults(partialResults: Bundle?) {
+                val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()?.trim().orEmpty()
+                if (t.isNotEmpty()) onPartial(t)
+            }
             override fun onResults(results: Bundle) {
+                if (done) return
+                done = true
                 val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.trim().orEmpty()
                 cleanup()
                 if (text.isNotEmpty()) onResult(text) else onError("No entendí nada.")
             }
             override fun onError(error: Int) {
+                if (done) return
                 cleanup()
-                onError(errorText(error))
+                // Transient errors: retry up to 3 attempts with a short backoff.
+                val transient = error == SpeechRecognizer.ERROR_CLIENT ||
+                    error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                    error == 11 /* ERROR_SERVER_DISCONNECTED */ ||
+                    error == SpeechRecognizer.ERROR_NETWORK ||
+                    error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+                // Language errors (12/13): retry once with the device default language.
+                val langErr = error == 12 || error == 13
+                when {
+                    transient && attempt < 3 -> {
+                        done = true
+                        main.postDelayed({
+                            startSingle(onResult, onError, onRms, onPartial, attempt + 1, preferOffline, lang)
+                        }, 450L)
+                    }
+                    langErr && lang.isNotEmpty() -> {
+                        done = true
+                        main.postDelayed({
+                            startSingle(onResult, onError, onRms, onPartial, attempt + 1, false, "")
+                        }, 200L)
+                    }
+                    else -> onError(errorText(error))
+                }
             }
         })
-        runCatching { sr.startListening(buildIntent()) }
-            .onFailure { sr.destroy(); recognizer = null; onError("No pude iniciar el micrófono: ${it.message}") }
+        runCatching { sr.startListening(buildIntent(preferOffline, lang)) }
+            .onFailure {
+                sr.destroy(); recognizer = null
+                if (attempt < 3) {
+                    main.postDelayed({
+                        startSingle(onResult, onError, onRms, onPartial, attempt + 1, preferOffline, lang)
+                    }, 450L)
+                } else onError("No pude iniciar el micrófono: ${it.message}")
+            }
     }
 
     /**

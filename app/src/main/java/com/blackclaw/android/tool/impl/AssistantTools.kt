@@ -84,8 +84,7 @@ class AssistantAlarmTool : BaseTool() {
 }
 
 /** Note: a persistent text note / todo in the hub. */
-class AssistantNoteTool : BaseTool() {
-    override fun getName() = "assistant_note"
+class AssistantNoteTool : BaseTool() {    override fun getName() = "assistant_note"
     override fun getDisplayName() = "Nota"
     override fun getDescriptionEN() =
         "Save a native in-app note or todo in the Assistant hub. Use for things to remember " +
@@ -134,9 +133,136 @@ class AssistantEventTool : BaseTool() {
     }
 }
 
+/**
+ * Smart appointment: the one-shot "tengo una reunión a las 7" flow. Creates a
+ * single calendar EVENT that ALSO rings like an alarm at its time, shows on the
+ * calendar/agenda, warns about conflicts, and can add an early heads-up
+ * reminder. Works for anything from "a las 7" to "en 3 semanas" — the native
+ * alarm fires whenever that moment arrives.
+ */
+class AssistantAppointmentTool : BaseTool() {
+    override fun getName() = "assistant_appointment"
+    override fun getDisplayName() = "Cita / reunión"
+    override fun getDescriptionEN() =
+        "Schedule an appointment/meeting the user mentions ('tengo una reunión a las 7', " +
+        "'cita el viernes 10:00', 'en 3 semanas tengo X'). Creates ONE calendar event that ALSO " +
+        "rings like an alarm at its time and shows on the calendar/agenda. Use this for ANY future " +
+        "commitment with a time — it handles near and far future. " +
+        "Time: 'HH:MM', 'tomorrow 15:00', 'el viernes 10:00', 'YYYY-MM-DD HH:MM'. " +
+        "Set ring=false for a silent calendar entry (no alarm). remind_before_min adds an early " +
+        "heads-up reminder (e.g. 30 = notify 30 min before)."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "agenda una cita/reunión: la pone en calendario, suena como alarma y avisa antes"
+    override fun getParameters() = listOf(
+        ToolParameter("title", "string", "What the appointment is (e.g. 'Reunión con cliente').", true),
+        ToolParameter("when", "string", "When it starts (e.g. 'a las 7' → '19:00', 'el viernes 10:00').", true),
+        ToolParameter("location", "string", "Optional place.", false),
+        ToolParameter("ring", "string", "true (rings like an alarm, default) | false (silent calendar entry).", false),
+        ToolParameter("remind_before_min", "string", "Optional minutes before to send an early reminder (e.g. '30').", false),
+        ToolParameter("repeat", "string", "none|daily|weekly|weekdays|weekends|monthly (default none).", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val title = requireString(params, "title").trim()
+        val ts = AssistantTime.parse(requireString(params, "when"))
+        if (ts <= 0) return ToolResult.error("No pude entender la fecha/hora '${params["when"]}'.")
+        val loc = optionalString(params, "location", "")
+        val ring = optionalString(params, "ring", "true").lowercase() != "false"
+        val repeat = optionalString(params, "repeat", "none").lowercase()
+        val remindBefore = optionalString(params, "remind_before_min", "").toIntOrNull() ?: 0
+
+        // Warn about conflicts (something else within 30 min).
+        val conflicts = AssistantStore.conflictsAt(ts, windowMin = 30)
+        val event = AssistantStore.create(
+            type = AssistantItemType.EVENT, title = title,
+            body = if (loc.isNotBlank()) "📍 $loc" else "",
+            triggerAtMs = ts, repeat = repeat, ring = ring, source = "ai",
+        )
+        AssistantScheduler.arm(ClawApplication.instance, event)
+
+        // Optional early heads-up reminder.
+        if (remindBefore > 0) {
+            val remindAt = ts - remindBefore * 60_000L
+            if (remindAt > System.currentTimeMillis()) {
+                val r = AssistantStore.create(
+                    type = AssistantItemType.REMINDER,
+                    title = "Pronto: $title",
+                    body = "En $remindBefore min" + if (loc.isNotBlank()) " · 📍 $loc" else "",
+                    triggerAtMs = remindAt, source = "ai", category = "lead",
+                )
+                AssistantScheduler.arm(ClawApplication.instance, r)
+            }
+        }
+
+        val sb = StringBuilder("Listo, jefe. Agendé '$title' para ${AssistantTime.format(ts)}")
+        if (ring) sb.append(" y sonará como alarma")
+        if (remindBefore > 0) sb.append("; te aviso $remindBefore min antes")
+        sb.append(". Está en tu calendario y agenda.")
+        if (conflicts.isNotEmpty()) {
+            val c = conflicts.first()
+            sb.append(" ⚠️ Ojo: ya tienes '${c.title}' a ${AssistantTime.format(c.triggerAtMs)}.")
+        }
+        return ToolResult.success(sb.toString())
+    }
+}
+
+/** Read the upcoming agenda (alarms/reminders/events) for a spoken summary. */
+class AssistantAgendaTool : BaseTool() {
+    override fun getName() = "assistant_agenda"
+    override fun getDisplayName() = "Agenda"
+    override fun getDescriptionEN() =
+        "Read the user's upcoming agenda (alarms, reminders, events) from the Assistant hub. " +
+        "Use for 'qué tengo hoy', 'qué tengo mañana', 'mi agenda de esta semana', 'what's coming up'. " +
+        "range: today | tomorrow | week | all (default today). Returns a chronological list."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "lee la agenda próxima (hoy/mañana/semana) para resumirla"
+    override fun getParameters() = listOf(
+        ToolParameter("range", "string", "today | tomorrow | week | all (default today).", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val range = optionalString(params, "range", "today").lowercase()
+        val now = System.currentTimeMillis()
+        val cal = java.util.Calendar.getInstance()
+        fun startOfDay(offsetDays: Int): Long {
+            val c = java.util.Calendar.getInstance()
+            c.add(java.util.Calendar.DAY_OF_YEAR, offsetDays)
+            c.set(java.util.Calendar.HOUR_OF_DAY, 0); c.set(java.util.Calendar.MINUTE, 0)
+            c.set(java.util.Calendar.SECOND, 0); c.set(java.util.Calendar.MILLISECOND, 0)
+            return c.timeInMillis
+        }
+        val (from, to) = when (range) {
+            "tomorrow", "mañana" -> startOfDay(1) to startOfDay(2)
+            "week", "semana" -> now to startOfDay(8)
+            "all", "todo" -> now to Long.MAX_VALUE
+            else -> now to startOfDay(1) // today
+        }
+        val items = AssistantStore.upcoming(limit = 50, fromMs = from)
+            .filter { it.triggerAtMs < to }
+        if (items.isEmpty()) {
+            val label = when (range) {
+                "tomorrow", "mañana" -> "mañana"
+                "week", "semana" -> "esta semana"
+                "all", "todo" -> "próximamente"
+                else -> "hoy"
+            }
+            return ToolResult.success("No tienes nada agendado $label, jefe.")
+        }
+        val sb = StringBuilder()
+        items.forEach { i ->
+            val kind = when {
+                i.ring || i.type == AssistantItemType.ALARM -> "⏰"
+                i.type == AssistantItemType.EVENT -> "📅"
+                else -> "🔔"
+            }
+            sb.append("$kind ${AssistantTime.format(i.triggerAtMs)} — ${i.title}")
+            if (i.body.isNotBlank()) sb.append(" (${i.body})")
+            sb.append("\n")
+        }
+        return ToolResult.success(sb.toString().trim())
+    }
+}
+
 /** Immediate alert push (no scheduling). */
-class AssistantAlertTool : BaseTool() {
-    override fun getName() = "assistant_alert"
+class AssistantAlertTool : BaseTool() {    override fun getName() = "assistant_alert"
     override fun getDisplayName() = "Aviso"
     override fun getDescriptionEN() =
         "Surface an important heads-up to the user right now as a native push notification, " +

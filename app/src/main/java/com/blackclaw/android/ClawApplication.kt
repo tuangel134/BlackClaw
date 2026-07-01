@@ -45,6 +45,17 @@ class ClawApplication : BaseApp() {
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
         runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
+        // Background self-check: which deep-link catalog schemes actually resolve
+        // on THIS device (helps prune/verify). Log only, non-blocking.
+        runCatching {
+            Thread({
+                runCatching {
+                    val cat = com.blackclaw.android.perception.AppActionScanner.verifiedCatalog()
+                    XLog.i(TAG, "Deep-link catalog: ${cat.count { it.second }} scheme-verified / " +
+                        "${cat.size} installed of ${com.blackclaw.android.tool.impl.AppDeepLinks.CATALOG.size}")
+                }
+            }, "deeplink-scan").start()
+        }
         // Unpack the bundled offline voice model in the background so the
         // hands-free wake word works out of the box (no download needed).
         runCatching { com.blackclaw.android.assistant.VoskModelManager.prepareIfNeeded() }

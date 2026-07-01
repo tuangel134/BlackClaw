@@ -172,6 +172,20 @@ private fun AlarmRingScreen(
     val challenge = remember { if (hasChallenge) AlarmChallenge.create(challengeKind) else null }
     var answer by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    // Memorise phase: countdown while [memorizeText] is visible, then hidden.
+    val needsMemorize = (challenge?.memorizeText != null)
+    var secondsLeft by remember { mutableStateOf(challenge?.memorizeSeconds ?: 0) }
+    val memorizing = solving && needsMemorize && secondsLeft > 0
+
+    LaunchedEffect(solving) {
+        if (solving && needsMemorize) {
+            secondsLeft = challenge?.memorizeSeconds ?: 0
+            while (secondsLeft > 0) {
+                kotlinx.coroutines.delay(1000L)
+                secondsLeft -= 1
+            }
+        }
+    }
 
     Box(
         Modifier.fillMaxSize().background(
@@ -201,42 +215,58 @@ private fun AlarmRingScreen(
 
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (hasChallenge && solving && challenge != null) {
-                    // Challenge gate
-                    Text(challenge.prompt, fontSize = 18.sp, color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = answer,
-                        onValueChange = { answer = it; error = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        isError = error,
-                        singleLine = true,
-                        placeholder = { Text("Tu respuesta", color = Color(0xFF6B5B90)) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF7C3AED),
-                            unfocusedBorderColor = Color(0xFF3A2E55),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            cursorColor = Color(0xFF7C3AED),
-                            errorBorderColor = Color(0xFFEF4444),
-                        ),
-                    )
-                    if (error) {
-                        Spacer(Modifier.height(6.dp))
-                        Text("Incorrecto, vuelve a intentarlo", fontSize = 13.sp, color = Color(0xFFEF4444))
+                    if (memorizing) {
+                        // Memorise phase — show the secret + a countdown, then hide.
+                        Text("Memoriza:", fontSize = 16.sp, color = Color(0xFFB9A7E0))
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            challenge.memorizeText ?: "",
+                            fontSize = 52.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            letterSpacing = 8.sp,
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        Text("Se oculta en $secondsLeft…", fontSize = 15.sp, color = Color(0xFF8B7BB0))
+                        Spacer(Modifier.height(40.dp))
+                    } else {
+                        // Answer phase (secret hidden if it was a memory challenge).
+                        Text(challenge.prompt, fontSize = 18.sp, color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = answer,
+                            onValueChange = { answer = it; error = false },
+                            modifier = Modifier.fillMaxWidth(),
+                            isError = error,
+                            singleLine = true,
+                            placeholder = { Text("Tu respuesta", color = Color(0xFF6B5B90)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF7C3AED),
+                                unfocusedBorderColor = Color(0xFF3A2E55),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = Color(0xFF7C3AED),
+                                errorBorderColor = Color(0xFFEF4444),
+                            ),
+                        )
+                        if (error) {
+                            Spacer(Modifier.height(6.dp))
+                            Text("Incorrecto, vuelve a intentarlo", fontSize = 13.sp, color = Color(0xFFEF4444))
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                if (challenge.check(answer)) onDismiss() else { error = true; answer = "" }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(58.dp),
+                            shape = RoundedCornerShape(29.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF7C3AED), contentColor = Color.White),
+                        ) { Text("Comprobar", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+                        Spacer(Modifier.height(40.dp))
                     }
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            if (challenge.check(answer)) onDismiss() else { error = true; answer = "" }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(58.dp),
-                        shape = RoundedCornerShape(29.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF7C3AED), contentColor = Color.White),
-                    ) { Text("Comprobar", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
-                    Spacer(Modifier.height(40.dp))
                 } else {
                     Button(
                         onClick = { if (hasChallenge) solving = true else onDismiss() },

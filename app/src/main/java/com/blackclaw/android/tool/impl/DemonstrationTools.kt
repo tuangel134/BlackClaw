@@ -72,3 +72,36 @@ class CancelDemoTool : BaseTool() {
         return ToolResult.success("Grabación descartada.")
     }
 }
+
+/**
+ * Save the LAST completed task as a reusable routine — frictionless learning.
+ * The recorder passively buffers every task's replayable steps, so the user can
+ * say "guarda lo último como rutina X" even without announcing it beforehand.
+ */
+class SaveLastAsRoutineTool : BaseTool() {
+    override fun getName() = "save_last_as_routine"
+    override fun getDisplayName() = "Guardar lo último como rutina"
+    override fun getDescriptionEN() =
+        "Save the steps of the LAST task you just performed as a reusable routine, WITHOUT having " +
+        "recorded it in advance. Use when the user says 'guarda lo que hiciste', 'guarda lo último " +
+        "como rutina X', 'repite esto la próxima vez'. Optional trigger_time to run it daily."
+    override fun getDescriptionCN() = getDescriptionEN()
+    override fun getBrief() = "guarda el último flujo ejecutado como rutina (sin haberlo anunciado)"
+    override fun getParameters() = listOf(
+        ToolParameter("name", "string", "Name for the routine.", true),
+        ToolParameter("trigger_time", "string", "Optional 'HH:MM' to run it daily.", false),
+        ToolParameter("icon", "string", "Optional emoji icon.", false),
+    )
+    override fun execute(params: Map<String, Any>): ToolResult {
+        val name = requireString(params, "name").trim()
+        if (name.isEmpty()) return ToolResult.error("Dame un nombre para la rutina.")
+        val triggerTime = optionalString(params, "trigger_time", "")
+        val icon = optionalString(params, "icon", "🐾")
+        val saved = DemonstrationRecorder.saveLastAsRoutine(name, icon, triggerTime)
+            ?: return ToolResult.error(
+                "No tengo pasos replicables del último flujo. Esto funciona justo después de que " +
+                "BlackClaw haga una tarea con acciones (abrir apps, tocar, escribir).")
+        val sched = if (triggerTime.isNotBlank()) " Se ejecutará a las $triggerTime." else ""
+        return ToolResult.success("Guardé el último flujo como rutina '$saved'.$sched Pídeme 'ejecuta $saved' cuando quieras.")
+    }
+}
