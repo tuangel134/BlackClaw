@@ -28,6 +28,10 @@ object ProactiveConfig {
     private const val KEY_QUIET_ONLY_IMPORTANT = "proactive_quiet_only_important"
     private const val KEY_WATCH_ALL_APPS = "proactive_watch_all_apps"
     private const val KEY_WATCHED_APPS = "proactive_watched_apps"
+    private const val KEY_MUTED_APPS = "proactive_muted_apps"
+    // ── Efficiency ──
+    private const val KEY_PREFILTER = "proactive_prefilter"
+    private const val KEY_MAX_CLASSIFY_HOUR = "proactive_max_classify_hour"
     // ── Gating ──
     private const val KEY_QUIET_START = "proactive_quiet_start_hour"   // e.g. 23
     private const val KEY_QUIET_END = "proactive_quiet_end_hour"       // e.g. 7
@@ -108,9 +112,47 @@ object ProactiveConfig {
         set(v) { KVUtils.putString(KEY_WATCHED_APPS, v); KVUtils.sync() }
 
     fun isAppWatched(pkg: String): Boolean {
+        // A learned-mute always wins: apps the assistant stopped watching (because
+        // the user almost always ignored them) are skipped even in watch-all mode.
+        if (isAppMuted(pkg)) return false
         if (watchAllApps) return true
         return watchedApps.split(",").map { it.trim() }.any { it.isNotEmpty() && it == pkg }
     }
+
+    /** Comma-separated packages the assistant auto-muted after learning they're
+     *  almost always ignored. Excluded from watching regardless of watchAllApps. */
+    var mutedApps: String
+        get() = KVUtils.getString(KEY_MUTED_APPS, "")
+        set(v) { KVUtils.putString(KEY_MUTED_APPS, v); KVUtils.sync() }
+
+    fun isAppMuted(pkg: String): Boolean =
+        pkg.isNotBlank() && mutedApps.split(",").map { it.trim() }.any { it.isNotEmpty() && it == pkg }
+
+    fun mutedAppList(): List<String> =
+        mutedApps.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+    fun muteApp(pkg: String) {
+        if (pkg.isBlank() || isAppMuted(pkg)) return
+        val set = mutedAppList().toMutableSet().apply { add(pkg) }
+        mutedApps = set.joinToString(",")
+    }
+
+    fun clearMutedApps() { mutedApps = "" }
+
+    // ──────────────────────── Efficiency ────────────────────────
+
+    /** Cheap local pre-filter: skip the LLM entirely for notifications with no
+     *  actionable cue (time/money/commitment). Saves tokens, battery and (in
+     *  local mode) RAM. Default on. */
+    var prefilterEnabled: Boolean
+        get() = KVUtils.getBoolean(KEY_PREFILTER, true)
+        set(v) { KVUtils.putBoolean(KEY_PREFILTER, v); KVUtils.sync() }
+
+    /** Max LLM classification calls per rolling hour (separate from action cap).
+     *  Guards against notification storms hammering the model. Default 40. */
+    var maxClassificationsPerHour: Int
+        get() = KVUtils.getInt(KEY_MAX_CLASSIFY_HOUR, 40)
+        set(v) { KVUtils.putInt(KEY_MAX_CLASSIFY_HOUR, v.coerceIn(1, 500)); KVUtils.sync() }
 
     // ──────────────────────── Gating ────────────────────────
 
@@ -179,6 +221,13 @@ object ProactiveConfig {
     var speakAlerts: Boolean
         get() = KVUtils.getBoolean("proactive_speak_alerts", true)
         set(v) { KVUtils.putBoolean("proactive_speak_alerts", v); KVUtils.sync() }
+
+    /** Auto-create detected habits (recurring alarms/reminders) without asking.
+     *  Off by default: recurring alarms appearing unannounced are high-surprise,
+     *  so by default the assistant only SUGGESTS them once and waits. */
+    var autoCreateHabits: Boolean
+        get() = KVUtils.getBoolean("proactive_auto_create_habits", false)
+        set(v) { KVUtils.putBoolean("proactive_auto_create_habits", v); KVUtils.sync() }
 
     // ──────────────────────── Weekly finance summary ────────────────────────
 

@@ -22,16 +22,26 @@ object SmartQuietDetector {
 
     private const val TAG = "SmartQuietDetector"
     private const val KEY_LAST_INTERACTION = "smart_quiet_last_interaction"
-    
+
     /** Minimum screen-off time to consider the user "away". */
     private const val SCREEN_OFF_THRESHOLD_MS = 30 * 60_000L  // 30 minutes
 
+    /** Don't hit MMKV on every accessibility event — throttle persisted writes. */
+    private const val WRITE_THROTTLE_MS = 60_000L
+    @Volatile private var lastWriteMs = 0L
+
     /**
      * Record that the user interacted with the device.
-     * Called from accessibility events or chat activity resume.
+     * Called from accessibility events (user taps/scrolls) and chat resume.
+     *
+     * Throttled: accessibility fires these constantly, so we persist at most once
+     * per minute to avoid pointless MMKV churn (important on low-RAM devices).
      */
     fun recordInteraction() {
-        KVUtils.putLong(KEY_LAST_INTERACTION, System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        if (now - lastWriteMs < WRITE_THROTTLE_MS) return
+        lastWriteMs = now
+        KVUtils.putLong(KEY_LAST_INTERACTION, now)
     }
 
     /**

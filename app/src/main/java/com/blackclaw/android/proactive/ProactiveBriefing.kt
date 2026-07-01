@@ -105,12 +105,31 @@ object ProactiveBriefing {
     }
 
     /**
-     * After morning briefing, automatically set up detected habits instead of
-     * just suggesting them. The assistant ACTS, it doesn't ask permission.
+     * After the morning briefing, handle a detected habit. By default the
+     * assistant only SUGGESTS it once (creating a recurring alarm unannounced is
+     * jarring); if the user opted into [ProactiveConfig.autoCreateHabits] it sets
+     * it up automatically as before.
      */
     private fun surfaceHabitSuggestion() {
         val habit = HabitTracker.newHabits().firstOrNull() ?: return
-        // Instead of just suggesting, actually create the recurring item
+
+        // Default path: suggest once, don't create anything. Reversible, no surprise.
+        if (!ProactiveConfig.autoCreateHabits) {
+            val body = "${HabitTracker.describe(habit)} Si quieres, puedo programarlo " +
+                "automáticamente cada semana — dímelo y lo activo."
+            AssistantStore.create(
+                type = AssistantItemType.ALERT,
+                title = "💡 ¿Automatizar un hábito?",
+                body = body, category = "habit", source = "ai",
+            )
+            AssistantReceiver.postNotification(
+                ClawApplication.instance, "💡 ¿Automatizar un hábito?", body, highPriority = false)
+            HabitTracker.markSuggested(habit)
+            XLog.i(TAG, "Suggested habit (no auto-create): ${habit.id}")
+            return
+        }
+
+        // Opt-in path: actually create the recurring item.
         val registry = ToolRegistry.getInstance()
         val cal = Calendar.getInstance().apply {
             set(Calendar.DAY_OF_WEEK, habit.dayOfWeek)
@@ -141,7 +160,7 @@ object ProactiveBriefing {
                 ))
             }
         }
-        val text = "Automaticé un patrón: ${HabitTracker.describe(habit).removeSuffix(" ¿Quieres que lo automatice?")}"
+        val text = "Automaticé un patrón: ${HabitTracker.describe(habit)}"
         AssistantStore.create(
             type = AssistantItemType.ALERT,
             title = "⚡ Hábito automatizado",

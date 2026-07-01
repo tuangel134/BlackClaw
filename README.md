@@ -107,6 +107,8 @@ touching the phone.
 | **Files & memory** | read/write files · long-term facts · shared knowledge base |
 | **Assistant hub** | reminders · alarms · notes · calendar · alerts · finances (native, push) |
 | **Automation** | cron-style scheduled tasks · multi-step plan execution · external API (Tasker/ADB) |
+| **Terminal** | persistent internal shell (local/privileged) · adb-over-wifi to remote devices (pair/connect/shell) without a PC |
+| **Security** | app risk scanner · real-time ad attribution · neutralize/block/disable/uninstall problem apps |
 
 ---
 
@@ -274,6 +276,25 @@ Agent Core Reliability:**
 ### Productivity tools
 - Device state (battery, memory, network), settings toggles, volume/brightness
 - Calendar, SMS, contacts, call log
+
+### Internal terminal
+- **Persistent shell session** shared between the user and the AI — working
+  directory, backend and adb connections survive across commands
+- Backends: LOCAL (app-level, works always) or PRIVILEGED (Shizuku / self-paired
+  ADB for `pm`, `am`, `settings`, `input`…)
+- **adb-over-WiFi without a PC:** `adb pair <host:port> <code>`, `adb connect`,
+  `adb shell <cmd>` — operate another device from inside BlackClaw
+- Activatable toggle in Settings → Advanced
+
+### Security (antimalware)
+- **Real-time ad attribution:** the accessibility service tracks which app's
+  window just interrupted you, attributing pop-up ads to their source package
+- **App risk scanner:** scores all installed apps on overlay permission, hidden
+  icon, accessibility service, device-admin, sideloaded origin, dangerous
+  permissions, and recently-installed timing
+- **Actions:** "neutralize" (revoke overlay + force-stop), disable, uninstall,
+  open settings — via Shizuku/ADB when available, system UI otherwise
+- Enable from Settings → Advanced → Security
 - Weather, web search, translation, currency/unit conversion, QR, hashing,
   JSON/regex utilities, file read/write, and more
 - Long-term memory facts and a shared knowledge base
@@ -459,6 +480,41 @@ PR guidelines, and conventions.
 
 ### Unreleased (dev)
 
+- **Internal terminal (Termux-like):** BlackClaw now ships its own persistent
+  shell session shared between the user (new Terminal screen) and the AI (the
+  `terminal` tool). Choose between LOCAL (app-level, no root) and PRIVILEGED
+  (Shizuku / self-paired ADB) backends. Built-in `adb` router for connecting to
+  other devices over Wireless Debugging without a PC: `adb pair`, `adb connect`,
+  `adb shell`, `adb disconnect` — all from inside BlackClaw. Enable from
+  Settings → Advanced → Terminal.
+- **Antimalware / app security:** built-in on-device scanner that scores
+  installed apps by risky traits (overlay permission, accessibility, hidden icon,
+  device-admin, sideloaded origin, dangerous permission combos) and **real-time
+  ad attribution** — the accessibility service tracks which app's window just
+  interrupted you, so when you say "an app is spamming me with ads" the
+  assistant knows who did it. Actions: revoke overlay + force-stop ("neutralize"),
+  disable, uninstall. Uses ADB/Shizuku when available; falls back to opening the
+  right system screen. Enable from Settings → Advanced → Security.
+- **Proactive assistant improvements:**
+  - Learned preferences now actually influence decisions (correction feedback +
+    inline learning from each classification)
+  - Pre-filter skips the LLM for notifications with no time/money/commitment cue
+    (biggest efficiency win — most notifications never wake the model)
+  - Classification budget (max calls/hour) protects against notification storms
+  - Apps the assistant keeps ignoring get auto-muted (reversible from settings)
+  - SmartQuietDetector now sees real user interaction (accessibility events), not
+    just chat opens
+  - Habits are SUGGESTED first, not auto-created as recurring alarms (opt-in)
+- **Assistant hub performance:** in-memory cache eliminates constant JSON
+  re-parsing; automatic pruning of stale alerts and old completed items
+- **Rich notification extraction:** reads MessagingStyle / BigText / TextLines
+  from notifications so the proactive assistant rarely needs the intrusive
+  "open the chat to read" deep-read fallback
+- **In-app updates from GitHub:** BlackClaw checks the repo's latest release on
+  launch (and on demand from Settings → About) and, if a newer version is
+  published, downloads the signed APK and launches the installer — no Play Store,
+  no manual sideload. Because releases are signed with the same key, updates
+  install in place.
 - **Android Auto:** a voice-first, driving-safe surface on the car head unit
   built on the Car App Library — one-tap actions (Preguntar, Navegar, Música,
   Llamar, Notificaciones) that use the car's own speech-to-text and read answers

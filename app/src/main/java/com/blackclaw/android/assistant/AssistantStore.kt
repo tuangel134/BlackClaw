@@ -99,15 +99,24 @@ object AssistantStore {
     private const val TAG = "AssistantStore"
     private const val KEY = "KEY_ASSISTANT_ITEMS_V1"
 
+    /**
+     * In-memory cache of the parsed list. Every read (`all()` and its many
+     * callers: byType, upcoming, conflictsAt, finance helpers, briefings, the
+     * proactive hub snippet) previously re-parsed the whole JSON blob from MMKV.
+     * We parse once and reuse; writes refresh the cache. Big CPU/RAM win as the
+     * list grows.
+     */
+    @Volatile private var cache: List<AssistantItem>? = null
+
     /** Item types whose creation feeds habit learning (timed, user-routine items). */
     private val HABIT_TRACKED_TYPES = setOf(
         AssistantItemType.ALARM, AssistantItemType.REMINDER, AssistantItemType.EVENT)
 
     @Synchronized
     fun all(): List<AssistantItem> {
+        cache?.let { return it }
         val raw = KVUtils.getString(KEY, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
+        val parsed = if (raw.isBlank()) emptyList() else runCatching {
             val arr = JSONArray(raw)
             (0 until arr.length()).mapNotNull { i ->
                 runCatching { AssistantItem.fromJson(arr.getJSONObject(i)) }.getOrNull()
@@ -116,6 +125,8 @@ object AssistantStore {
             XLog.w(TAG, "Failed to parse assistant items: ${it.message}")
             emptyList()
         }
+        cache = parsed
+        return parsed
     }
 
     fun byType(type: AssistantItemType): List<AssistantItem> =
@@ -131,8 +142,35 @@ object AssistantStore {
         items.forEach { arr.put(it.toJson()) }
         KVUtils.putString(KEY, arr.toString())
         KVUtils.sync()
+        cache = items
         // Keep the home-screen widget + QS tile in sync.
         runCatching { AssistantWidget.refresh(com.blackclaw.android.ClawApplication.instance) }
+    }
+
+    /**
+     * Trim items that are safe to drop so the store doesn't grow without bound
+     * (relevant on low-RAM devices). Removes stale ALERTs (briefings / one-off
+     * heads-ups) and long-completed reminders/notes/events. NEVER touches
+     * finance, alarms, shopping, or any pending timed item.
+     */
+    @Synchronized
+    fun pruneOldItems(now: Long = System.currentTimeMillis()) {
+        val alertMaxAgeMs = 14L * 24 * 60 * 60 * 1000   // 14 days
+        val doneMaxAgeMs = 30L * 24 * 60 * 60 * 1000    // 30 days
+        val prunableDone = setOf(
+            AssistantItemType.REMINDER, AssistantItemType.NOTE, AssistantItemType.EVENT)
+        val before = all()
+        val after = before.filterNot { item ->
+            when {
+                item.type == AssistantItemType.ALERT -> now - item.createdAtMs > alertMaxAgeMs
+                item.done && item.type in prunableDone -> now - item.createdAtMs > doneMaxAgeMs
+                else -> false
+            }
+        }
+        if (after.size != before.size) {
+            saveAll(after)
+            XLog.i(TAG, "Pruned ${before.size - after.size} old assistant items")
+        }
     }
 
     @Synchronized

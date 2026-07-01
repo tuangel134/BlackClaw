@@ -57,6 +57,7 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var allowCalendar by remember { mutableStateOf(ProactiveConfig.allowCalendar) }
     var allowFinance by remember { mutableStateOf(ProactiveConfig.allowFinance) }
     var watchAll by remember { mutableStateOf(ProactiveConfig.watchAllApps) }
+    var mutedCount by remember { mutableStateOf(ProactiveConfig.mutedAppList().size) }
     var morningOn by remember { mutableStateOf(ProactiveConfig.morningBriefingEnabled) }
     var nightOn by remember { mutableStateOf(ProactiveConfig.nightBriefingEnabled) }
     var weeklyFinOn by remember { mutableStateOf(ProactiveConfig.weeklyFinanceEnabled) }
@@ -198,6 +199,30 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     if (watchAll) "Revisa notificaciones de cualquier app"
                     else "Solo apps de mensajería (WhatsApp, Telegram, SMS)",
                     watchAll, colors) { watchAll = it; ProactiveConfig.watchAllApps = it }
+            }
+
+            if (mutedCount > 0) {
+                Spacer(Modifier.height(8.dp))
+                Surface(color = colors.surface, shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Apps silenciadas automáticamente", fontSize = 14.sp,
+                                color = colors.textPrimary, fontWeight = FontWeight.Medium)
+                            Text("$mutedCount app(s) que casi siempre ignorabas. La IA dejó de revisarlas.",
+                                fontSize = 11.sp, color = colors.textSecondary, lineHeight = 15.sp)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text("Reactivar", fontSize = 12.sp, color = colors.accent,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(colors.accent.copy(alpha = 0.10f))
+                                .clickable { ProactiveConfig.clearMutedApps(); mutedCount = 0 }
+                                .padding(horizontal = 10.dp, vertical = 4.dp))
+                    }
+                }
             }
 
             Spacer(Modifier.height(18.dp))

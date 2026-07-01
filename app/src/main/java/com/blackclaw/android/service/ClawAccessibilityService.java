@@ -131,6 +131,28 @@ public class ClawAccessibilityService extends AccessibilityService {
         if (event != null && event.getEventType() == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             XLog.d(TAG, "Notification event from: " + event.getPackageName());
         }
+        // Smart-quiet signal: genuine user interaction cancels "away/asleep"
+        // detection. Throttled inside recordInteraction() so this is cheap.
+        if (event != null) {
+            int et = event.getEventType();
+            if (et == AccessibilityEvent.TYPE_VIEW_CLICKED
+                    || et == AccessibilityEvent.TYPE_VIEW_SCROLLED
+                    || et == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                    || et == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                try {
+                    com.blackclaw.android.proactive.SmartQuietDetector.INSTANCE.recordInteraction();
+                } catch (Throwable ignored) { }
+            }
+            // Security: real-time ad/interruption attribution — track which app's
+            // window just came to the front (out-of-context ad detection).
+            if (et == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                try {
+                    CharSequence p = event.getPackageName();
+                    com.blackclaw.android.security.AdEventMonitor.INSTANCE
+                            .onWindow(p != null ? p.toString() : null);
+                } catch (Throwable ignored) { }
+            }
+        }
         // Auto-reply: check incoming messaging notifications
         try {
             AutoReplyManager.getInstance().onAccessibilityEvent(event);

@@ -78,11 +78,16 @@ public class ClawNotificationListener extends NotificationListenerService {
 
         if (title.isEmpty() && text.isEmpty()) return;
 
+        // Richer text (MessagingStyle messages / inbox lines / big text) so the
+        // proactive classifier gets the full content and rarely needs the
+        // intrusive "open the chat" deep-read.
+        String richText = extractRichText(notification, text);
+
         // Proactive Assistant: route through NotificationBatcher for intelligent
         // batching (groups rapid-fire messages from same app into one LLM call).
         try {
             com.blackclaw.android.proactive.NotificationBatcher.INSTANCE
-                    .submit(pkg, title, text);
+                    .submit(pkg, title, richText);
         } catch (Throwable t) {
             XLog.w(TAG, "Proactive hook failed: " + t.getMessage());
         }
@@ -95,6 +100,44 @@ public class ClawNotificationListener extends NotificationListenerService {
 
         // Route to AutoReplyManager
         AutoReplyManager.getInstance().onNotificationReceived(pkg, title, text);
+    }
+
+    /**
+     * Build the richest available text for a notification: MessagingStyle
+     * messages > inbox text lines > big text, falling back to [fallback] (the
+     * short EXTRA_TEXT). Recovers full content that would otherwise force an
+     * intrusive "open the app" deep-read by the proactive assistant.
+     */
+    private static String extractRichText(Notification n, String fallback) {
+        try {
+            Bundle extras = n.extras;
+            if (extras == null) return fallback;
+            StringBuilder sb = new StringBuilder();
+
+            android.os.Parcelable[] msgs = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+            if (msgs != null && msgs.length > 0) {
+                for (android.os.Parcelable p : msgs) {
+                    if (p instanceof Bundle) {
+                        CharSequence mt = ((Bundle) p).getCharSequence("text");
+                        if (mt != null && mt.length() > 0) sb.append(mt).append('\n');
+                    }
+                }
+            }
+            if (sb.length() == 0) {
+                CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+                if (lines != null && lines.length > 0) {
+                    for (CharSequence l : lines) if (l != null) sb.append(l).append('\n');
+                }
+            }
+            if (sb.length() == 0) {
+                CharSequence big = extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+                if (big != null && big.length() > 0) sb.append(big);
+            }
+            String result = sb.toString().trim();
+            return result.isEmpty() ? fallback : result;
+        } catch (Throwable t) {
+            return fallback;
+        }
     }
 
     /**

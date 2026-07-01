@@ -242,64 +242,26 @@ class LocalTerminalTool : BaseTool() {
     override fun getName() = "terminal"
     override fun getDisplayName() = "Terminal local"
     override fun getDescriptionEN() =
-        "Execute a command on the Android device's local shell (no root, app-level permissions). " +
-        "Useful for: ping, nslookup, cat, ls, ifconfig, logcat (limited), pm list packages. " +
-        "For privileged commands use shell_exec instead (needs ADB/Shizuku)."
+        "Run a command in BlackClaw's internal terminal — a PERSISTENT shell session " +
+        "(remembers the working directory, chosen backend and adb connection). " +
+        "Backends: local (app-level, no root), or privileged (Shizuku / self-paired ADB) " +
+        "for pm/am/settings/input. Built-ins: cd, pwd, backend [auto|local|privileged], whoami. " +
+        "adb over Wireless Debugging (no PC): 'adb pair <host:port> <code>', 'adb connect <host:port>', " +
+        "'adb shell <cmd>', 'adb devices', 'adb disconnect'."
     override fun getDescriptionCN() = getDescriptionEN()
-    override fun getBrief() = "ejecuta un comando en la terminal local de Android (sin root)"
+    override fun getBrief() = "terminal interno persistente (shell local/privilegiado + adb wifi)"
     override fun getParameters() = listOf(
-        ToolParameter("command", "string", "Shell command to run locally.", true),
-        ToolParameter("timeout_seconds", "integer", "Timeout. Default 15.", false),
+        ToolParameter("command", "string", "Comando a ejecutar en la sesión del terminal.", true),
+        ToolParameter("timeout_seconds", "integer", "Reservado (el engine gestiona el timeout).", false),
     )
     override fun execute(params: Map<String, Any>): ToolResult {
         val command = requireString(params, "command").trim()
         if (command.isEmpty()) return ToolResult.error("Comando vacío.")
-        val timeout = optionalInt(params, "timeout_seconds", 15).toLong().coerceIn(3, 60)
-
-        // Block dangerous commands
-        val blocked = listOf("rm -rf /", "mkfs", "dd if=/dev/zero", "reboot", "shutdown")
-        if (blocked.any { command.lowercase().contains(it) }) {
-            return ToolResult.error("Comando bloqueado por seguridad.")
-        }
-
-        return try {
-            val process = ProcessBuilder("sh", "-c", command)
-                .redirectErrorStream(true)  // merge stderr→stdout, single pipe
-                .start()
-            // Drain the output CONCURRENTLY with waiting, so commands that emit
-            // more than the OS pipe buffer (~64KB) don't deadlock.
-            val outBuffer = StringBuilder()
-            val reader = Thread {
-                runCatching {
-                    process.inputStream.bufferedReader().use { br ->
-                        val buf = CharArray(4096)
-                        var n = br.read(buf)
-                        while (n >= 0) {
-                            if (outBuffer.length < 16000) outBuffer.append(buf, 0, n)
-                            n = br.read(buf)
-                        }
-                    }
-                }
-            }.apply { isDaemon = true; start() }
-
-            val completed = process.waitFor(timeout, TimeUnit.SECONDS)
-            if (!completed) {
-                process.destroyForcibly()
-                reader.join(500)
-                return ToolResult.error("Timeout después de ${timeout}s.")
-            }
-            reader.join(1000)
-            val output = outBuffer.toString()
-            val exitCode = process.exitValue()
-            val result = if (output.length > 8000) output.take(8000) + "\n…[truncado]" else output
-            if (exitCode == 0) {
-                ToolResult.success(result.ifBlank { "(exit 0, sin output)" })
-            } else {
-                ToolResult.success("[exit $exitCode] $result")
-            }
-        } catch (e: Exception) {
-            ToolResult.error("Error ejecutando comando: ${e.message}")
-        }
+        val out = com.blackclaw.android.terminal.TerminalEngine.run(
+            com.blackclaw.android.ClawApplication.instance, command)
+        val clean = out.replace("\u000C", "").trim()
+        val capped = if (clean.length > 8000) clean.take(8000) + "\n…[truncado]" else clean
+        return ToolResult.success(capped.ifBlank { "(exit 0, sin output)" })
     }
 }
 

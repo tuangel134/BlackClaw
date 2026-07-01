@@ -67,6 +67,9 @@ class ClawApplication : BaseApp() {
         }
         LocalBackendHealth.recoverPendingGpuCrashIfNeeded()
         ToolRegistry.getInstance().registerAllTools(ToolRegistry.DeviceType.MOBILE)
+        // Trim stale assistant-hub items (old alerts / long-done reminders) so the
+        // store doesn't grow unbounded on long-lived installs.
+        runCatching { com.blackclaw.android.assistant.AssistantStore.pruneOldItems() }
         com.blackclaw.android.agent.skill.SkillRegistry.loadBuiltInSkills()
         com.blackclaw.android.agent.PlaybookManager.loadAll(this)
         XLog.e(TAG, "ClawApplication initialized, tools registered: ${ToolRegistry.getInstance().getAllTools().size}")

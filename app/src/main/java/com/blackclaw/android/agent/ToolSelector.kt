@@ -216,6 +216,21 @@ object ToolSelector {
             tools = listOf("run_skill"),
         ),
         Category(
+            triggers = listOf("terminal", "consola", "shell", "comando", "command", "adb",
+                "adb wifi", "adb connect", "adb pair", "adb shell", "depuración inalámbrica",
+                "depuracion inalambrica", "wireless debugging", "conéctate por adb", "conectate por adb",
+                "ejecuta en la terminal", "ping", "logcat"),
+            tools = listOf("terminal", "shell_exec"),
+        ),
+        Category(
+            triggers = listOf("malware", "virus", "antivirus", "seguridad", "malicioso", "malicious",
+                "anuncios", "anuncio", "ads", "publicidad", "pop-up", "popup", "ventanas emergentes",
+                "me molesta", "app molesta", "spam", "bloquea la app", "bloquear app", "app sospechosa",
+                "escanea", "escanear apps", "spyware", "adware", "superposición", "superposicion"),
+            tools = listOf("security_scan", "find_ad_culprit", "block_app",
+                "uninstall_app", "force_stop_app", "app_info"),
+        ),
+        Category(
             triggers = listOf("rutina", "routine", "mi rutina", "morning routine", "rutina mañana",
                 "rutina noche", "focus", "modo foco", "workout", "ejercicio"),
             tools = listOf("run_routine", "list_routines", "create_routine", "delete_routine",

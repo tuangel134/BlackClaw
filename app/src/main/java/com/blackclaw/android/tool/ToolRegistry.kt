@@ -183,6 +183,11 @@ object ToolRegistry {
         register(AppSettingsTool())
         register(CreateShortcutTool())
 
+        // Security / antimalware — scan apps, find ad culprits, block/uninstall
+        register(SecurityScanTool())
+        register(FindAdCulpritTool())
+        register(BlockAppTool())
+
         // Misc helpers
         register(GetLocationTool())
         register(CountTool())

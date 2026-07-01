@@ -153,8 +153,8 @@ class ComposeChatActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
 
-        // Check for updates
-        com.blackclaw.android.utils.UpdateChecker.checkForUpdate(this)
+        // Check for updates (GitHub Releases → in-app download + install)
+        com.blackclaw.android.utils.AppUpdater.checkForUpdate(this)
 
         // Status bar color
         val themeColors = ThemeManager.getColors()

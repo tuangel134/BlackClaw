@@ -20,6 +20,7 @@ object ProactiveMemory {
     private const val KEY_PREFS = "proactive_learned_prefs"      // JSON array of strings
     private const val KEY_RECENT = "proactive_recent_events"     // JSON array of {t,pkg,title,text,action}
     private const val KEY_ACTION_TIMES = "proactive_action_times" // JSON array of epoch ms
+    private const val KEY_CLASSIFY_TIMES = "proactive_classify_times" // JSON array of epoch ms
     private const val KEY_CORRECTIONS = "proactive_corrections"  // JSON obj: category -> {rejects, quickRejects, lastT}
     private const val KEY_PKG_STATS = "proactive_pkg_stats"      // JSON obj: pkg -> {total, ignores}
     private const val KEY_PKG_PROPOSED = "proactive_pkg_proposed" // JSON array of pkgs already proposed to mute
@@ -127,6 +128,33 @@ object ProactiveMemory {
 
     private fun actionTimes(): List<Long> {
         val raw = KVUtils.getString(KEY_ACTION_TIMES, "")
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val a = JSONArray(raw); (0 until a.length()).map { a.getLong(it) }
+        }.getOrDefault(emptyList())
+    }
+
+    // ── Rolling classification (LLM call) rate limit ──
+    // Separate from the action cap: this bounds how often we wake the LLM, even
+    // when it decides to do nothing. Protects against notification storms.
+    @Synchronized
+    fun canClassify(maxPerHour: Int): Boolean {
+        val cutoff = System.currentTimeMillis() - 3_600_000L
+        return classifyTimes().count { it >= cutoff } < maxPerHour
+    }
+
+    @Synchronized
+    fun recordClassification() {
+        val now = System.currentTimeMillis()
+        val cutoff = now - 3_600_000L
+        val times = classifyTimes().filter { it >= cutoff }.toMutableList()
+        times.add(now)
+        val arr = JSONArray(); times.forEach { arr.put(it) }
+        KVUtils.putString(KEY_CLASSIFY_TIMES, arr.toString()); KVUtils.sync()
+    }
+
+    private fun classifyTimes(): List<Long> {
+        val raw = KVUtils.getString(KEY_CLASSIFY_TIMES, "")
         if (raw.isBlank()) return emptyList()
         return runCatching {
             val a = JSONArray(raw); (0 until a.length()).map { a.getLong(it) }

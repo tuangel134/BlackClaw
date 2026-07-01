@@ -106,6 +106,8 @@ class SettingsActivity : BaseActivity() {
                 onOpenProactive = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
                 onOpenShizuku = { startActivity(Intent(this, com.blackclaw.android.ui.shizuku.ShizukuSetupActivity::class.java)) },
                 onOpenAdbPro = { startActivity(Intent(this, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
+                onOpenTerminal = { startActivity(Intent(this, com.blackclaw.android.ui.terminal.TerminalActivity::class.java)) },
+                onOpenSecurity = { startActivity(Intent(this, com.blackclaw.android.ui.security.SecurityActivity::class.java)) },
                 onOpenTelegram = { ChannelConfigActivity.start(this, ChannelConfigActivity.ChannelType.TELEGRAM) },
                 onToggleExternalAutomation = {
                     val newState = !KVUtils.isExternalAutomationEnabled()
@@ -176,6 +178,8 @@ private fun ModernSettingsScreen(
     onOpenProactive: () -> Unit,
     onOpenShizuku: () -> Unit,
     onOpenAdbPro: () -> Unit,
+    onOpenTerminal: () -> Unit,
+    onOpenSecurity: () -> Unit,
     onOpenTelegram: () -> Unit,
     onToggleExternalAutomation: () -> Unit,
     onReportBug: () -> Unit,
@@ -433,6 +437,56 @@ private fun ModernSettingsScreen(
                     onClick = onOpenAdbPro,
                 )
                 Divider(colors)
+                var terminalOn by remember {
+                    mutableStateOf(com.blackclaw.android.terminal.TerminalConfig.enabled)
+                }
+                SwitchRow(
+                    icon = Icons.Outlined.Code,
+                    title = "Terminal interno",
+                    subtitle = "Una terminal propia para ti y la IA: shell local/privilegiado y " +
+                        "adb por WiFi (adb pair/connect/shell) sin PC.",
+                    checked = terminalOn,
+                    colors = colors,
+                ) { on ->
+                    terminalOn = on
+                    com.blackclaw.android.terminal.TerminalConfig.enabled = on
+                }
+                if (terminalOn) {
+                    Divider(colors)
+                    NavRow(
+                        icon = Icons.Outlined.Code,
+                        title = "Abrir terminal",
+                        subtitle = "Sesión compartida con la IA",
+                        colors = colors,
+                        onClick = onOpenTerminal,
+                    )
+                }
+                Divider(colors)
+                var securityOn by remember {
+                    mutableStateOf(com.blackclaw.android.security.SecurityConfig.enabled)
+                }
+                SwitchRow(
+                    icon = Icons.Outlined.Bolt,
+                    title = "Seguridad (antimalware)",
+                    subtitle = "Detecta apps riesgosas y bloquea las que te llenan de anuncios " +
+                        "(revoca superposición, fuerza detención o desinstala).",
+                    checked = securityOn,
+                    colors = colors,
+                ) { on ->
+                    securityOn = on
+                    com.blackclaw.android.security.SecurityConfig.enabled = on
+                }
+                if (securityOn) {
+                    Divider(colors)
+                    NavRow(
+                        icon = Icons.Outlined.Bolt,
+                        title = "Abrir seguridad",
+                        subtitle = "Escanea apps y bloquea anuncios",
+                        colors = colors,
+                        onClick = onOpenSecurity,
+                    )
+                }
+                Divider(colors)
                 var fastPath by remember {
                     mutableStateOf(KVUtils.getBoolean("cfg_fast_path", true))
                 }
@@ -476,10 +530,14 @@ private fun ModernSettingsScreen(
                 NavRow(
                     icon = Icons.Outlined.Info,
                     title = "BlackClaw",
-                    subtitle = "v${BuildConfig.VERSION_NAME} · Beta",
+                    subtitle = "v${BuildConfig.VERSION_NAME} · Beta · toca para buscar actualizaciones",
                     trailing = "v${BuildConfig.VERSION_NAME}",
                     colors = colors,
-                    onClick = {},
+                    onClick = {
+                        (ctx as? android.app.Activity)?.let {
+                            com.blackclaw.android.utils.AppUpdater.checkForUpdate(it, force = true)
+                        }
+                    },
                 )
                 Divider(colors)
                 NavRow(
