@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Declares BlackClaw as an Android Auto template app (Car App Library). -->
+<automotiveApp>
+    <uses name="template" />
+</automotiveApp>

@@ -56,12 +56,15 @@ rather than relying on per-app integrations.
   engine let you talk to it; set BlackClaw as the phone's assistant and invoke it
   with the power button — even over the lock screen — with a full-screen animated
   panel that streams the answer and speaks it back.
-- **Fast app control.** ~65 popular apps (Uber, Uber Eats, Spotify, Maps,
+- **Fast app control.** 70+ popular apps (Uber, Uber Eats, Spotify, Maps,
   WhatsApp, Amazon…) are driven straight to the right screen via deep links, and
   a deterministic fast-path runs common commands instantly with zero LLM calls.
+- **Android Auto.** A voice-first, driving-safe surface on the car head unit:
+  one-tap actions (navigate, play music, call, notifications) plus a "Preguntar"
+  search that uses the car's own speech-to-text — answers read aloud.
 - **Remote-controllable.** Drive the phone by messaging it from Telegram,
   Discord, or WeChat — useful for an agent that runs while the device is away.
-- **Broad reach.** 100+ built-in tools spanning UI control, device settings,
+- **Broad reach.** 110+ built-in tools spanning UI control, device settings,
   messaging, files, network, perception, and automation.
 
 ---
@@ -92,8 +95,9 @@ touching the phone.
 |---|---|
 | **UI control** | tap · long-press · swipe · pinch · drag-and-drop · path trace · type · scroll-to-find |
 | **Navigation** | open app · switch app · back/home/recents · find & tap by text |
-| **App shortcuts** | deep-link ~65 apps (Uber · Uber Eats · Spotify · Maps · Amazon…) · play music in any player · discover installed-app actions |
+| **App shortcuts** | deep-link 70+ apps (Uber · Uber Eats · Spotify · Maps · Amazon…) · play music in any player · discover installed-app actions |
 | **Voice** | wake word · offline STT (Vosk) · system-assistant panel · streaming TTS · continuous conversation |
+| **Android Auto** | voice-first car surface · one-tap navigate/music/call/notifications · car speech-to-text · answers read aloud |
 | **Privileged (ADB/Shizuku)** | fast tap/swipe in games · force-stop · arbitrary shell · burst tap |
 | **Perception** | read screen (accessibility tree) · OCR over screen capture · screenshot |
 | **Device** | battery · memory · network · volume · brightness · WiFi/BT/flashlight toggles |
@@ -129,8 +133,22 @@ touching the phone.
 - Whisper mode (Alexa-style), voice activity detection, and phone-call mic
   handling so it yields the microphone during calls.
 
+### Android Auto
+- A **voice-first, driving-safe** surface built on the **Android for Cars App
+  Library**. When the phone is connected to Android Auto, BlackClaw shows a grid
+  of large one-tap actions on the car screen: **Preguntar** (ask anything),
+  **Navegar**, **Música**, **Llamar** and **Notificaciones**.
+- The action screens use a **search template**, so the **car's own
+  speech-to-text** transcribes what you say — you never touch the phone. The
+  transcribed request runs through the same task pipeline as the phone (deep-link
+  fast-path, tools, agent loop) and the answer is **read aloud** with TTS.
+- Because it reuses the full pipeline, anything BlackClaw can do by voice on the
+  phone also works from the car.
+- Distributed as a sideload app (not on Play), so to use it you enable **"Unknown
+  sources"** for developer apps in the Android Auto settings on the phone.
+
 ### App control via deep links
-- **~65 popular apps** open straight to the useful screen via deep links —
+- **70+ popular apps** open straight to the useful screen via deep links —
   ride-hailing (Uber, DiDi, Cabify, Lyft, Bolt), food (Uber Eats, Rappi,
   DoorDash, Glovo), music, maps, shopping (Amazon, Mercado Libre, AliExpress),
   streaming, social, travel and more — far faster than tapping through the UI.
@@ -277,7 +295,7 @@ Agent Core Reliability:**
         │ result                      │ tool calls
         │                             ▼
 ┌───────┴───────┐          ┌──────────────────────┐
-│  LLM           │◀────────│  Tool layer (~85)     │
+│  LLM           │◀────────│  Tool layer (110+)    │
 │ local / cloud  │ schemas │  a11y · ADB · OCR ·   │
 └───────────────┘          │  net · device · files │
                            └───────────┬───────────┘
@@ -294,7 +312,7 @@ next move without a wasted round.
 
 ### Token-efficient tool disclosure
 
-Sending ~85 full tool schemas on every request is expensive and trips cloud rate
+Sending ~110 full tool schemas on every request is expensive and trips cloud rate
 limits. BlackClaw uses **progressive disclosure**: a compact one-line catalog of
 every tool is shown in the system prompt, a task-relevant subset is preloaded
 with full schemas, and the model loads anything else on demand via a
@@ -356,6 +374,7 @@ app/
     assistant/        Native Assistant hub (reminders/alarms/notes/finance) + alarm ring
     autoreply/        Auto-reply profiles + WhatsApp export parser
     automation/       External automation API (RUN_TASK / RUN_CHAT)
+    car/              Android Auto (Car App Library) — voice-first car surface
     channel/          Discord, Telegram, WeChat handlers
     floating/         Overlay floating control
     perception/       MediaProjection screen capture + ML Kit OCR
@@ -364,7 +383,7 @@ app/
     server/           NanoHTTPD LAN config server
     service/          Accessibility, notification listener, foreground services
     shizuku/          Optional Shizuku backend
-    tool/             Generic tool layer (~85 tools)
+    tool/             Generic tool layer (110+ tools)
     ui/               Compose UI: chat, settings, themes, skills, auto-replies, ADB
     utils/            Logging, KV storage, contact / UI matching
 docs/                 Skill file specification
@@ -440,6 +459,10 @@ PR guidelines, and conventions.
 
 ### Unreleased (dev)
 
+- **Android Auto:** a voice-first, driving-safe surface on the car head unit
+  built on the Car App Library — one-tap actions (Preguntar, Navegar, Música,
+  Llamar, Notificaciones) that use the car's own speech-to-text and read answers
+  aloud, reusing the full phone task pipeline
 - **Voice & system assistant:** hands-free wake word with offline STT, set as the
   phone's default assistant, full-screen animated panel (audio-reactive claw orb)
   over the lock screen, **streaming replies** (live text + speak-as-it-generates
@@ -465,7 +488,7 @@ PR guidelines, and conventions.
 
 First public beta. Highlights:
 
-- On-device or cloud LLM driving ~90 tools over the accessibility tree
+- On-device or cloud LLM driving 100+ tools over the accessibility tree
 - **Native Assistant hub:** reminders, alarms (real full-screen ringing, with
   optional wake-up challenges), notes, calendar, alerts and finances — managed
   by the AI from chat, with a home-screen widget and Quick Settings tile

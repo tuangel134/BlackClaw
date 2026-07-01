@@ -240,9 +240,16 @@ dependencies {
 
     // Vosk — fully offline speech recognition / keyword spotting. No API key, no
     // account, no audio leaves the device. Used for the always-listening wake
-    // word (no system beep, unlike SpeechRecognizer). The model is downloaded
-    // once at runtime (kept out of the APK to avoid bloating it ~40MB).
+    // word (no system beep, unlike SpeechRecognizer). The Spanish model ships
+    // bundled in assets (vosk-model-es.zip); other languages (e.g. English) are
+    // downloaded on demand from the voice settings.
     implementation("com.alphacephei:vosk-android:0.3.47")
+
+    // Android for Cars App Library — drives the hands-free Android Auto experience
+    // (voice-first quick actions on the car head unit / phone projection). The
+    // "projected" artifact adds the Android Auto host backend.
+    implementation(libs.car.app)
+    implementation(libs.car.app.projected)
 
 
     testImplementation(libs.junit)
