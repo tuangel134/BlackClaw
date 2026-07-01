@@ -9,6 +9,9 @@
 .cxx
 local.properties
 *.jks
+*.keystore
+keystore.properties
+/signing/
 /.claude/
 /.idea/
 *.mp4

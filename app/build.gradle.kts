@@ -32,14 +32,24 @@ android {
 
     signingConfigs {
         create("release") {
-            val props = Properties().apply {
-                rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
-            }
+            // Signing values resolve from (in priority): env vars → signing/keystore.properties
+            // (the private keys repo dropped into the project) → local.properties.
+            val props = Properties()
+            rootProject.file("local.properties").takeIf { it.exists() }
+                ?.inputStream()?.use { props.load(it) }
+            val signingProps = rootProject.file("signing/keystore.properties")
+            if (signingProps.exists()) signingProps.inputStream().use { props.load(it) } // overrides
             fun readSigningValue(key: String): String {
                 return System.getenv(key)?.takeIf { it.isNotBlank() }
                     ?: props.getProperty(key, "").trim()
             }
-            val keystorePath = readSigningValue("KEYSTORE_FILE")
+            var keystorePath = readSigningValue("KEYSTORE_FILE")
+            // When using the signing/ folder without an explicit path, default to
+            // the bundled keystore next to keystore.properties.
+            if (keystorePath.isEmpty() && signingProps.exists()) {
+                val bundled = rootProject.file("signing/blackclaw-release.jks")
+                if (bundled.exists()) keystorePath = bundled.absolutePath
+            }
             if (keystorePath.isNotEmpty()) {
                 storeFile = file(keystorePath)
                 storePassword = readSigningValue("KEYSTORE_PASSWORD")
