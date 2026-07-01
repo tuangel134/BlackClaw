@@ -44,6 +44,17 @@ class TaskParserTest {
     }
 
     @Test
+    fun `generic play music has empty query so it resumes instead of searching`() {
+        // "reproduce música" / "pon música" must NOT search literally for "música".
+        for (cmd in listOf("reproduce música", "pon música", "pon musica", "reproduce musica")) {
+            val parsed = TaskParser.parse(cmd)
+            assertNotNull("expected fast-path for '$cmd'", parsed)
+            assertEquals("play_music", parsed!!.toolName)
+            assertEquals("empty query for '$cmd'", "", parsed.toolParams!!["query"])
+        }
+    }
+
+    @Test
     fun `car navigate tile command routes to open_app_action maps`() {
         // "Navegar" tile => "navégame a " + spoken text.
         val parsed = TaskParser.parse("navégame a walmart")

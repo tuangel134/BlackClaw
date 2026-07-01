@@ -39,7 +39,9 @@ class PlayMusicTool : BaseTool() {
     override fun getDescriptionCN() = getDescriptionEN()
     override fun getBrief() = "reproduce música en cualquier reproductor (no solo Spotify) vía el intent universal"
     override fun getParameters() = listOf(
-        ToolParameter("query", "string", "Song, artist, album or playlist to play.", true),
+        ToolParameter("query", "string",
+            "Song, artist, album or playlist to play. Leave empty to just start/resume " +
+            "playback in the user's player (for a plain 'play music' with no specifics).", false),
         ToolParameter("app", "string",
             "Optional player: spotify|youtube_music|youtube|amazon_music|apple_music|deezer|" +
             "soundcloud|tidal|poweramp|default.", false),
@@ -88,14 +90,73 @@ class PlayMusicTool : BaseTool() {
         }
     }
 
+    /**
+     * Handle a plain "play music" with no song/artist. Per the Android media
+     * spec an EMPTY play-from-search query means "play some music", so we fire
+     * that first (most players start/shuffle something). If that isn't handled,
+     * we open the player and dispatch a MEDIA_PLAY key to resume the last track —
+     * far better than searching literally for the word "música".
+     */
+    private fun playOrResume(
+        ctx: android.content.Context,
+        app: String,
+        targetPkg: String?,
+    ): ToolResult {
+        val pm = ctx.packageManager
+        val where = if (app.isNotBlank()) " en $app" else ""
+
+        // 1) Empty play-from-search = "play any music" (spec-compliant).
+        runCatching {
+            val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                putExtra(SearchManager.QUERY, "")
+                putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (targetPkg != null) setPackage(targetPkg)
+            }
+            if (intent.resolveActivity(pm) != null) {
+                ctx.startActivity(intent)
+                return ToolResult.success("Reproduciendo música$where.")
+            }
+        }
+
+        // 2) Open the player, then resume playback via a MEDIA_PLAY key event.
+        if (targetPkg != null) {
+            runCatching {
+                pm.getLaunchIntentForPackage(targetPkg)?.let {
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(it)
+                }
+            }
+            dispatchPlayKey(ctx)
+            return ToolResult.success("Abrí tu reproductor y reanudé la música$where.")
+        }
+
+        // 3) No known player installed → just try to resume whatever media session exists.
+        dispatchPlayKey(ctx)
+        return ToolResult.success("Reanudé la reproducción de música.")
+    }
+
+    /** Send a global MEDIA_PLAY key so the active/last media session resumes. */
+    private fun dispatchPlayKey(ctx: android.content.Context) {
+        runCatching {
+            val am = ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val code = android.view.KeyEvent.KEYCODE_MEDIA_PLAY
+            am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+            am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+        }
+    }
+
     override fun execute(params: Map<String, Any>): ToolResult {
-        val query = requireString(params, "query").trim()
-        if (query.isEmpty()) return ToolResult.error("Dime qué quieres reproducir.")
+        val query = optionalString(params, "query", "").trim()
         val app = optionalString(params, "app", "").lowercase().trim()
         val ctx = ClawApplication.instance
         val pm = ctx.packageManager
 
         val targetPkg = resolvePackage(ctx, app)
+
+        // Plain "play music" with no song/artist → start or resume playback in the
+        // user's player instead of literally searching for the word "música".
+        if (query.isEmpty()) return playOrResume(ctx, app, targetPkg)
 
         // 1 & 3: universal play-from-search (pinned to a player if given).
         runCatching {

@@ -85,11 +85,29 @@ object TaskParser {
         if (MUSIC_EXCLUDE.any { lower.contains(it) }) return null
         val m = PLAY_MUSIC_PATTERN.find(lower) ?: return null
         var q = m.groupValues[1].trim()
-        // Strip leftover leaders ("música de X" → "X").
-        q = q.removePrefix("música de ").removePrefix("musica de ")
+        // Strip leftover leaders and play-verbs ("música de X" → "X",
+        // "reproduce música" → "música", "pon algo de X" → "X").
+        q = q.removePrefix("reproduce ").removePrefix("reproducir ")
+            .removePrefix("pon ").removePrefix("ponme ")
+            .removePrefix("música de ").removePrefix("musica de ")
             .removePrefix("la canción ").removePrefix("la cancion ")
+            .removePrefix("algo de ")
             .removePrefix("música ").removePrefix("musica ").trim()
-        if (q.isBlank() || q.length < 2) return null
+        // Generic "just play music" (no specific song/artist) → empty query so the
+        // player starts/resumes playback instead of literally searching "música".
+        val generic = setOf(
+            "musica", "música", "music", "algo", "una cancion", "una canción",
+            "cancion", "canción", "canciones", "unas canciones", "play",
+            "reproduce", "reproducir", "algo de musica", "algo de música",
+        )
+        if (q.isBlank() || q in generic) {
+            return ParseResult(
+                action = "play_music", intent = null,
+                toolName = "play_music", toolParams = mapOf("query" to ""),
+                description = "Reproduciendo música"
+            )
+        }
+        if (q.length < 2) return null
         return ParseResult(
             action = "play_music", intent = null,
             toolName = "play_music", toolParams = mapOf("query" to q),
