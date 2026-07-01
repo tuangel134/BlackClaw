@@ -28,4 +28,43 @@ class TaskParserTest {
     fun `email commands do not route to messaging app tool`() {
         assertNull(TaskParser.parse("send email to user@example.com"))
     }
+
+    // ── Android Auto fast-path: the car tiles prefix the spoken text and rely on
+    // these deterministic (0-LLM) routes. ──────────────────────────────────────
+
+    @Test
+    fun `car music tile command routes to play_music`() {
+        // "Música" tile => "pon " + spoken text.
+        val parsed = TaskParser.parse("pon bad bunny")
+
+        assertNotNull(parsed)
+        assertEquals("play_music", parsed!!.action)
+        assertEquals("play_music", parsed.toolName)
+        assertEquals("bad bunny", parsed.toolParams!!["query"])
+    }
+
+    @Test
+    fun `car navigate tile command routes to open_app_action maps`() {
+        // "Navegar" tile => "navégame a " + spoken text.
+        val parsed = TaskParser.parse("navégame a walmart")
+
+        assertNotNull(parsed)
+        assertEquals("navigate", parsed!!.action)
+        assertEquals("open_app_action", parsed.toolName)
+        assertEquals("maps", parsed.toolParams!!["app"])
+        assertEquals("walmart", parsed.toolParams!!["query"])
+    }
+
+    @Test
+    fun `nearest place navigation keeps the cercano hint for distance-sorted search`() {
+        val parsed = TaskParser.parse("llévame al walmart más cercano")
+
+        assertNotNull(parsed)
+        assertEquals("open_app_action", parsed!!.toolName)
+        assertEquals("maps", parsed.toolParams!!["app"])
+        // The parser is accent-insensitive ("más" → "mas"); the "cercano" hint
+        // still survives so OpenAppActionTool opens the distance-sorted Maps
+        // search list (its regex matches "cercan") instead of auto-routing.
+        assertEquals("walmart mas cercano", parsed.toolParams!!["query"])
+    }
 }
