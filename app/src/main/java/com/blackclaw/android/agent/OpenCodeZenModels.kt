@@ -35,13 +35,15 @@ object OpenCodeZenModels {
     private const val KEY_CACHE_TS = "opencode_zen_models_ts_v1"
     private const val TTL_MS = 24L * 60 * 60 * 1000  // 24h
 
-    /** Hand-verified free models (probed 2026-06) — used as seed/offline default. */
+    /** Hand-verified free models (probed 2026-06) — used as seed/offline default.
+     *  Note: the `deepseek-v4-flash-free` alias currently hangs on the provider,
+     *  so we lead with `big-pickle`, which routes to the SAME model
+     *  (its responses report model="deepseek-v4-flash") and answers reliably. */
     private val SEED = listOf(
-        "deepseek-v4-flash-free",
+        "big-pickle",              // = DeepSeek V4 Flash (working alias)
         "nemotron-3-ultra-free",
         "mimo-v2.5-free",
         "north-mini-code-free",
-        "big-pickle",
     )
 
     private val client = OkHttpClient.Builder()
@@ -68,7 +70,7 @@ object OpenCodeZenModels {
             outputPricePerM = 0.0,
             tier = tierFor(id),
             contextSize = 128_000,
-            recommended = id == "deepseek-v4-flash-free",
+            recommended = id == "big-pickle",
         )
     }
 
@@ -180,7 +182,8 @@ object OpenCodeZenModels {
         if (!provider.equals("OPENCODE_ZEN", ignoreCase = true)) return
         val active = KVUtils.getLlmModelName()
         if (active.isBlank() || active in fresh) return
-        val replacement = fresh.firstOrNull { it == "deepseek-v4-flash-free" }
+        val replacement = fresh.firstOrNull { it == "big-pickle" }
+            ?: fresh.firstOrNull { it == "deepseek-v4-flash-free" }
             ?: fresh.firstOrNull() ?: return
         KVUtils.setLlmModelName(replacement)
         KVUtils.sync()
@@ -207,6 +210,9 @@ object OpenCodeZenModels {
     // ── Presentation helpers ──
 
     private fun prettyName(id: String): String {
+        // big-pickle is OpenCode Zen's reliable alias for DeepSeek V4 Flash
+        // (its completions report model="deepseek-v4-flash").
+        if (id == "big-pickle") return "DeepSeek V4 Flash (Big Pickle)"
         val base = id.removeSuffix("-free")
         val nice = base.split("-", ".").joinToString(" ") {
             it.replaceFirstChar { c -> c.uppercase() }

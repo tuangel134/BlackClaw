@@ -61,11 +61,11 @@ enum class CloudProvider(
         models = listOf(
             // Seed list (hand-verified free with Bearer public). The live list is
             // fetched + re-verified by OpenCodeZenModels and overrides this in the UI.
-            CloudModel("deepseek-v4-flash-free", "Deepseek V4 Flash (Gratis)", 0.0, 0.0, ModelTier.SMART, 128_000, recommended = true),
+            // big-pickle = DeepSeek V4 Flash (reliable alias; the *-free one hangs).
+            CloudModel("big-pickle", "DeepSeek V4 Flash (Big Pickle)", 0.0, 0.0, ModelTier.SMART, 128_000, recommended = true),
             CloudModel("nemotron-3-ultra-free", "Nemotron 3 Ultra (Gratis)", 0.0, 0.0, ModelTier.PRO, 128_000),
             CloudModel("mimo-v2.5-free", "Mimo V2.5 (Gratis)", 0.0, 0.0, ModelTier.FAST, 128_000),
             CloudModel("north-mini-code-free", "North Mini Code (Gratis)", 0.0, 0.0, ModelTier.FAST, 128_000),
-            CloudModel("big-pickle", "Big Pickle (Gratis)", 0.0, 0.0, ModelTier.SMART, 128_000),
         )
     ),
     CUSTOM(
