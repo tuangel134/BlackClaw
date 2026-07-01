@@ -478,6 +478,38 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.1.1
+
+- **Assist panel: type instead of talk.** A keyboard toggle next to the mic
+  lets you switch to typing at any time — even mid-listen/think/speak — and
+  submit through the exact same pipeline (tools, context, conversation memory)
+  as a spoken command. Suggestion chips now rotate through a wider variety of
+  capabilities (reminders, security, notifications, alarms) instead of only
+  "open app X".
+- **Fixed: voice input not working on some OEM ROMs** (observed on HonorOS/
+  MagicOS). Root causes and fixes:
+  - The system's DEFAULT speech-recognition component could fail to bind
+    ("error 10"); BlackClaw now resolves and binds to a working recognizer
+    (Google) explicitly instead of relying on the OEM default.
+  - When Google's on-device recognizer lacks the Spanish language pack
+    (error 12/13), BlackClaw now falls back to the bundled offline Vosk engine
+    automatically — voice input works with zero network and zero OEM
+    dependency.
+  - R8/minification was silently breaking Vosk in release builds
+    (`UnsatisfiedLinkError` in JNA) — added the missing ProGuard keep rules.
+    This also fixes the "garra" wake word in release builds.
+  - The assist panel no longer kills the mic on `onPause` (it shows over the
+    lock screen, which briefly pauses/resumes during transitions).
+- **Fixed: assistant panel opening the main app unexpectedly.** Any task
+  started from the voice panel or the wake word previously reopened
+  BlackClaw's chat screen on completion, even for plain answers ("what's on my
+  agenda?"). The panel is now a self-contained surface that never redirects to
+  the main app.
+- **Fixed: no way to interrupt a stuck/looping task from voice.** Re-invoking
+  the assist panel (power button) while a task is running now cancels it
+  instead of being silently ignored, so a runaway multi-step task (e.g.
+  navigation) can always be broken out of.
+
 ### v1.1.0
 
 - **Internal terminal (Termux-like):** BlackClaw now ships its own persistent

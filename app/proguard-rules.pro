@@ -239,6 +239,22 @@
 -keep interface androidx.** { *; }
 
 # ============================================================
+# Vosk (offline speech recognition) + JNA
+# Vosk's native code uses JNI to look up fields/classes BY NAME (notably
+# com.sun.jna.Pointer.peer). R8 renaming them causes at runtime:
+#   UnsatisfiedLinkError: Can't obtain peer field ID for class com.sun.jna.Pointer
+# So JNA and Vosk must be kept verbatim (names + members).
+# ============================================================
+-dontwarn com.sun.jna.**
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class com.sun.jna.** { *; }
+-keep class * extends com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-dontwarn org.vosk.**
+-keep class org.vosk.** { *; }
+-keepclassmembers class org.vosk.** { *; }
+
+# ============================================================
 # glide-transformations (wasabeef)
 # ============================================================
 -dontwarn jp.wasabeef.glide.**

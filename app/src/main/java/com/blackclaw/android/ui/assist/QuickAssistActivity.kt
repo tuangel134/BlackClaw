@@ -19,13 +19,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -108,9 +115,12 @@ class QuickAssistActivity : ComponentActivity() {
                 partial = partial.value,
                 phase = phase.value,
                 rms = rms.floatValue,
-                onMic = { if (!busy) ensureMicThenListen() },
+                busy = busy,
+                onMic = { if (!busy) { switchingToVoice(); ensureMicThenListen() } },
                 onOrbTap = { bargeIn() },
                 onSuggestion = { runSuggestion(it) },
+                onTyped = { onTypedCommand(it) },
+                onStartTyping = { stopListeningForTyping() },
                 onClose = { runCatching { if (busy) appViewModel.stopTask() }; finish() },
             )
         }
@@ -126,7 +136,7 @@ class QuickAssistActivity : ComponentActivity() {
             val cmd = intent?.getStringExtra(EXTRA_COMMAND)?.trim().orEmpty()
             intent?.removeExtra(EXTRA_COMMAND)
             if (cmd.isNotBlank()) window.decorView.postDelayed({ onCommand(cmd) }, 200L)
-            else window.decorView.postDelayed({ ensureMicThenListen() }, 300L)
+            else window.decorView.postDelayed({ ensureMicThenListen() }, 600L)
         }
     }
 
@@ -137,14 +147,36 @@ class QuickAssistActivity : ComponentActivity() {
         val cmd = newIntent.getStringExtra(EXTRA_COMMAND)?.trim().orEmpty()
         newIntent.removeExtra(EXTRA_COMMAND)
         runCatching { Speaker.stop() }
-        if (cmd.isNotBlank()) {
-            if (!busy) onCommand(cmd)
-        } else {
-            if (!busy) ensureMicThenListen()
+        // Reinvoking the panel while a task is running (user pressing the power
+        // button again) must let them regain control — cancel the current
+        // (possibly stuck/looping) task instead of silently ignoring the press.
+        if (busy) {
+            runCatching { appViewModel.stopTask() }
+            busy = false
+            status.value = "Cancelado, jefe."
+            phase.value = Phase.IDLE
         }
+        if (cmd.isNotBlank()) onCommand(cmd) else ensureMicThenListen()
     }
 
     fun runSuggestion(cmd: String) { if (!busy) onCommand(cmd) }
+
+    /** User tapped the keyboard icon: stop listening, let them type instead. */
+    private fun stopListeningForTyping() {
+        runCatching { VoiceInputManager.cancelListenOnce() }
+        if (!busy) { phase.value = Phase.IDLE; status.value = "Escribe tu mensaje…" }
+    }
+
+    /** Re-entering voice mode after typing: nothing to cancel, just a hook for parity. */
+    private fun switchingToVoice() { partial.value = "" }
+
+    /** Submit a typed command — same pipeline as a spoken one. */
+    private fun onTypedCommand(text: String) {
+        val cmd = text.trim()
+        if (cmd.isEmpty() || busy) return
+        runCatching { VoiceInputManager.cancelListenOnce() }
+        onCommand(cmd)
+    }
 
     private fun ensureMicThenListen() {
         if (!VoiceInputManager.isAvailable()) {
@@ -221,7 +253,7 @@ class QuickAssistActivity : ComponentActivity() {
         val override = buildContextPrompt(command)
         val taskId = "assist-" + UUID.randomUUID().toString().take(8)
         runCatching {
-            appViewModel.startTask(command, taskId, agentPromptOverride = override) { event ->
+            appViewModel.startTask(command, taskId, agentPromptOverride = override, autoReturnToChat = false) { event ->
                 runOnUiThread {
                     when (event) {
                         is TaskEvent.ToolAction -> {
@@ -446,7 +478,10 @@ class QuickAssistActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        runCatching { VoiceInputManager.stopWakeLoop() }
+        // DON'T stop listening on pause — this activity shows over the lock screen
+        // and Android may briefly pause it during transitions (display wake, biometric
+        // prompt, etc.). Killing the mic on every onPause causes "doesn't listen" bugs.
+        // We only release the mic in onDestroy (user dismissed) or when a task runs.
     }
 
     override fun onDestroy() {
@@ -473,11 +508,16 @@ private fun AssistScreen(
     partial: String,
     phase: QuickAssistActivity.Phase,
     rms: Float,
+    busy: Boolean,
     onMic: () -> Unit,
     onOrbTap: () -> Unit,
     onSuggestion: (String) -> Unit,
+    onTyped: (String) -> Unit,
+    onStartTyping: () -> Unit,
     onClose: () -> Unit,
 ) {
+    var textMode by remember { mutableStateOf(false) }
+    var typedText by remember { mutableStateOf("") }
     val level by animateFloatAsState(rms, tween(120, easing = LinearEasing), label = "level")
     val bgTop by animateColorAsState(
         when (phase) {
@@ -564,23 +604,78 @@ private fun AssistScreen(
             }
 
             // Suggestion chips on first open / when idle, to hint what to say.
-            val showChips = phase == QuickAssistActivity.Phase.IDLE ||
-                (turns.isEmpty() && phase == QuickAssistActivity.Phase.LISTENING)
+            // Hidden in text mode so they don't crowd the keyboard input row.
+            val showChips = !textMode && (phase == QuickAssistActivity.Phase.IDLE ||
+                (turns.isEmpty() && phase == QuickAssistActivity.Phase.LISTENING))
             if (showChips) {
                 SuggestionChips(onSuggestion)
                 Spacer(Modifier.height(10.dp))
             }
 
-            // Tap-to-talk button (idle / need mic).
-            if (phase == QuickAssistActivity.Phase.IDLE || phase == QuickAssistActivity.Phase.NEED_MIC) {
-                Box(
-                    Modifier.padding(bottom = 28.dp).size(64.dp).clip(CircleShape)
-                        .background(Brush.radialGradient(listOf(Color(0xFF7C3AED), Color(0xFF3A1E6E))))
-                        .clickable { onMic() },
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Default.Mic, "Hablar", tint = Color.White, modifier = Modifier.size(30.dp)) }
+            // Input dock: type a message, or tap-to-talk (idle / need mic).
+            if (textMode) {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = typedText,
+                        onValueChange = { typedText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Escribe un mensaje…", color = Color(0xFF7A6FA0)) },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = {
+                            if (typedText.isNotBlank() && !busy) { onTyped(typedText); typedText = ""; textMode = false }
+                        }),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF9D5CFF),
+                            unfocusedBorderColor = Color(0xFF3A2E5C),
+                            cursorColor = Color(0xFF9D5CFF),
+                        ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape)
+                            .background(Brush.radialGradient(listOf(Color(0xFF7C3AED), Color(0xFF3A1E6E))))
+                            .clickable(enabled = !busy) {
+                                if (typedText.isNotBlank()) { onTyped(typedText); typedText = ""; textMode = false }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.AutoMirrored.Filled.Send, "Enviar", tint = Color.White, modifier = Modifier.size(20.dp)) }
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(onClick = { textMode = false; onMic() }) {
+                        Icon(Icons.Default.Mic, "Hablar", tint = Color(0xFFB9A7E0))
+                    }
+                }
             } else {
-                Spacer(Modifier.height(28.dp))
+                // Keyboard toggle is always available (even while listening/
+                // thinking/speaking) so the user can switch to typing whenever
+                // voice isn't cooperating. The big tap-to-talk mic only shows
+                // when idle, same as before.
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 28.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spacer(Modifier.weight(1f))
+                    if (phase == QuickAssistActivity.Phase.IDLE || phase == QuickAssistActivity.Phase.NEED_MIC) {
+                        Box(
+                            Modifier.size(64.dp).clip(CircleShape)
+                                .background(Brush.radialGradient(listOf(Color(0xFF7C3AED), Color(0xFF3A1E6E))))
+                                .clickable { onMic() },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Default.Mic, "Hablar", tint = Color.White, modifier = Modifier.size(30.dp)) }
+                        Spacer(Modifier.width(16.dp))
+                    }
+                    IconButton(
+                        onClick = { onStartTyping(); textMode = true },
+                        modifier = Modifier.size(44.dp).clip(CircleShape)
+                            .background(Color(0xFF221A38)),
+                    ) { Icon(Icons.Default.Keyboard, "Escribir", tint = Color(0xFFB9A7E0), modifier = Modifier.size(20.dp)) }
+                    Spacer(Modifier.weight(1f))
+                }
             }
         }
     }
@@ -588,10 +683,18 @@ private fun AssistScreen(
 
 @Composable
 private fun SuggestionChips(onSuggestion: (String) -> Unit) {
-    val chips = listOf(
-        "¿Qué tengo hoy?", "Pon música", "¿Cuánta batería?",
-        "Pídeme un Uber", "Lee mis notificaciones", "¿Qué hora es?",
-    )
+    // A varied mix so the panel signals it can do more than "open app X":
+    // agenda/reminders, device control, security, and general Q&A.
+    val chips = remember {
+        listOf(
+            "¿Qué tengo hoy?", "Pon música", "¿Cuánta batería?",
+            "Pídeme un Uber", "Lee mis notificaciones", "¿Qué hora es?",
+            "Recuérdame llamar al dentista mañana a las 5",
+            "¿Alguna app me está mostrando anuncios?",
+            "Resume mis mensajes sin leer",
+            "Pon una alarma a las 7",
+        ).shuffled().take(6)
+    }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -1,9 +1,11 @@
 package com.blackclaw.android.assistant
 
 import android.content.Context
+import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.os.Handler
@@ -60,7 +62,44 @@ object VoiceInputManager {
         set(v) { KVUtils.putBoolean("voice_panel_on_wake", v); KVUtils.sync() }
 
     fun isAvailable(): Boolean =
-        SpeechRecognizer.isRecognitionAvailable(ClawApplication.instance)
+        SpeechRecognizer.isRecognitionAvailable(ClawApplication.instance) ||
+            pickRecognizerComponent() != null
+
+    // Some OEM ROMs (e.g. HonorOS/MagicOS) point the DEFAULT recognition service
+    // at a component that fails to bind ("Bind to system recognition service
+    // failed with error 10"), even though Google's recognizer IS installed. So
+    // instead of relying on the system default, we resolve a WORKING recognizer
+    // component ourselves — preferring Google — and bind to it explicitly.
+    @Volatile private var compResolved = false
+    @Volatile private var cachedComp: ComponentName? = null
+
+    private fun pickRecognizerComponent(): ComponentName? {
+        if (compResolved) return cachedComp
+        compResolved = true
+        cachedComp = runCatching {
+            val pm = ClawApplication.instance.packageManager
+            val services = pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+            if (services.isEmpty()) return@runCatching null
+            val preferred = services.firstOrNull {
+                it.serviceInfo?.packageName == "com.google.android.googlequicksearchbox"
+            } ?: services.firstOrNull {
+                it.serviceInfo?.packageName?.contains("google") == true
+            } ?: services.first()
+            preferred.serviceInfo?.let { ComponentName(it.packageName, it.name) }
+        }.getOrNull()
+        XLog.i(TAG, "Recognizer component resolved: ${cachedComp ?: "(system default)"}")
+        return cachedComp
+    }
+
+    /** Create a recognizer bound to a working component (Google) when possible. */
+    private fun createRecognizer(): SpeechRecognizer {
+        val ctx = ClawApplication.instance
+        val comp = pickRecognizerComponent()
+        return if (comp != null)
+            SpeechRecognizer.createSpeechRecognizer(ctx, comp)
+        else
+            SpeechRecognizer.createSpeechRecognizer(ctx)
+    }
 
     private fun buildIntent(preferOffline: Boolean = true, lang: String = language): Intent =
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -88,7 +127,20 @@ object VoiceInputManager {
         onRms: (Float) -> Unit = {},
         onPartial: (String) -> Unit = {},
     ) {
-        main.post { startSingle(onResult, onError, onRms, onPartial, attempt = 0, preferOffline = false, lang = language) }
+        // Try the system recognizer (Google) first. If it's fundamentally
+        // unusable on this device (broken default component, or missing language
+        // pack → error 12/13), fall back to the bundled offline Vosk engine so
+        // voice input works regardless of the OEM's speech stack.
+        val fallback = {
+            if (VoskSingleShot.isReady()) {
+                XLog.i(TAG, "System recognizer unusable → falling back to offline Vosk")
+                VoskSingleShot.listen(onResult, onError, onRms, onPartial)
+            } else onError("El reconocimiento de voz no está disponible en este dispositivo.")
+        }
+        main.post {
+            startSingle(onResult, onError, onRms, onPartial,
+                attempt = 0, preferOffline = false, lang = language, onUnusable = fallback)
+        }
     }
 
     private fun startSingle(
@@ -99,10 +151,11 @@ object VoiceInputManager {
         attempt: Int,
         preferOffline: Boolean,
         lang: String,
+        onUnusable: (() -> Unit)? = null,
     ) {
         if (!isAvailable()) { onError("Reconocimiento de voz no disponible en este dispositivo."); return }
         runCatching { recognizer?.destroy() }
-        val sr = SpeechRecognizer.createSpeechRecognizer(ClawApplication.instance)
+        val sr = createRecognizer()
         recognizer = sr
         var done = false
         sr.setRecognitionListener(object : SimpleRecognition() {
@@ -134,17 +187,29 @@ object VoiceInputManager {
                 when {
                     transient && attempt < 3 -> {
                         done = true
+                        // If the first attempt was offline and failed, try online next.
+                        val nextOffline = if (preferOffline && attempt == 0) false else preferOffline
                         main.postDelayed({
-                            startSingle(onResult, onError, onRms, onPartial, attempt + 1, preferOffline, lang)
+                            startSingle(onResult, onError, onRms, onPartial, attempt + 1, nextOffline, lang, onUnusable)
                         }, 450L)
                     }
                     langErr && lang.isNotEmpty() -> {
                         done = true
                         main.postDelayed({
-                            startSingle(onResult, onError, onRms, onPartial, attempt + 1, false, "")
+                            startSingle(onResult, onError, onRms, onPartial, attempt + 1, false, "", onUnusable)
                         }, 200L)
                     }
-                    else -> onError(errorText(error))
+                    else -> {
+                        // "Unusable" = the recognizer itself can't serve us (client/bind
+                        // failure, or no language pack) rather than a genuine no-speech.
+                        // In that case, hand off to the Vosk fallback if provided.
+                        val unusable = error == SpeechRecognizer.ERROR_CLIENT ||
+                            error == 10 /* bind failed */ ||
+                            error == 12 /* language unavailable */ ||
+                            error == 13 /* language not supported */ ||
+                            error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+                        if (unusable && onUnusable != null) onUnusable() else onError(errorText(error))
+                    }
                 }
             }
         })
@@ -153,9 +218,10 @@ object VoiceInputManager {
                 sr.destroy(); recognizer = null
                 if (attempt < 3) {
                     main.postDelayed({
-                        startSingle(onResult, onError, onRms, onPartial, attempt + 1, preferOffline, lang)
+                        startSingle(onResult, onError, onRms, onPartial, attempt + 1, preferOffline, lang, onUnusable)
                     }, 450L)
-                } else onError("No pude iniciar el micrófono: ${it.message}")
+                } else if (onUnusable != null) onUnusable()
+                else onError("No pude iniciar el micrófono: ${it.message}")
             }
     }
 
@@ -252,7 +318,7 @@ object VoiceInputManager {
     private fun listenForWake(onCommand: (String) -> Unit) {
         if (!wakeLoopActive) return
         BeepSuppressor.mute()  // keep streams muted while we (re)start listening
-        val sr = SpeechRecognizer.createSpeechRecognizer(ClawApplication.instance)
+        val sr = createRecognizer()
         recognizer = sr
         var fired = false
         sr.setRecognitionListener(object : SimpleRecognition() {
@@ -320,6 +386,16 @@ object VoiceInputManager {
             recognizer?.destroy()
         }
         recognizer = null
+    }
+
+    /**
+     * Cancel any single-shot listening in progress (system recognizer or the
+     * Vosk fallback), without touching the hands-free wake loop. Used when the
+     * user switches to typing instead of talking.
+     */
+    fun cancelListenOnce() {
+        main.post { cleanup() }
+        runCatching { VoskSingleShot.cancel() }
     }
 
     private fun errorText(code: Int): String = when (code) {

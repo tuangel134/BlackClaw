@@ -74,11 +74,13 @@ class TaskOrchestrator(
 
     // ==================== Task Lock ====================
 
-    fun tryAcquireTask(messageId: String, channel: Channel, taskText: String = ""): Boolean {
+    fun tryAcquireTask(messageId: String, channel: Channel, taskText: String = "",
+                       autoReturnToChat: Boolean = (channel == Channel.LOCAL)): Boolean {
         return taskSessionStore.tryAcquire(
             messageId = messageId,
             channel = channel,
             taskText = taskText,
+            autoReturnToChat = autoReturnToChat,
         )
     }
 
@@ -108,10 +110,11 @@ class TaskOrchestrator(
         messageID: String,
         agentPromptOverride: String? = null,
         isFallback: Boolean = false,
+        autoReturnToChat: Boolean = (channel == Channel.LOCAL),
     ) {
         // Acquire task lock if not already held
         if (!isTaskRunning()) {
-            if (!tryAcquireTask(messageID, channel, task)) {
+            if (!tryAcquireTask(messageID, channel, task, autoReturnToChat)) {
                 XLog.w(TAG, "Failed to acquire task lock for: $task")
                 taskEventCallback?.invoke(TaskEvent.Failed("Another task is running"))
                 return

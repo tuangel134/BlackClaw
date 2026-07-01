@@ -180,7 +180,7 @@ class VoiceWakeService : Service() {
         updateNotif("processing")
         val taskId = "voice-" + UUID.randomUUID().toString().take(8)
         runCatching {
-            appViewModel.startTask(command, taskId) { event ->
+            appViewModel.startTask(command, taskId, autoReturnToChat = false) { event ->
                 when (event) {
                     is TaskEvent.Completed -> { speakResult(event.answer, whisper); runningTask = false }
                     is TaskEvent.Failed -> {
