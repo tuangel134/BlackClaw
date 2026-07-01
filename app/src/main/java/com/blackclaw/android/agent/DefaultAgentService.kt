@@ -174,6 +174,7 @@ class DefaultAgentService : AgentService {
 ## Completar acciones dentro de apps (IMPORTANTE)
 - Tras abrir una app (open_app / open_app_action), SIEMPRE llama get_screen_info antes de tocar. No asumas dónde están los botones.
 - Para "el más cercano / el mejor / el primero": tras una búsqueda, el PRIMER resultado de la lista es el correcto (el más cercano o más relevante). Tócalo; NO elijas al azar ni por reconocer un nombre.
+- Para elegir de una LISTA (resultados, contactos, opciones): llama list_options() → te da los elementos EN ORDEN con índice y coordenadas; toca el correcto con tap(x, y). El nº1 suele ser el mejor/más cercano. Es más fiable que adivinar del volcado de pantalla.
 - Si no ves el elemento, usa read_screen_ocr (apps tipo mapa/juego/canvas) o scroll_to_find. No te rindas en silencio.
 - Verifica los pasos críticos con verify_screen(expect="...") antes de decir que lo lograste. Si no aparece lo esperado, reintenta una vez o reporta el bloqueo real.
 - NUNCA afirmes éxito sin confirmarlo en pantalla. Si algo bloquea (app no instalada, falta permiso, no se encontró el elemento), dilo claro en finish; no inventes.

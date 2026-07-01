@@ -456,6 +456,10 @@ PR guidelines, and conventions.
   reinforced bilingual wake-word matching, cancel/undo, per-provider streaming,
   self-healing free-model list, and more playbooks (email, WhatsApp media,
   shopping, maps, banking, camera, device settings)
+- **Reliable list selection** (`list_options`): enumerates on-screen items in
+  order with tap coordinates so the agent picks the right result
+- **Local (Gemma) chat streaming**: on-device chat replies now type out
+  token-by-token via LiteRT-LM's async API
 
 ### v1.0.0 (beta)
 

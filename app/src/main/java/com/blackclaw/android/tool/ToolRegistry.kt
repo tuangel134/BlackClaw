@@ -252,6 +252,7 @@ object ToolRegistry {
         register(SwipeTool())
         register(ScrollToFindTool())
         register(FindAndTapTool())
+        register(ListOptionsTool())
         register(SendMessageTool())
         register(AutoReplyTool())
         // Advanced gesture tools (work without Shizuku, all via accessibility)

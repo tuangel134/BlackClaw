@@ -355,14 +355,24 @@ class ChatSessionController(
                     if (currentConversation == null || !isModelReady) {
                         throw IllegalStateException("Local model is still loading. Try again in a moment.")
                     }
-                    val response = currentConversation.sendMessage(text)
-                    val responseText = response?.toString() ?: "(no response)"
-                    val inputTokensEst = text.length / 4 + 1
-                    val outputTokensEst = responseText.length / 4 + 1
                     val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
                     val localModelTag = localModelTag(modelPath)
+                    val streamIdx = uiState.messages.indexOfLast {
+                        it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+                    val sb = StringBuilder()
+                    val responseText = try {
+                        streamLocal(currentConversation, text, sb) { soFar ->
+                            postToMain { setStreamingText(streamIdx, soFar, localModelTag) }
+                        }
+                    } catch (se: Exception) {
+                        // Some runtime builds may not support async streaming — fall back.
+                        XLog.w(TAG, "local streaming failed, sync fallback: ${se.message}")
+                        currentConversation.sendMessage(text)?.toString() ?: sb.toString()
+                    }.ifBlank { "(no response)" }
+                    val inputTokensEst = text.length / 4 + 1
+                    val outputTokensEst = responseText.length / 4 + 1
                     postToMain {
-                        replaceTypingIndicator(responseText, localModelTag)
+                        setStreamingText(streamIdx, responseText, localModelTag)
                         uiState.isAwaitingReply.value = false
                         uiState.sessionTokens.value += inputTokensEst + outputTokensEst
                         onPersistConversation()
@@ -619,6 +629,41 @@ class ChatSessionController(
         if (cloudHistory.isEmpty()) {
             rebuildCloudHistoryFromVisibleMessages()
         }
+    }
+
+    /**
+     * Stream a local (LiteRT-LM) chat response token-by-token via sendMessageAsync.
+     * Robust to delta OR cumulative emissions. Returns the full text; throws on
+     * error/timeout so the caller can fall back to the blocking path. No tools
+     * here (plain chat), so there's no tool-call parsing risk.
+     */
+    private fun streamLocal(
+        conv: com.google.ai.edge.litertlm.Conversation,
+        text: String,
+        sb: StringBuilder,
+        onDelta: (String) -> Unit,
+    ): String {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val err = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        conv.sendMessageAsync(text, object : com.google.ai.edge.litertlm.MessageCallback {
+            override fun onMessage(message: com.google.ai.edge.litertlm.Message) {
+                val t = runCatching { message.contents?.toString() }.getOrNull()
+                    ?: runCatching { message.toString() }.getOrNull() ?: ""
+                if (t.isEmpty()) return
+                if (t.length >= sb.length && t.startsWith(sb.toString())) {
+                    sb.setLength(0); sb.append(t)   // cumulative snapshot
+                } else {
+                    sb.append(t)                    // incremental delta
+                }
+                onDelta(sb.toString())
+            }
+            override fun onDone() { latch.countDown() }
+            override fun onError(throwable: Throwable) { err.set(throwable); latch.countDown() }
+        })
+        if (!latch.await(120, java.util.concurrent.TimeUnit.SECONDS))
+            throw RuntimeException("local stream timeout")
+        err.get()?.let { throw it }
+        return sb.toString()
     }
 
     /** Update the streaming assistant message at [idx] with the text so far. */

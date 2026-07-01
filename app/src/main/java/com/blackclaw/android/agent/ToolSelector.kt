@@ -36,6 +36,7 @@ object ToolSelector {
         "get_screen_info", "find_node_info", "tap", "tap_node", "input_text",
         "system_key", "swipe", "scroll_to_find", "find_and_tap", "open_app",
         "wait", "finish", "get_foreground_app", "close_app", "verify_screen",
+        "list_options",
         // request_tool is the unlock mechanism — must always be available.
         "request_tool",
     )
