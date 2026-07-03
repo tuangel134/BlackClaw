@@ -478,6 +478,19 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.1.2
+
+- **Fixed a crash-loop that could disable accessibility.** Any tool that
+  triggers screen-capture consent (OCR/screenshot tools, used automatically
+  when the accessibility tree is empty — e.g. games and other apps that render
+  their own UI via SurfaceView/OpenGL) crashed the app instantly
+  (`IllegalStateException: You need to use a Theme.AppCompat theme`) because
+  the permission dialog's activity used a non-AppCompat theme. Repeated crashes
+  killed the whole process, which took the Accessibility service down with it —
+  looking like BlackClaw's accessibility permission "turned itself off".
+  Confirmed fixed on-device (Honor Magic 7 Pro / MagicOS) via crash-log
+  analysis (`dumpsys dropbox`) before and after.
+
 ### v1.1.1
 
 - **Assist panel: type instead of talk.** A keyboard toggle next to the mic

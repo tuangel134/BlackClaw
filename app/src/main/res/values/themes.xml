@@ -64,7 +64,13 @@
     </style>
 
     <!-- 透明 Activity（用于剪贴板读取等需要前台焦点的操作） -->
-    <style name="Theme.Transparent" parent="android:Theme">        <item name="android:windowIsTranslucent">true</item>
+    <!-- MUST descend from Theme.AppCompat: any AppCompatActivity using this
+         theme (e.g. ScreenCapturePermissionActivity, ClipboardReaderActivity)
+         crashes instantly in onPostCreate with "You need to use a
+         Theme.AppCompat theme" otherwise — a real crash-loop bug observed on
+         device that also killed the accessibility service (same process). -->
+    <style name="Theme.Transparent" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowContentOverlay">@null</item>
