@@ -30,7 +30,8 @@ or in the cloud.
 <div align="center">
 
 <img src="screenshots/screenshot_01.jpg" width="24%" /> <img src="screenshots/screenshot_02.jpg" width="24%" /> <img src="screenshots/screenshot_03.jpg" width="24%" /> <img src="screenshots/screenshot_04.jpg" width="24%" />
-<img src="screenshots/screenshot_05.jpg" width="24%" /> <img src="screenshots/screenshot_06.jpg" width="24%" /> <img src="screenshots/screenshot_07.jpg" width="24%" />
+<img src="screenshots/screenshot_05.jpg" width="24%" /> <img src="screenshots/screenshot_06.jpg" width="24%" /> <img src="screenshots/screenshot_07.jpg" width="24%" /> <img src="screenshots/screenshot_08.jpg" width="24%" />
+<img src="screenshots/screenshot_09.jpg" width="24%" /> <img src="screenshots/screenshot_10.jpg" width="24%" /> <img src="screenshots/screenshot_11.jpg" width="24%" />
 
 </div>
 
@@ -64,8 +65,9 @@ rather than relying on per-app integrations.
   search that uses the car's own speech-to-text — answers read aloud.
 - **Remote-controllable.** Drive the phone by messaging it from Telegram,
   Discord, or WeChat — useful for an agent that runs while the device is away.
-- **Broad reach.** 110+ built-in tools spanning UI control, device settings,
-  messaging, files, network, perception, and automation.
+- **Broad reach.** 166 built-in tools spanning UI control, device settings,
+  messaging, files, network, perception, and automation — browsable in-app via
+  Settings → Herramientas → Catálogo de herramientas.
 
 ---
 
@@ -89,7 +91,7 @@ touching the phone.
 
 ---
 
-## Tools at a glance
+## Tools at a glance (166)
 
 | Category | Examples |
 |---|---|
@@ -159,9 +161,10 @@ touching the phone.
 - **Auto-discovery:** BlackClaw asks the system which installed apps can handle
   each capability (music, navigation, email, calling…), so it adapts to *your*
   app set instead of a hardcoded list.
-- **Deterministic fast-path:** common commands ("open X", "play Y", "navigate to
-  Z", "get me an Uber") run **instantly with zero LLM calls** — toggle it in
-  Settings → Advanced.
+- **Deterministic fast-path ("Atajos rápidos"):** common commands ("open X",
+  "play Y", "navigate to Z", "get me an Uber") run **instantly with zero LLM
+  calls**. Toggle it off in Settings → Advanced if you want *everything* — even
+  trivial commands — to go through the model instead.
 
 ### Privileged control (no PC, no root)
 - **Built-in self-ADB pairing.** BlackClaw can pair with its own `adbd` over the
@@ -261,9 +264,15 @@ Agent Core Reliability:**
   **uncensored (abliterated)** Gemma 4 community ports — same architecture, so
   they load on the same runtime — downloadable from within the app. You can also
   paste a custom `.litertlm` URL.
+- **Cloud, free, no account (BlackClaw Free tier):** a set of hosted models
+  usable out of the box with **no API key and no signup** — Settings → Modelo →
+  **BlackClaw Free**. Currently includes DeepSeek V4 Flash, Mimo V2.5,
+  Nemotron 3 Ultra, and North Mini Code, each tagged with a speed/quality rating
+  so you can pick fast vs. smart per task.
 - **Cloud (bring your own key):** OpenAI, Anthropic, Google Gemini, Groq,
   DeepSeek, Cerebras, or any OpenAI-compatible endpoint via a custom base URL
-- Switch modes anytime; chat can stay local while heavy tasks use the cloud
+- Switch modes anytime; chat can stay local, free-tier, or paid-cloud, and heavy
+  tasks can use a stronger model while quick replies stay cheap or offline
 
 ### Reliability & safety
 - **Stuck detection** breaks out of loops and re-plans instead of repeating a
@@ -316,7 +325,7 @@ Agent Core Reliability:**
         │ result                      │ tool calls
         │                             ▼
 ┌───────┴───────┐          ┌──────────────────────┐
-│  LLM           │◀────────│  Tool layer (110+)    │
+│  LLM           │◀────────│  Tool layer (166)     │
 │ local / cloud  │ schemas │  a11y · ADB · OCR ·   │
 └───────────────┘          │  net · device · files │
                            └───────────┬───────────┘
@@ -333,7 +342,7 @@ next move without a wasted round.
 
 ### Token-efficient tool disclosure
 
-Sending ~110 full tool schemas on every request is expensive and trips cloud rate
+Sending 166 full tool schemas on every request is expensive and trips cloud rate
 limits. BlackClaw uses **progressive disclosure**: a compact one-line catalog of
 every tool is shown in the system prompt, a task-relevant subset is preloaded
 with full schemas, and the model loads anything else on demand via a
@@ -404,7 +413,7 @@ app/
     server/           NanoHTTPD LAN config server
     service/          Accessibility, notification listener, foreground services
     shizuku/          Optional Shizuku backend
-    tool/             Generic tool layer (110+ tools)
+    tool/             Generic tool layer (166 tools)
     ui/               Compose UI: chat, settings, themes, skills, auto-replies, ADB
     utils/            Logging, KV storage, contact / UI matching
 docs/                 Skill file specification
@@ -416,13 +425,16 @@ scripts/              ADB-driven smoke and E2E harnesses
 
 ## Tech stack
 
-- Kotlin / Java 17, Android Gradle Plugin 9.1
-- Jetpack Compose (BOM 2025.05) + Material 3
-- LiteRT-LM 0.10 for on-device Gemma inference
-- LangChain4j for cloud OpenAI / Anthropic clients
-- libadb-android + Conscrypt for the built-in ADB pairing stack
-- ML Kit Text Recognition for offline OCR
-- OkHttp · Retrofit · Gson · MMKV · Glide · ZXing · NanoHTTPD
+| Layer | Stack |
+|---|---|
+| Language / build | Kotlin · Java 17 · Android Gradle Plugin 9.1 |
+| UI | Jetpack Compose (BOM 2025.05) · Material 3 · 10 built-in themes |
+| On-device LLM | LiteRT-LM 0.10 (Gemma 4 E2B / E4B, incl. abliterated ports) |
+| Cloud LLM clients | LangChain4j (OpenAI / Anthropic) · BlackClaw Free routing layer (no-key hosted models) |
+| Offline speech | Vosk (wake word + STT, zero network) |
+| Privileged control | libadb-android + Conscrypt (self-ADB pairing, TLS 1.3 + SPAKE2) · Shizuku |
+| Perception | ML Kit Text Recognition (OCR) · MediaProjection screen capture |
+| Networking / data | OkHttp · Retrofit · Gson · MMKV · Glide · ZXing · NanoHTTPD |
 
 ---
 
@@ -615,9 +627,9 @@ Si este proyecto te es útil y quieres ayudar a que siga mejorando, puedes apoya
 `tuangel1346@gmail.com`
 
 **Criptomonedas (Bitcoin)**  
-\`\`\`
+```
 bc1q5nrv64jchep3hpqptvwmume8rkw68937zftfpa
-\`\`\`
+```
 
 Tu apoyo ayuda a mantener el desarrollo, mejorar la documentación y portar a más plataformas. ¡Gracias! 🙏
 
