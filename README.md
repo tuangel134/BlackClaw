@@ -490,6 +490,13 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.1.3
+- **Fixed notification intent routing in chat.** Merely mentioning notifications in a question, explanation, example, or general conversation no longer triggers immediate access to device notifications.
+- Reading notifications now requires an explicit request, such as “read my notifications” or “what notifications do I have”.
+- Negated requests such as “do not read my notifications” are respected.
+- Added regression tests for explicit requests, contextual mentions, and negated commands.
+
+
 ### v1.1.2
 
 - **Fixed a crash-loop that could disable accessibility.** Any tool that
