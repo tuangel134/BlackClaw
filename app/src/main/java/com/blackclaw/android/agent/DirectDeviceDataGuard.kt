@@ -79,13 +79,17 @@ internal class DirectDeviceDataGuard private constructor(
             return match.taskLabel != "screen-reading"
         }
 
+        internal fun matchesNotificationDataRequest(task: String): Boolean {
+            return isNotificationDataRequest(task)
+        }
+
         fun deterministicToolCall(task: String): DeterministicToolCall? {
             val normalized = normalize(task)
             return when {
                 isClipboardDataRequest(normalized) ->
                     DeterministicToolCall("clipboard", mapOf("action" to "get"))
 
-                normalized.contains("notif") || normalized.contains("notification") ->
+                isNotificationDataRequest(task) ->
                     DeterministicToolCall("get_notifications", emptyMap())
 
                 normalized.contains("what apps do i have") ||
@@ -125,7 +129,7 @@ internal class DirectDeviceDataGuard private constructor(
                         requiredAction = "Call clipboard(action=\"get\") before you answer.",
                     )
 
-                normalized.contains("notif") || normalized.contains("notification") ->
+                isNotificationDataRequest(task) ->
                     Match(
                         taskText = task.trim(),
                         taskLabel = "notification",
@@ -177,6 +181,96 @@ internal class DirectDeviceDataGuard private constructor(
             return value.lowercase(Locale.US)
                 .replace(Regex("""\s+"""), " ")
                 .trim()
+        }
+
+        private val NOTIFICATION_NOUN =
+            Regex("""\b(notificacion(?:es)?|notifications?|notifs?)\b""")
+
+        private val NEGATED_NOTIFICATION_ACCESS = Regex(
+            """\b(no|nunca|jamas|sin|dont|don t|do not|never|without)\b.{0,48}""" +
+                """\b(lee|leer|leas|revisa|revisar|revises|checa|checar|muestra|mostrar|muestres|""" +
+                """lista|listar|resume|resumir|ver|consulta|consultar|ensena|ensenar|read|check|show|""" +
+                """list|summarize|summarise|view)\b.{0,48}""" +
+                """\b(notificacion(?:es)?|notifications?|notifs?)\b"""
+        )
+
+        private val CONCEPTUAL_NOTIFICATION_CONTEXTS = listOf(
+            Regex(
+                """\b(que es|que significa|what is|what does)\s+(?:una?\s+|an?\s+)?""" +
+                    """(notificacion(?:es)?|notifications?)\b"""
+            ),
+            Regex(
+                """\b(como|how to|how do i|how can i|aprender a|learn to)\s+""" +
+                    """(?:puedo\s+|se\s+)?(leer|ver|crear|programar|hacer|configurar|""" +
+                    """read|view|create|program|make|configure)\b.{0,64}""" +
+                    """\b(notificacion(?:es)?|notifications?|notifs?)\b"""
+            ),
+            Regex(
+                """\b(tutorial|ejemplo|codigo|articulo|documento|texto|palabra|frase|concepto|""" +
+                    """documentation|example|code|article|document|text|word|phrase|concept)\b.{0,80}""" +
+                    """\b(notificacion(?:es)?|notifications?|notifs?)\b"""
+            ),
+            Regex(
+                """\b(notificacion(?:es)?|notifications?|notifs?)\b.{0,80}""" +
+                    """\b(tutorial|ejemplo|codigo|articulo|documento|texto|palabra|frase|concepto|""" +
+                    """documentation|example|code|article|document|text|word|phrase|concept)\b"""
+            ),
+        )
+
+        private val NOTIFICATION_ACTION_REQUESTS = listOf(
+            Regex(
+                """\b(lee|leer|leeme|leas|revisa|revisar|revises|checa|checar|muestra|mostrar|""" +
+                    """muestrame|muestres|lista|listar|resume|resumir|resumeme|cuenta|contar|cuentame|""" +
+                    """ver|consulta|consultar|ensena|ensename|ensenar)\s+""" +
+                    """(?:todas?\s+)?(mis|las|estas|tus|actuales|nuevas|pendientes)\s+notificacion(?:es)?\b"""
+            ),
+            Regex(
+                """\b(read|check|show|list|summarize|summarise|count|view)\s+""" +
+                    """(?:all\s+)?(my|the|current|new|pending)\s+(notifications?|notifs?)\b"""
+            ),
+            Regex(
+                """\b(show|tell)\s+me\s+(?:all\s+)?(my|the|current|new|pending)\s+(notifications?|notifs?)\b"""
+            ),
+            Regex("""^(lee|revisa|checa|muestra|lista)\s+notificacion(?:es)?$"""),
+            Regex("""^(read|check|show|list)\s+(notifications?|notifs?)$"""),
+        )
+
+        private val NOTIFICATION_QUESTION_REQUESTS = listOf(
+            Regex("""\b(que|cuales|cuantas)\s+notificacion(?:es)?\s+(tengo|hay|recibi|llegaron)\b"""),
+            Regex("""\b(que hay|que tengo|cuales son|cuantas hay)\s+(?:en\s+)?(mis|las|estas)?\s*notificacion(?:es)?\b"""),
+            Regex("""\b(tengo|hay)\s+(?:alguna?s?|nuevas?|pendientes?)?\s*notificacion(?:es)?\b"""),
+            Regex("""\b(whats|what s|what is)\s+on\s+my\s+(notifications?|notifs?)\b"""),
+            Regex("""\b(what|which)\s+(notifications?|notifs?)\s+(do i have|did i get|are on my (phone|device)|are pending)\b"""),
+            Regex("""\bhow many\s+(notifications?|notifs?)\b"""),
+            Regex("""\b(do i have|did i get|are there)\s+(?:any|new|pending)?\s*(notifications?|notifs?)\b"""),
+        )
+
+        private fun isNotificationDataRequest(task: String): Boolean {
+            val normalized = normalizeNotificationIntent(task)
+            if (!NOTIFICATION_NOUN.containsMatchIn(normalized)) return false
+            if (NEGATED_NOTIFICATION_ACCESS.containsMatchIn(normalized)) return false
+            if (CONCEPTUAL_NOTIFICATION_CONTEXTS.any { it.containsMatchIn(normalized) }) return false
+
+            return NOTIFICATION_ACTION_REQUESTS.any { it.containsMatchIn(normalized) } ||
+                NOTIFICATION_QUESTION_REQUESTS.any { it.containsMatchIn(normalized) }
+        }
+
+        private fun normalizeNotificationIntent(value: String): String {
+            val sb = StringBuilder(value.length)
+            for (character in value.lowercase(Locale.US)) {
+                sb.append(
+                    when (character) {
+                        'á' -> 'a'
+                        'é' -> 'e'
+                        'í' -> 'i'
+                        'ó' -> 'o'
+                        'ú', 'ü' -> 'u'
+                        'ñ' -> 'n'
+                        else -> if (character.isLetterOrDigit() || character == ' ') character else ' '
+                    }
+                )
+            }
+            return sb.toString().trim().replace(Regex("""\s+"""), " ")
         }
 
         private fun isClipboardDataRequest(normalized: String): Boolean {

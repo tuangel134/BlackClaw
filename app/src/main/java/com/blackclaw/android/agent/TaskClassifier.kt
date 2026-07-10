@@ -196,13 +196,22 @@ object TaskClassifier {
     }
 
     // ── 5. Device state nouns ──
+    // Notifications are context-sensitive: mentioning the word is not enough to
+    // read private device data. Other device-state nouns keep their legacy routing.
+    private val NOTIFICATION_STATE =
+        Regex("""\b(notificacion|notificaciones|notification|notifications|notif|notifs)\b""")
+
     private val DEVICE_STATE = Regex(
         """\b(bateria|pila|wifi|bluetooth|datos|almacenamiento|memoria|ram|brillo|volumen|""" +
-        """linterna|notificacion|notificaciones|portapapeles|pantalla|camara|microfono|""" +
-        """ubicacion|gps|hotspot|nfc|avion|""" +
-        """battery|wifi|bluetooth|storage|brightness|volume|flashlight|notification|""" +
-        """clipboard|screen|camera|microphone|location|airplane)\b"""
+        """linterna|portapapeles|pantalla|camara|microfono|ubicacion|gps|hotspot|nfc|avion|""" +
+        """battery|wifi|bluetooth|storage|brightness|volume|flashlight|clipboard|screen|""" +
+        """camera|microphone|location|airplane)\b"""
     )
 
-    private fun hasDeviceState(t: String): Boolean = DEVICE_STATE.containsMatchIn(t)
+    private fun hasDeviceState(t: String): Boolean {
+        if (NOTIFICATION_STATE.containsMatchIn(t)) {
+            return DirectDeviceDataGuard.matchesNotificationDataRequest(t)
+        }
+        return DEVICE_STATE.containsMatchIn(t)
+    }
 }
