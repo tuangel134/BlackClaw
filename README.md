@@ -491,6 +491,12 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.1
+
+- Delivery-only version bump after `v1.2.0` shared its version name with an
+  earlier local build. The higher version name and code ensure the in-app updater
+  offers this signed public release to those installations.
+
 ### v1.2.0
 
 - Quick Assist is now a native Android default-assistant integration: it receives
