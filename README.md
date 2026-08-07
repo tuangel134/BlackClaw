@@ -491,6 +491,15 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.2
+
+- Fixed an audio race in Quick Assist: opening it now pauses the background
+  wake-word service, releases its microphone and cancels any queued response.
+  Only the Quick Assist conversation can listen or speak until the panel closes.
+- Excluded BlackClaw's Android 11 voice-service compatibility bridge from the
+  speech recognizer picker, preventing it from being selected as a real
+  recognizer and emitting a second false failure.
+
 ### v1.2.1
 
 - Delivery-only version bump after `v1.2.0` shared its version name with an

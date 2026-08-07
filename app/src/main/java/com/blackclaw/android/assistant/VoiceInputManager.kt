@@ -92,9 +92,8 @@ object VoiceInputManager {
         get() = KVUtils.getBoolean("voice_panel_on_wake", true)
         set(v) { KVUtils.putBoolean("voice_panel_on_wake", v); KVUtils.sync() }
 
-    fun isAvailable(): Boolean =
-        SpeechRecognizer.isRecognitionAvailable(ClawApplication.instance) ||
-            pickRecognizerComponent() != null
+    /** A component from this app is the Android 11 compatibility bridge, not a backend. */
+    fun isAvailable(): Boolean = pickRecognizerComponent() != null || VoskSingleShot.isReady()
 
     // Some OEM ROMs (e.g. HonorOS/MagicOS) point the DEFAULT recognition service
     // at a component that fails to bind ("Bind to system recognition service
@@ -110,6 +109,11 @@ object VoiceInputManager {
         cachedComp = runCatching {
             val pm = ClawApplication.instance.packageManager
             val services = pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+                // BlackClaw declares a RecognitionService only because the old
+                // VoiceInteractionService contract requires one. Binding a
+                // SpeechRecognizer to ourselves feeds its compatibility error back
+                // into QuickAssist and can make the system speak a second failure.
+                .filter { it.serviceInfo?.packageName != ClawApplication.instance.packageName }
             if (services.isEmpty()) return@runCatching null
             val preferred = services.firstOrNull {
                 it.serviceInfo?.packageName == "com.google.android.googlequicksearchbox"
@@ -174,6 +178,13 @@ object VoiceInputManager {
         onRms: (Float) -> Unit = {},
         onPartial: (String) -> Unit = {},
     ) {
+        // On devices without a separate platform recognizer, go directly to the
+        // offline engine. Do not let Android resolve our compatibility service as
+        // the default recognizer and report a spurious client error first.
+        if (pickRecognizerComponent() == null && VoskSingleShot.isReady()) {
+            VoskSingleShot.listen(onResult, onError, onRms, onPartial)
+            return
+        }
         // Try the system recognizer (Google) first. If it's fundamentally
         // unusable on this device (broken default component, or missing language
         // pack → error 12/13), fall back to the bundled offline Vosk engine so

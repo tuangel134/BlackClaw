@@ -134,6 +134,10 @@ class QuickAssistActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The background wake-word service and this panel must never listen or
+        // speak together. Without this hand-off it can hear the same command,
+        // execute a second task and voice an unrelated failure over QuickAssist.
+        com.blackclaw.android.service.VoiceWakeService.pauseForQuickAssist()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT

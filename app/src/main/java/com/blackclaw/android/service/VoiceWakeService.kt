@@ -46,6 +46,12 @@ class VoiceWakeService : Service() {
         const val ACTION_RESUME_WAKE = "com.blackclaw.android.RESUME_WAKE"
         @Volatile private var liveInstance: VoiceWakeService? = null
 
+        /** Give the foreground QuickAssist session exclusive ownership of the mic and TTS. */
+        @JvmStatic
+        fun pauseForQuickAssist() {
+            liveInstance?.pauseForQuickAssistSession()
+        }
+
         fun decisionHandled(id: String) {
             liveInstance?.takeIf { it.pendingDecisionId == id }?.apply {
                 pendingDecisionId = null
@@ -65,6 +71,7 @@ class VoiceWakeService : Service() {
     }
 
     @Volatile private var pausedForCall = false
+    @Volatile private var pausedForQuickAssist = false
     @Volatile private var runningTask = false
     @Volatile private var pendingConfirm: String? = null   // destructive command awaiting "sí"
     @Volatile private var pendingConfirmWhisper = false
@@ -89,6 +96,7 @@ class VoiceWakeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Resume the wake loop after the assist panel handed the mic back.
         if (intent?.action == ACTION_RESUME_WAKE) {
+            pausedForQuickAssist = false
             runningTask = false
             runCatching { startListening() }
         }
@@ -108,7 +116,7 @@ class VoiceWakeService : Service() {
     // ── Listening ──
 
     private fun startListening() {
-        if (pausedForCall) return
+        if (pausedForCall || pausedForQuickAssist) return
         // Don't grab the mic if a call/communication audio mode is active.
         if (isCallActive()) { pausedForCall = true; return }
         // Battery guard: don't keep the mic + recognizer running when critically
@@ -133,6 +141,10 @@ class VoiceWakeService : Service() {
     }
 
     private fun onVoiceCommand(command: String, whisper: Boolean) {
+        if (pausedForQuickAssist) {
+            XLog.d(TAG, "Ignoring wake command while QuickAssist owns the conversation")
+            return
+        }
         // Resolve a pending destructive-confirmation first.
         val pending = pendingConfirm
         if (pending != null) {
@@ -221,7 +233,17 @@ class VoiceWakeService : Service() {
     }
 
     private fun say(text: String, whisper: Boolean) {
+        if (pausedForQuickAssist) return
         if (whisper) Speaker.speakWhisper(text) else Speaker.speak(text)
+    }
+
+    private fun pauseForQuickAssistSession() {
+        pausedForQuickAssist = true
+        runCatching { VoiceInputManager.stopWakeLoop() }
+        // A task may have finished just as QuickAssist was opened. Cancel that
+        // queued utterance too, otherwise its old voice can overlap the panel.
+        runCatching { Speaker.stop() }
+        updateNotif("paused_assist")
     }
 
     /** Heuristic destructive-intent check for spoken commands (ES/EN). */
@@ -238,6 +260,7 @@ class VoiceWakeService : Service() {
     }
 
     private fun speakResult(text: String, whisper: Boolean) {
+        if (pausedForQuickAssist) return
         val clean = text
             .replace(Regex("[*_#`>]+"), " ")
             .replace(Regex("https?://\\S+"), "")
@@ -335,6 +358,7 @@ class VoiceWakeService : Service() {
             "heard" -> "Te escuché…"
             "listening_followup" -> "Escuchando (sigue hablando)…"
             "paused_battery" -> "Pausado (batería baja)"
+            "paused_assist" -> "QuickAssist está activo"
             else -> "Di \"garra\" seguido de tu orden"
         }
         val b = notifBuilder ?: return
