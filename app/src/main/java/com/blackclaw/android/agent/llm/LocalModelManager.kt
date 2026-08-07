@@ -1,11 +1,14 @@
 package com.blackclaw.android.agent.llm
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.os.StatFs
 import com.blackclaw.android.utils.XLog
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.InputStream
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
@@ -592,6 +595,87 @@ object LocalModelManager {
         val tempFile = File(getModelDir(context), "${model.fileName}.downloading")
         tempFile.delete()
         return if (file.exists()) file.delete() else true
+    }
+
+    /**
+     * Copies a compatible model selected by the user into BlackClaw's own model
+     * directory. Native LiteRT-LM receives a filesystem path, so retaining a
+     * temporary content URI from another app is not reliable enough.
+     */
+    fun importLiteRtModel(context: Context, uri: Uri): String {
+        val fileName = displayNameForUri(context, uri)
+        require(ExternalModelDiscovery.classify(fileName) == ExternalModelDiscovery.Format.LITERT_LM) {
+            "BlackClaw can only run LiteRT-LM (.litertlm) files"
+        }
+        val expectedSize = context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                val column = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst() && column >= 0 && !cursor.isNull(column)) cursor.getLong(column) else null
+            }
+        return context.contentResolver.openInputStream(uri)?.use { input ->
+            importLiteRtModel(context, fileName, input, expectedSize)
+        } ?: throw IllegalStateException("BlackClaw could not open the selected model")
+    }
+
+    fun importLiteRtModel(context: Context, source: File): String {
+        require(source.isFile && source.canRead()) { "The selected model file is not readable" }
+        require(ExternalModelDiscovery.classify(source.name) == ExternalModelDiscovery.Format.LITERT_LM) {
+            "BlackClaw can only run LiteRT-LM (.litertlm) files"
+        }
+        return source.inputStream().use { input -> importLiteRtModel(context, source.name, input, source.length()) }
+    }
+
+    private fun importLiteRtModel(
+        context: Context,
+        suppliedName: String,
+        input: InputStream,
+        expectedSize: Long?,
+    ): String {
+        val modelDir = getModelDir(context)
+        val safeName = File(suppliedName).name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .ifBlank { "imported-model.litertlm" }
+        val target = uniqueImportedFile(modelDir, safeName)
+        val temp = File(modelDir, ".${target.name}.importing")
+
+        if (expectedSize != null && expectedSize > 0L && StatFs(modelDir.absolutePath).availableBytes < expectedSize) {
+            throw IllegalStateException("Not enough free storage to import this model")
+        }
+        try {
+            FileOutputStream(temp).use { output -> input.copyTo(output, DEFAULT_BUFFER_SIZE) }
+            if (temp.length() < 1_048_576L) {
+                throw IllegalStateException("The selected file is too small to be a complete model")
+            }
+            if (!temp.renameTo(target)) {
+                throw IllegalStateException("BlackClaw could not move the imported model into place")
+            }
+            XLog.i(TAG, "Model imported: ${target.absolutePath} (${target.length()} bytes)")
+            return target.absolutePath
+        } finally {
+            if (temp.exists()) temp.delete()
+        }
+    }
+
+    private fun uniqueImportedFile(modelDir: File, requestedName: String): File {
+        val base = requestedName.substringBeforeLast('.', requestedName)
+        val extension = requestedName.substringAfterLast('.', "litertlm")
+        var candidate = File(modelDir, requestedName)
+        var number = 2
+        while (candidate.exists()) {
+            candidate = File(modelDir, "$base-$number.$extension")
+            number++
+        }
+        return candidate
+    }
+
+    private fun displayNameForUri(context: Context, uri: Uri): String {
+        return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst() && column >= 0 && !cursor.isNull(column)) cursor.getString(column) else null
+            }
+            ?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/')
+            ?: "imported-model.litertlm"
     }
 
     private fun cleanupInvalidFiles(model: ModelInfo, targetFile: File, tempFile: File) {

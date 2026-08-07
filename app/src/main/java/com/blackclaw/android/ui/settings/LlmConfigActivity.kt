@@ -15,6 +15,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.cardview.widget.CardView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
@@ -24,6 +25,7 @@ import com.blackclaw.android.agent.CloudModel
 import com.blackclaw.android.agent.CloudProvider
 import com.blackclaw.android.agent.ModelPricing
 import com.blackclaw.android.agent.llm.ActiveModelMode
+import com.blackclaw.android.agent.llm.ExternalModelDiscovery
 import com.blackclaw.android.agent.llm.LocalModelManager
 import com.blackclaw.android.agent.llm.ModelConfigRepository
 import com.blackclaw.android.base.BaseActivity
@@ -32,9 +34,24 @@ import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.widget.CommonToolbar
 import com.blackclaw.android.widget.KButton
 import java.util.concurrent.Executors
+import java.io.File
 import kotlin.math.max
 
 class LlmConfigActivity : BaseActivity() {
+
+    private val importLocalModelPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        executor.submit {
+            try {
+                val modelPath = LocalModelManager.importLiteRtModel(this, uri)
+                activateImportedLocalModel(modelPath)
+            } catch (error: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, error.message ?: "Could not import model", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     private val executor = Executors.newSingleThreadExecutor()
     private var isDownloading = false
@@ -341,8 +358,116 @@ class LlmConfigActivity : BaseActivity() {
         // Storage info
         updateStorageInfo()
 
+        val discoveredModelList = findViewById<LinearLayout>(R.id.layoutDiscoveredModelList)
+        val externalModelHint = findViewById<TextView>(R.id.tvExternalModelHint)
+        val refreshLocalModelsButton = findViewById<TextView>(R.id.btnRefreshLocalModels)
+
+        fun renderDiscoveredModels(discovered: List<ExternalModelDiscovery.ModelFile>) {
+            discoveredModelList.removeAllViews()
+            if (discovered.isEmpty()) {
+                discoveredModelList.addView(TextView(this).apply {
+                    text = "No shared model files found yet"
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#8b949e"))
+                    setPadding(0, dp(4), 0, 0)
+                })
+                return
+            }
+            discovered.forEach { candidate ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(10), 0, dp(2))
+                }
+                val info = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                info.addView(TextView(this).apply {
+                    text = candidate.file.name
+                    textSize = 13f
+                    setTextColor(tc.aiText)
+                })
+                info.addView(TextView(this).apply {
+                    val sizeMb = candidate.file.length() / 1_000_000
+                    text = "${candidate.source} · ${candidate.format.label} · ${sizeMb} MB"
+                    textSize = 11f
+                    setTextColor(if (candidate.isCompatible) Color.parseColor("#8b949e") else getColor(R.color.colorWarningPrimary))
+                })
+                row.addView(info)
+                if (candidate.isCompatible) {
+                    row.addView(TextView(this).apply {
+                        text = "Import"
+                        textSize = 13f
+                        setTextColor(getColor(R.color.colorBrandPrimary))
+                        setPadding(dp(12), dp(6), 0, dp(6))
+                        setOnClickListener { importLocalModel(candidate.file) }
+                    })
+                } else {
+                    row.addView(TextView(this).apply {
+                        text = "Not compatible"
+                        textSize = 11f
+                        setTextColor(getColor(R.color.colorWarningPrimary))
+                        setPadding(dp(12), dp(6), 0, dp(6))
+                    })
+                }
+                discoveredModelList.addView(row)
+            }
+        }
+
+        fun refreshDiscoveredModels() {
+            refreshLocalModelsButton.isEnabled = false
+            refreshLocalModelsButton.text = "Searching…"
+            executor.submit {
+                val discovered = ExternalModelDiscovery.discoverVisibleModels(this)
+                runOnUiThread {
+                    renderDiscoveredModels(discovered)
+                    externalModelHint.text = if (discovered.isEmpty()) {
+                        "No shared models found. Use Import file if another app lets you export or share one."
+                    } else {
+                        "${discovered.size} model file${if (discovered.size == 1) "" else "s"} found. Only .litertlm models can run in BlackClaw."
+                    }
+                    refreshLocalModelsButton.isEnabled = true
+                    refreshLocalModelsButton.text = "↻ Refresh"
+                }
+            }
+        }
+
+        findViewById<TextView>(R.id.btnImportLocalModel).setOnClickListener {
+            // File providers disagree on model MIME types; let the user pick a
+            // file, then validate its extension before we copy anything.
+            importLocalModelPicker.launch(arrayOf("*/*"))
+        }
+        refreshLocalModelsButton.setOnClickListener { refreshDiscoveredModels() }
+        refreshDiscoveredModels()
+
         // Cloud LLM — Provider tabs + model cards
         setupCloudLlm(tc)
+    }
+
+    private fun importLocalModel(source: File) {
+        executor.submit {
+            try {
+                val modelPath = LocalModelManager.importLiteRtModel(this, source)
+                activateImportedLocalModel(modelPath)
+            } catch (error: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, error.message ?: "Could not import model", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun activateImportedLocalModel(modelPath: String) {
+        val modelId = "imported-${File(modelPath).nameWithoutExtension}"
+        val shouldActivateLocal = ModelConfigRepository.isLocalActive() || !KVUtils.hasDefaultCloudModel()
+        ModelConfigRepository.saveLocalDefault(modelPath, modelId, shouldActivateLocal)
+        ClawApplication.appViewModelInstance.updateAgentConfig()
+        ClawApplication.appViewModelInstance.initAgent()
+        runOnUiThread {
+            Toast.makeText(this, "Local model imported", Toast.LENGTH_SHORT).show()
+            recreate()
+        }
     }
 
     private fun updateStorageInfo() {
