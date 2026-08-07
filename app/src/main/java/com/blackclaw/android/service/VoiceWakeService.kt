@@ -171,6 +171,18 @@ class VoiceWakeService : Service() {
             return
         }
 
+        // Emergency commands must reach the lock-screen QuickAssist surface even
+        // when the user normally keeps the panel closed. Camera/microphone
+        // foreground services can only be started reliably while that visible
+        // activity owns the invocation; it then takes the deterministic fast-path.
+        val protectionCommand = com.blackclaw.android.emergency.EmergencyCommandParser.parse(command)
+        if (protectionCommand != null && launchAssistPanel(command)) {
+            runCatching { VoiceInputManager.stopWakeLoop() }
+            runningTask = false
+            updateNotif("idle")
+            return
+        }
+
         // Destructive-action confirmation for hands-free safety.
         if (isDestructive(command)) {
             pendingConfirm = command

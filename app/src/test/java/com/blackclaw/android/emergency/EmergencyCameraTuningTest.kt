@@ -15,28 +15,26 @@ import org.junit.Test
  */
 class EmergencyCameraTuningTest {
 
-    // ── AE target FPS range: the brightness decision ──────────────────────────
+    // ── AE target FPS range: the 60-fps decision ──────────────────────────────
 
-    @Test fun `prefers the range with the lowest lower bound so exposure can lengthen`() {
-        // [30,30] forbids exposures longer than 1/30s and is exactly what produces
-        // dark footage. [7,24] lets the HAL slow the shutter down indoors.
-        val available = listOf(Fps(30, 30), Fps(15, 24), Fps(7, 24))
-        assertEquals(Fps(7, 24), EmergencyCameraTuning.selectAeFpsRange(available))
+    @Test fun `prefers an exact sixty fps sensor range`() {
+        val available = listOf(Fps(30, 30), Fps(30, 60), Fps(60, 60))
+        assertEquals(Fps(60, 60), EmergencyCameraTuning.selectAeFpsRange(available))
     }
 
-    @Test fun `never selects a range faster than the encoder can sustain`() {
-        val available = listOf(Fps(60, 60), Fps(30, 30), Fps(10, 20))
-        assertEquals(Fps(10, 20), EmergencyCameraTuning.selectAeFpsRange(available))
+    @Test fun `selects a variable range that includes sixty fps when fixed is absent`() {
+        val available = listOf(Fps(30, 30), Fps(15, 60), Fps(30, 60))
+        assertEquals(Fps(30, 60), EmergencyCameraTuning.selectAeFpsRange(available))
     }
 
-    @Test fun `breaks lower-bound ties by preferring smoother motion`() {
-        val available = listOf(Fps(7, 15), Fps(7, 24))
-        assertEquals(Fps(7, 24), EmergencyCameraTuning.selectAeFpsRange(available))
-    }
-
-    @Test fun `falls back to the slowest range when every option exceeds target fps`() {
-        val available = listOf(Fps(60, 60), Fps(30, 30))
+    @Test fun `falls back to the highest real rate below sixty`() {
+        val available = listOf(Fps(7, 24), Fps(15, 30), Fps(30, 30))
         assertEquals(Fps(30, 30), EmergencyCameraTuning.selectAeFpsRange(available))
+    }
+
+    @Test fun `uses the lowest reported rate when every option is faster than sixty`() {
+        val available = listOf(Fps(120, 120), Fps(240, 240))
+        assertEquals(Fps(120, 120), EmergencyCameraTuning.selectAeFpsRange(available))
     }
 
     @Test fun `returns null rather than fabricating a range when nothing is reported`() {
@@ -51,7 +49,7 @@ class EmergencyCameraTuningTest {
 
     @Test fun `picks the largest widescreen size within the cap`() {
         val sizes = listOf(Dimensions(1920, 1080), Dimensions(1280, 720), Dimensions(640, 480))
-        assertEquals(Dimensions(1280, 720), EmergencyCameraTuning.selectRecordingSize(sizes))
+        assertEquals(Dimensions(1920, 1080), EmergencyCameraTuning.selectRecordingSize(sizes))
     }
 
     @Test fun `tolerates sensors that are only approximately sixteen by nine`() {
@@ -61,13 +59,13 @@ class EmergencyCameraTuningTest {
     }
 
     @Test fun `accepts a non-widescreen size when nothing widescreen fits the cap`() {
-        val sizes = listOf(Dimensions(1920, 1080), Dimensions(640, 480))
-        assertEquals(Dimensions(640, 480), EmergencyCameraTuning.selectRecordingSize(sizes))
+        val sizes = listOf(Dimensions(1024, 768), Dimensions(640, 480))
+        assertEquals(Dimensions(1024, 768), EmergencyCameraTuning.selectRecordingSize(sizes))
     }
 
     @Test fun `falls back to the smallest size rather than the first reported one`() {
-        // getOutputSizes returns descending order, so taking the head would pair a
-        // 12MP frame with a 1.2 Mbps bitrate and stall the encoder.
+        // getOutputSizes returns descending order, so only a documented 4K60
+        // profile may exceed Full HD. The generic selector must stay stable.
         val sizes = listOf(Dimensions(4000, 3000), Dimensions(2560, 1920))
         assertEquals(Dimensions(2560, 1920), EmergencyCameraTuning.selectRecordingSize(sizes))
     }
@@ -84,8 +82,8 @@ class EmergencyCameraTuningTest {
     // ── Bitrate ───────────────────────────────────────────────────────────────
 
     @Test fun `bitrate scales with resolution`() {
-        assertEquals(2_500_000, EmergencyCameraTuning.bitrateFor(Dimensions(1280, 720)))
-        assertEquals(1_200_000, EmergencyCameraTuning.bitrateFor(Dimensions(640, 480)))
+        assertEquals(22_000_000, EmergencyCameraTuning.bitrateFor(Dimensions(1920, 1080)))
+        assertEquals(5_000_000, EmergencyCameraTuning.bitrateFor(Dimensions(640, 480)))
     }
 
     // ── MP4 orientation hint ──────────────────────────────────────────────────

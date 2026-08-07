@@ -3,6 +3,7 @@ package com.blackclaw.android.emergency
 import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.camera2.*
+import android.media.CamcorderProfile
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
@@ -127,6 +128,12 @@ class EmergencyCameraController(
         var warmupFallback: Runnable? = null
     }
 
+    private data class RecordingSpec(
+        val size: Size,
+        val frameRate: Int,
+        val bitRate: Int,
+    )
+
     private val manager = context.getSystemService(CameraManager::class.java)
     private val thread = HandlerThread("BlackClawEmergencyCamera").apply { start() }
     private val handler = Handler(thread.looper)
@@ -213,11 +220,11 @@ class EmergencyCameraController(
         runCatching {
             val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(context)
                 else @Suppress("DEPRECATION") MediaRecorder()
-            val size = recordingSize(characteristics)
             val fpsRange = selectAeFpsRange(
                 characteristics?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             )
-            val frameRate = fpsRange?.upper ?: TARGET_FPS
+            val spec = recordingSpec(slot.id, characteristics, fpsRange)
+            val size = spec.size
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
             val output = EmergencyEvidenceVault.newPlainVideoSegment(context, stamp, slot.lens)
             recorder.apply {
@@ -230,12 +237,8 @@ class EmergencyCameraController(
                 setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                setVideoEncodingBitRate(
-                    EmergencyCameraTuning.bitrateFor(
-                        EmergencyCameraTuning.Dimensions(size.width, size.height)
-                    )
-                )
-                setVideoFrameRate(frameRate)
+                setVideoEncodingBitRate(spec.bitRate)
+                setVideoFrameRate(spec.frameRate)
                 setVideoSize(size.width, size.height)
                 setOrientationHint(orientationHint(characteristics, slot.lens))
                 setOutputFile(output.absolutePath)
@@ -257,7 +260,7 @@ class EmergencyCameraController(
                         scheduleWarmupFallback(slot, size, fpsRange)
                         onEvent(
                             "camera_warmup lens=${slot.lens} size=${size.width}x${size.height} " +
-                                "fps=${fpsRange?.lower ?: "?"}-${fpsRange?.upper ?: TARGET_FPS} torch=$torch"
+                                "fps=${spec.frameRate} sensor=${fpsRange?.lower ?: "?"}-${fpsRange?.upper ?: "?"} torch=$torch"
                         )
                     }.onFailure {
                         onEvent("camera_start_failed lens=${slot.lens} error=${it.javaClass.simpleName}: ${it.message}")
@@ -366,6 +369,51 @@ class EmergencyCameraController(
         val sizes = runCatching { map?.getOutputSizes(MediaRecorder::class.java).orEmpty().toList() }
             .getOrDefault(emptyList())
         return selectRecordingSize(sizes)
+    }
+
+    /**
+     * Uses a device-declared 60-fps H.264 profile when possible. This is the
+     * only safe way to opt into 4K60: a large output size by itself says nothing
+     * about encoder throughput. All other devices get the robust Full-HD-or-less
+     * selector plus their highest real sensor frame rate.
+     */
+    private fun recordingSpec(
+        cameraId: String,
+        characteristics: CameraCharacteristics?,
+        fpsRange: Range<Int>?,
+    ): RecordingSpec {
+        preferred60FpsProfile(cameraId)?.let { return it }
+        val size = recordingSize(characteristics)
+        val frameRate = fpsRange?.let {
+            if (it.lower <= TARGET_FPS && it.upper >= TARGET_FPS) TARGET_FPS
+            else it.upper.coerceIn(15, TARGET_FPS)
+        } ?: 30
+        return RecordingSpec(
+            size = size,
+            frameRate = frameRate,
+            bitRate = EmergencyCameraTuning.bitrateFor(
+                EmergencyCameraTuning.Dimensions(size.width, size.height), frameRate
+            ),
+        )
+    }
+
+    private fun preferred60FpsProfile(cameraId: String): RecordingSpec? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val qualities = listOf(
+            CamcorderProfile.QUALITY_2160P,
+            CamcorderProfile.QUALITY_2K,
+            CamcorderProfile.QUALITY_1080P,
+            CamcorderProfile.QUALITY_720P,
+        )
+        return qualities.asSequence()
+            .mapNotNull { quality -> runCatching { CamcorderProfile.getAll(cameraId, quality) }.getOrNull() }
+            .flatMap { it.videoProfiles.asSequence() }
+            .filter {
+                it.codec == MediaRecorder.VideoEncoder.H264 &&
+                    it.frameRate == TARGET_FPS && it.width > 0 && it.height > 0
+            }
+            .maxByOrNull { it.width.toLong() * it.height }
+            ?.let { RecordingSpec(Size(it.width, it.height), it.frameRate, it.bitrate) }
     }
 
     private fun hasFlash(characteristics: CameraCharacteristics?): Boolean =

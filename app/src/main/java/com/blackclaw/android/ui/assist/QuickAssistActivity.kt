@@ -278,7 +278,7 @@ class QuickAssistActivity : ComponentActivity() {
 
     private fun onCommand(command: String) {
         if (command.isBlank()) { onListenError(""); return }
-        if (startDiscreetModeSilently(command)) return
+        if (startEmergencyProtection(command)) return
         silentCount = 0
         // Reset streaming state for this answer.
         streamBuf.setLength(0); spokenLen = 0; didStreamSpeak = false; toolUsed = false; leftApp = false
@@ -368,22 +368,39 @@ class QuickAssistActivity : ComponentActivity() {
     }
 
     /**
-     * Safety fast-path: start camera/mic while this Activity is still visible,
-     * satisfying Android's while-in-use foreground-service rule. No TTS, sound,
-     * vibration, answer bubble or acknowledgement is emitted.
+     * Safety fast-path for both protection modes. It runs before the agent so a
+     * locked-screen invocation never waits for network/model latency before
+     * starting the foreground service. Keeping this Activity visible briefly is
+     * intentional: Android permits the camera/mic foreground service because it
+     * was started from an activity the user can see, even on the keyguard.
      */
-    private fun startDiscreetModeSilently(command: String): Boolean {
+    private fun startEmergencyProtection(command: String): Boolean {
         val options = com.blackclaw.android.emergency.EmergencyCommandParser.parse(command) ?: return false
-        if (!options.silent) return false
         runCatching { VoiceInputManager.cancelListenOnce() }
-        runCatching { Speaker.stop() }
+        if (options.silent) runCatching { Speaker.stop() }
         val started = com.blackclaw.android.emergency.EmergencyService.start(this, options)
         if (started) {
-            window.decorView.postDelayed({ if (!isFinishing) finish() }, 180L)
+            busy = false
+            progress.value = null
+            phase.value = Phase.IDLE
+            if (options.silent) {
+                // No spoken/textual acknowledgement for discreet mode. The short
+                // hand-off lets the camera foreground service acquire its sensor
+                // before this overlay disappears from the lock screen.
+                window.decorView.postDelayed({ if (!isFinishing) finish() }, 900L)
+            } else {
+                turns.add(Turn(true, command))
+                turns.add(Turn(false, "Modo emergencia iniciándose. Puedes cancelarlo desde la notificación."))
+                status.value = "Activando emergencia…"
+                // The normal mode has a five-second cancellation window. Keep the
+                // lock-screen activity visible through it so camera startup remains
+                // eligible for Android's while-in-use foreground-service policy.
+                window.decorView.postDelayed({ if (!isFinishing) finish() }, 6_200L)
+            }
         } else {
             turns.add(Turn(true, command))
             phase.value = Phase.IDLE
-            status.value = "Configura el contacto y los permisos del modo discreto en Ajustes."
+            status.value = "Configura el contacto y los permisos del modo de protección en Ajustes."
         }
         return true
     }

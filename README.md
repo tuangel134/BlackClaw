@@ -491,6 +491,16 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.3
+
+- Emergency and discreet protection now activate immediately from Quick Assist on
+  the lock screen, without waiting for the agent. Wake-word emergency commands
+  also open the protected assist surface even when the regular visual panel is off.
+- Emergency video defaults to the rear camera and now prefers a genuine 60-fps
+  H.264 recording profile (including 4K60 when the device declares one). Other
+  devices use the best stable supported mode, up to Full HD, rather than forcing
+  an unsupported camera configuration.
+
 ### v1.2.2
 
 - Fixed an audio race in Quick Assist: opening it now pauses the background

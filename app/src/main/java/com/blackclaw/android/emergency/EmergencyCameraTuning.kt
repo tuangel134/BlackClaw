@@ -10,12 +10,16 @@ package com.blackclaw.android.emergency
  */
 internal object EmergencyCameraTuning {
 
-    /** Frame-rate bound we ask both the sensor and the encoder to agree on. */
-    const val TARGET_FPS = 24
+    /** Preferred evidence rate. The controller falls back when this is unavailable. */
+    const val TARGET_FPS = 60
 
-    /** Resolution cap: keeps segments small and the encoder reliable on low-end hardware. */
-    private const val MAX_WIDTH = 1280
-    private const val MAX_HEIGHT = 720
+    /**
+     * Full HD is the highest broadly reliable Camera2 + MediaRecorder target at
+     * 60 fps. Devices that advertise a validated 4K60 H.264 recording profile are
+     * selected by [EmergencyCameraController] before this general fallback.
+     */
+    private const val MAX_WIDTH = 1920
+    private const val MAX_HEIGHT = 1080
 
     /** How far from exact 16:9 a sensor may be and still count as widescreen. */
     private const val WIDESCREEN_TOLERANCE = 0.06
@@ -27,42 +31,52 @@ internal object EmergencyCameraTuning {
     }
 
     /**
-     * Pick the auto-exposure target frame-rate range that allows the longest exposure.
+     * Pick the best sensor rate for a 60-fps recording.
      *
-     * This is the single most important setting for footage brightness. A range with
-     * a high lower bound (e.g. `[30,30]`) forbids the HAL from exposing longer than
-     * 1/30 s, which is exactly what yields near-black video indoors or at night.
+     * A true 60-fps range is preferred whenever one is reported. This is important
+     * because setting `MediaRecorder` to 60 alone does not make the camera deliver
+     * 60 frames. If 60 is not available we choose the smoothest rate at or below
+     * it instead of fabricating an unsupported request.
      *
-     * Strategy: keep only ranges the encoder can actually sustain (`upper <=`
-     * [TARGET_FPS]), then take the lowest lower bound. Ties go to the higher upper
-     * bound so motion stays smooth when there is enough light.
+     * A fixed `[60,60]` range wins over a variable range containing 60. For a
+     * fallback, higher upper and lower bounds win, yielding the smoothest genuine
+     * stream the encoder can receive.
      *
      * @return null when the device reports nothing usable, so the caller can leave
      *   the capture key unset rather than send a fabricated range.
      */
     fun selectAeFpsRange(available: List<Fps>): Fps? {
         if (available.isEmpty()) return null
-        val achievable = available.filter { it.upper <= TARGET_FPS }
-        // Every range is faster than we want: take the slowest one on offer.
-        val pool = achievable.ifEmpty { listOf(available.minByOrNull { it.upper }!!) }
-        return pool.sortedWith(compareBy({ it.lower }, { -it.upper })).first()
+        val supportsTarget = available.filter { it.lower <= TARGET_FPS && it.upper >= TARGET_FPS }
+        if (supportsTarget.isNotEmpty()) {
+            return supportsTarget.sortedWith(
+                compareBy<Fps>(
+                    { if (it.lower == TARGET_FPS && it.upper == TARGET_FPS) 0 else 1 },
+                    { kotlin.math.abs(it.upper - TARGET_FPS) },
+                    { -it.lower },
+                )
+            ).first()
+        }
+        val sustainable = available.filter { it.upper <= TARGET_FPS }
+        val pool = sustainable.ifEmpty { listOf(available.minByOrNull { it.upper }!!) }
+        return pool.sortedWith(compareByDescending<Fps> { it.upper }.thenByDescending { it.lower }).first()
     }
 
     /**
      * Choose a recording resolution.
      *
-     * Prefers the largest widescreen mode within the 720p cap, then any mode within
-     * the cap, then anything up to 1080p. The final fallback is the *smallest*
+     * Prefers the largest widescreen mode within the Full-HD cap, then any mode within
+     * the cap, then anything up to 4K. The final fallback is the *smallest*
      * reported size, not the first: `getOutputSizes` returns descending order, so
-     * taking the head would pair a multi-megapixel frame with a 1.2 Mbps bitrate and
-     * stall or fail the encoder.
+     * taking the head can select a sensor mode that the general 60-fps encoder path
+     * cannot sustain.
      */
     fun selectRecordingSize(sizes: List<Dimensions>): Dimensions {
         if (sizes.isEmpty()) return Dimensions(640, 480)
-        return sizes.filter { it.withinCap() && it.isWidescreen() }.maxByOrNull { it.area }
-            ?: sizes.filter { it.withinCap() }.maxByOrNull { it.area }
-            ?: sizes.filter { it.width <= 1920 && it.height <= 1080 }.maxByOrNull { it.area }
-            ?: sizes.minByOrNull { it.area }
+        return sizes.filter { it.valid() && it.withinCap() && it.isWidescreen() }.maxByOrNull { it.area }
+            ?: sizes.filter { it.valid() && it.withinCap() }.maxByOrNull { it.area }
+            ?: sizes.filter { it.valid() && it.width <= 3840 && it.height <= 2160 }.maxByOrNull { it.area }
+            ?: sizes.filter { it.valid() }.minByOrNull { it.area }
             ?: Dimensions(640, 480)
     }
 
@@ -79,10 +93,17 @@ internal object EmergencyCameraTuning {
         else (normalizedSensor - normalizedRotation + 360) % 360
     }
 
-    /** Encoder bitrate for a chosen resolution. */
-    fun bitrateFor(size: Dimensions): Int = if (size.width >= 1280) 2_500_000 else 1_200_000
+    /** Encoder bitrate for a chosen resolution/rate, tuned for readable evidence. */
+    fun bitrateFor(size: Dimensions, fps: Int = TARGET_FPS): Int = when {
+        size.width >= 3840 -> if (fps >= 60) 55_000_000 else 35_000_000
+        size.width >= 1920 -> if (fps >= 60) 22_000_000 else 14_000_000
+        size.width >= 1280 -> if (fps >= 60) 12_000_000 else 7_000_000
+        else -> if (fps >= 60) 5_000_000 else 3_000_000
+    }
 
     private fun Dimensions.withinCap(): Boolean = width <= MAX_WIDTH && height <= MAX_HEIGHT
+
+    private fun Dimensions.valid(): Boolean = width > 0 && height > 0
 
     private fun Dimensions.isWidescreen(): Boolean {
         if (height == 0) return false
