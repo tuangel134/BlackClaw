@@ -9,7 +9,6 @@ import com.blackclaw.android.agent.langchain.LangChain4jToolBridge
 import com.blackclaw.android.agent.llm.LlmClient
 import com.blackclaw.android.agent.llm.LlmClientFactory
 import com.blackclaw.android.agent.llm.LlmResponse
-import com.blackclaw.android.agent.llm.StreamingListener
 import com.blackclaw.android.service.ClawAccessibilityService
 import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.tool.impl.GetScreenInfoTool
@@ -57,12 +56,41 @@ class DefaultAgentService : AgentService {
 4. Check the result, then decide next step
 5. When done, call finish(summary="what you did or found")
 
+## Examples (follow these patterns exactly)
+
+Example 1 — "¿Cuánta batería tengo?"
+→ get_device_info(category="battery")
+→ finish(summary="La batería está al 73%, jefe.")
+
+Example 2 — "Abre WhatsApp"
+→ open_app(package_name="com.whatsapp")
+→ wait(duration_ms=2000)
+→ get_screen_info()
+→ finish(summary="WhatsApp abierto, jefe. Veo tus chats recientes.")
+
+Example 3 — "Mándale un mensaje a mamá diciendo que llego tarde"
+→ send_message(contact="mamá", message="Mamá, voy a llegar un poco tarde 🙏", app="WhatsApp")
+→ finish(summary="Mensaje enviado a mamá por WhatsApp: 'Voy a llegar un poco tarde'.")
+
+Example 4 — "Pon una alarma a las 7"
+→ set_alarm(mode="alarm", hour=7, minute=0)
+→ finish(summary="Alarma puesta para las 7:00, jefe. Que descanse.")
+
+Example 5 — "Busca el clima de hoy"
+→ web_search(query="clima hoy")
+→ finish(summary="Hoy: 25°C, soleado. Mínima de 18°C por la noche.")
+
 ## Tool selection guide
 - Open an app → open_app(package_name="com.example.app")
 - Tap something → tap_node(node_id="n3") or tap(x=500, y=300)
 - Tap text inside a game / video / SurfaceView → tap_ocr(text="Play")
 - Read text from a game / video / Canvas → read_screen_ocr() (works when get_screen_info is empty)
 - Hammer the same spot N times (autoclicker, games, OK chains) → tap_burst(x, y, count=5, interval_ms=30)
+- Control a game reliably → game_observe() first, then game_action() with normalized 0..1000 coordinates. Re-observe after navigation or uncertainty. Never start attacks/ranked matches, spend currency, buy, or upgrade without explicit confirmation.
+- "Abre el autoclicker" while a game is visible → game_autoclicker(operation="open"). This opens a visible no-ADB editor where the user places taps/swipes and saves a named macro.
+- "Abre [juego] e inicia el autoclicker [nombre]" → open_app, then game_macro(operation="play", name="nombre"). game_macro launches the saved macro's game itself when needed.
+- Named game macros → game_macro(operation="play", name="farmeo", loop=true, max_duration_minutes=10, confirmed=true). They support pause, resume, restart and stop; loops/risky actions require confirmation.
+- Repeated taps in a game → game_autoclicker(operation="start", x=0..1000, y=0..1000, interval_ms=250, duration_seconds=180, confirmed=true). It supports up to 30 minutes and is stoppable.
 - Pinch / zoom (maps, photos, web) → pinch(center_x, center_y, action="in"|"out", amount=400)
 - Drag and drop (icons, lists, files) → drag_drop(start_x, start_y, end_x, end_y)
 - Trace a path (lock pattern, signature, curved swipe) → path_trace(points="[[x1,y1],[x2,y2],...]")
@@ -92,6 +120,10 @@ class DefaultAgentService : AgentService {
 - Toggle wifi/bt/airplane/dnd/location → toggle_setting(setting="wifi", state="on")
 - Schedule a task or chat for later → schedule_task(text="...", when="in 30m"|"tomorrow 09:00", recurrence="once|daily|hourly|weekly|interval", interval_minutes=N)
 - List or cancel scheduled tasks → list_scheduled_tasks() or cancel_scheduled_task(id="abc")
+- Time/cron automation ("a las 5 envía X", "cada lunes haz Y") → schedule_task(text="the complete action or precise multi-step sequence", when="17:00", recurrence="once|daily|weekly|interval"). Explicit user schedules RUN without asking again.
+- IF→THEN by notification ("si mi novia escribe, despiértame") → automation_rule(operation="create", name="...", trigger="notification", match="contact name", package_name="com.whatsapp", action="despiértame").
+- IF→THEN by place ("al llegar a casa apaga datos y enciende Wi-Fi") → get_location first if home means current place, then automation_rule(trigger="location_enter", latitude=..., longitude=..., action="Apaga datos móviles y enciende Wi-Fi").
+- Multi-step scheduled actions must preserve the requested order and verification. Do not ask again merely because execution is scheduled; only destructive/financial/account actions need confirmation.
 - Remember a fact long-term → remember_fact(key="name", value="Alex")
 - Recall remembered facts → recall_facts(query="optional substring")
 - Forget a fact → forget_fact(key="name") or forget_fact(key="all")
@@ -103,6 +135,9 @@ class DefaultAgentService : AgentService {
 - Find a contact by name or number → find_contact(query="Mom")
 - Set an alarm or timer → set_alarm(mode="alarm", hour=7, minute=30) or set_alarm(mode="timer", duration_seconds=600)
 - Open the camera → open_camera(mode="photo|video")
+- Emergency protection → emergency_mode(action="start|stop|status", mode="emergency|discreet", cameras="none|front|back|both", send_location=true). "Ambas/las dos cámaras" always means cameras="both". Discreet mode must not call speak_text or add spoken confirmation.
+- Answer from downloaded offline knowledge → use zim_consult(question="...", topics="core entities") first; it treats the ZIM as a book and returns only relevant passages. Cite the local ZIM and never claim internet access.
+- Use zim_search + zim_read when an exact article is requested. zim_index is an optional fallback only for archives/queries that cannot be resolved by book consultation; never require it before consulting a ZIM.
 - Speak text aloud (TTS) → speak_text(text="...", language="en-US")
 - Control media playback → media_control(action="play|pause|toggle|next|previous|stop")
 - Reproducir una canción/artista en CUALQUIER reproductor (no solo Spotify) → play_music(query="Bad Bunny", app="youtube_music"|"spotify"|"amazon_music"|"deezer"|… o sin app para el predeterminado). Usa el intent universal de Android; prefiérelo sobre open_app_action para "pon música".
@@ -185,12 +220,6 @@ class DefaultAgentService : AgentService {
 - Si el "Ambient state" dice que hay shell privilegiado (Shizuku o ADB), prefiere fast_tap/fast_swipe (instantáneos) sobre tap/swipe normales.
 - No llames get_screen_info de más: si por la última lectura ya sabes dónde está el elemento, actúa directo (find_and_tap por texto) sin re-leer."""
 
-        /** Maximum number of retries on LLM API call failure */
-        private const val MAX_API_RETRIES = 3
-        /** Rate-limit retries are separate and more generous — on the free tier
-         *  these are expected and we just wait out the window the API tells us. */
-        private const val MAX_RATE_LIMIT_RETRIES = 6
-
         /**
          * Determines whether a user prompt looks like a phone-control task
          * (should receive a pre-warmed screen snapshot) vs a conversational question.
@@ -245,19 +274,56 @@ class DefaultAgentService : AgentService {
         var FILE_LOGGING_CACHE_DIR: File? = null
     }
 
-    private lateinit var config: AgentConfig
-    private lateinit var llmClient: LlmClient
+    // UNSAFE PUBLICATION FIX: initialize()/updateConfig() run on the caller's
+    // thread (UI / settings), while the agent loop reads these same fields from
+    // the single-thread executor via closures. Without a memory barrier the agent
+    // thread can observe a half-published AgentConfig or a stale/closed LlmClient
+    // — which shows up as "using the old model after switching provider" or a
+    // crash inside a client that was just close()d. `lateinit var` cannot be
+    // @Volatile in Kotlin, so the backing fields are nullable @Volatile and the
+    // original non-null `config`/`llmClient` names are kept as accessors so no
+    // call site (or the public API) has to change.
+    @Volatile
+    private var configRef: AgentConfig? = null
+
+    @Volatile
+    private var llmClientRef: LlmClient? = null
+
+    private val config: AgentConfig
+        get() = configRef ?: error("Agent not initialized: call initialize(config) first")
+
+    private val llmClient: LlmClient
+        get() = llmClientRef ?: error("Agent not initialized: call initialize(config) first")
+
+    /** Narrowed per task by the agent thread; also read by it. Volatile for safe publication. */
+    @Volatile
     private var toolSpecs: List<dev.langchain4j.agent.tool.ToolSpecification> = emptyList()
-    /** Full set built once at init; per-task we narrow this down. */
+
+    /** Full set built once at init (caller thread), read by the agent thread. */
+    @Volatile
     private var allToolSpecs: List<dev.langchain4j.agent.tool.ToolSpecification> = emptyList()
+
+    /** Replaced by initialize()/updateConfig() from another thread than the reader. */
+    @Volatile
     private var executor: ExecutorService? = null
     private val running = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
+
+    /** Written by executeTask(), read by cancel() from a different thread. */
+    @Volatile
     private var taskFuture: java.util.concurrent.Future<*>? = null
 
+    private val retryHandler = AgentRetryHandler(
+        config = { config },
+        llmClient = { llmClient },
+        isCancelled = { cancelled.get() },
+        onRateLimitWait = { iteration, waitMs -> },
+    )
+    private val contextCompressor = AgentContextCompressor(provider = { config.provider })
+
     override fun initialize(config: AgentConfig) {
-        this.config = config
-        this.llmClient = LlmClientFactory.create(config)
+        this.configRef = config
+        this.llmClientRef = LlmClientFactory.create(config)
         this.allToolSpecs = LangChain4jToolBridge.buildToolSpecifications()
         this.toolSpecs = allToolSpecs
         this.executor = Executors.newSingleThreadExecutor()
@@ -271,9 +337,9 @@ class DefaultAgentService : AgentService {
         }
         executor?.shutdownNow()
         // Close old LlmClient before reinitializing to free engine memory
-        if (::llmClient.isInitialized) {
+        llmClientRef?.let { old ->
             try {
-                llmClient.close()
+                old.close()
                 XLog.i(TAG, "Old LlmClient closed before config update")
             } catch (e: Exception) {
                 XLog.w(TAG, "Old LlmClient close error during config update", e)
@@ -324,7 +390,7 @@ class DefaultAgentService : AgentService {
             }
         }
 
-        taskFuture = executor?.submit {
+        val agentTask = Runnable {
             try {
                 runAgentLoop(userPrompt, callbackProxy)
             } catch (e: Exception) {
@@ -342,9 +408,9 @@ class DefaultAgentService : AgentService {
             } finally {
                 // Close local engine BEFORE clearing running flag so the chat engine
                 // reload (triggered by onComplete/onError) never overlaps with task engine.
-                if (::llmClient.isInitialized) {
+                llmClientRef?.let { client ->
                     try {
-                        llmClient.close()
+                        client.close()
                         XLog.i(TAG, "LlmClient closed after task completion")
                     } catch (e: Exception) {
                         XLog.w(TAG, "LlmClient close error after task", e)
@@ -355,6 +421,30 @@ class DefaultAgentService : AgentService {
                 terminalCallback = null
                 terminal?.invoke()
             }
+        }
+
+        // STUCK-FOREVER FIX: running was set to true above, but the only code that
+        // clears it lives in the submitted Runnable's finally block. If submit()
+        // throws (RejectedExecutionException after shutdown/updateConfig races) or
+        // the executor is null (initialize() never ran), the flag stayed true for
+        // the rest of the process and every subsequent executeTask() bailed out
+        // with "Agent is already running a task" forever. Clear it here and report
+        // the failure through the normal error channel.
+        val pool = executor
+        if (pool == null) {
+            running.set(false)
+            val err = IllegalStateException("Agent executor is not initialized")
+            XLog.e(TAG, "executeTask: no executor available", err)
+            callback.onError(0, err, 0)
+            return
+        }
+        taskFuture = try {
+            pool.submit(agentTask)
+        } catch (e: Exception) {
+            running.set(false)
+            XLog.e(TAG, "executeTask: failed to submit agent task", e)
+            callback.onError(0, e, 0)
+            return
         }
     }
 
@@ -403,256 +493,9 @@ class DefaultAgentService : AgentService {
         return sb.toString()
     }
 
-    // ==================== LLM Call (with retry) ====================
-
-    private fun chatWithRetry(messages: List<ChatMessage>, callback: AgentCallback, iteration: Int): LlmResponse {
-        var lastException: Exception? = null
-        var attempt = 0
-        var rateLimitRetries = 0
-        while (attempt < MAX_API_RETRIES) {
-            if (cancelled.get()) throw RuntimeException(ClawApplication.instance.getString(R.string.agent_task_cancelled))
-            try {
-                return if (config.streaming) {
-                    try {
-                        val textBuilder = StringBuilder()
-                        llmClient.chatStreaming(messages, toolSpecs, object : StreamingListener {
-                            override fun onPartialText(token: String) {
-                                textBuilder.append(token)
-                                callback.onContent(iteration, token)
-                            }
-                            override fun onComplete(response: LlmResponse) {}
-                            override fun onError(error: Throwable) {}
-                        })
-                    } catch (se: Exception) {
-                        // Provider may not support streaming (SSE) or tool-call streaming.
-                        // Degrade gracefully to a blocking call so the task never breaks.
-                        XLog.w(TAG, "Streaming failed, falling back to non-streaming: ${se.message}")
-                        llmClient.chat(messages, toolSpecs)
-                    }
-                } else {
-                    llmClient.chat(messages, toolSpecs)
-                }
-            } catch (e: Exception) {
-                lastException = e
-                val msg = e.message ?: ""
-                // Do not retry on auth failure or true token exhaustion (context too big)
-                if (msg.contains("401") || msg.contains("403") ||
-                    (msg.contains("insufficient") && !msg.contains("rate"))) {
-                    // Self-healing: a "free" model that returns auth errors has likely
-                    // stopped being free. Re-verify the OpenCode Zen list in the
-                    // background so the dead model is dropped and the picker updates.
-                    if (config.baseUrl.contains("opencode.ai/zen", ignoreCase = true) &&
-                        (msg.contains("401") || msg.contains("403"))) {
-                        XLog.w(TAG, "OpenCode Zen auth failure on '${config.modelName}' — re-verifying free models")
-                        runCatching { OpenCodeZenModels.refreshNow() }
-                    }
-                    throw e
-                }
-
-                // Rate limit: Groq/OpenAI tell us exactly how long to wait
-                // ("Please try again in 19.125s"). Honor that instead of a
-                // blind backoff, and don't count it against the normal retry
-                // budget (these are expected on the free tier).
-                val rateLimitWaitMs = parseRateLimitWaitMs(msg)
-                if (rateLimitWaitMs != null) {
-                    rateLimitRetries++
-                    if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
-                        XLog.w(TAG, "Rate limit retries exhausted ($MAX_RATE_LIMIT_RETRIES)")
-                        throw e
-                    }
-                    val waitMs = (rateLimitWaitMs + 500).coerceAtMost(60_000L)
-                    XLog.w(TAG, "Rate limited; waiting ${waitMs}ms then retrying (rl retry $rateLimitRetries)")
-                    callback.onContent(iteration,
-                        "\n⏳ Límite de Groq alcanzado, esperando ${(waitMs / 1000)}s para continuar…\n")
-                    // Sleep in short chunks so the user can cancel mid-wait.
-                    var slept = 0L
-                    while (slept < waitMs) {
-                        if (cancelled.get()) throw RuntimeException(
-                            ClawApplication.instance.getString(R.string.agent_task_cancelled))
-                        try {
-                            Thread.sleep(500)
-                        } catch (ie: InterruptedException) {
-                            Thread.currentThread().interrupt(); throw e
-                        }
-                        slept += 500
-                    }
-                    continue  // retry without consuming a normal attempt
-                }
-
-                attempt++
-                if (attempt >= MAX_API_RETRIES) break
-                val delay = (Math.pow(2.0, attempt.toDouble()) * 1000).toLong()
-                XLog.w(TAG, "LLM API call failed (attempt $attempt/$MAX_API_RETRIES), retrying in ${delay}ms: $msg")
-                try {
-                    Thread.sleep(delay)
-                } catch (ie: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw e
-                }
-            }
-        }
-        throw lastException!!
-    }
-
-    /**
-     * Parses the retry-after hint from a rate-limit error message. Returns the
-     * wait in milliseconds, or null if this isn't a rate-limit error.
-     *
-     * Handles Groq/OpenAI style: "Please try again in 19.125s" / "in 1m30s" /
-     * "try again in 2.5 seconds", plus the generic 429 marker.
-     */
-    private fun parseRateLimitWaitMs(msg: String): Long? {
-        val lower = msg.lowercase()
-        val isRateLimit = lower.contains("rate_limit") || lower.contains("rate limit") ||
-            lower.contains("429") || lower.contains("tokens per minute") ||
-            lower.contains("requests per minute") || lower.contains("tpm")
-        if (!isRateLimit) return null
-
-        // "in 1m30s" or "in 90s" or "in 19.125s"
-        val combo = Regex("""in\s+(?:(\d+)m)?\s*([\d.]+)?\s*s""").find(lower)
-        if (combo != null) {
-            val mins = combo.groupValues[1].toLongOrNull() ?: 0L
-            val secs = combo.groupValues[2].toDoubleOrNull() ?: 0.0
-            val total = mins * 60_000L + (secs * 1000).toLong()
-            if (total > 0) return total
-        }
-        // "in 2.5 seconds"
-        val secOnly = Regex("""in\s+([\d.]+)\s*seconds?""").find(lower)
-        if (secOnly != null) {
-            val secs = secOnly.groupValues[1].toDoubleOrNull() ?: 0.0
-            if (secs > 0) return (secs * 1000).toLong()
-        }
-        // Rate-limited but no parseable hint → default cool-down.
-        return 15_000L
-    }
-
     // ==================== Dead Loop Detection ====================
     // NOTE: Legacy RoundFingerprint loop detection removed.
     // StuckDetector (5-signal, 3-level) is the single source of truth.
-
-    // ==================== Context Compression ====================
-
-    /** Protected zone: keep the most recent N rounds intact.
-     *  Local models have shorter context windows → keep fewer rounds to save tokens.
-     *  Cloud models: kept moderate. On tight rate limits (e.g. Groq free tier,
-     *  12k TPM) fewer rounds means smaller requests, so we keep this lean (3). */
-    private val KEEP_RECENT_ROUNDS: Int
-        get() = if (config.provider == LlmProvider.LOCAL) 2 else 3
-
-    /** Large-output observation tools → compressed placeholder */
-    private val OBSERVATION_PLACEHOLDERS = mapOf(
-        "get_screen_info" to "[screen info omitted]",
-        "take_screenshot" to "[screenshot result omitted]",
-        "find_node_info" to "[node find result omitted]",
-        "get_installed_apps" to "[app list omitted]",
-        "scroll_to_find" to "[scroll find result omitted]"
-    )
-
-    /**
-     * Compress history messages before sending to save input tokens:
-     * - get_screen_info: keep only the latest complete result globally
-     * - Protected zone (most recent KEEP_RECENT_ROUNDS rounds): keep intact
-     * - Outside protected zone: keep AI thinking as-is, compress tool results to a one-line summary
-     */
-    private fun compressHistoryForSend(messages: MutableList<ChatMessage>) {
-        // Count total characters before compression
-        val charsBefore = messages.sumOf { msg ->
-            when (msg) {
-                is AiMessage -> (msg.text()?.length ?: 0) + (msg.toolExecutionRequests()?.sumOf { it.arguments()?.length ?: 0 } ?: 0)
-                is ToolExecutionResultMessage -> msg.text().length
-                is UserMessage -> msg.singleText().length
-                is SystemMessage -> msg.text().length
-                else -> 0
-            }
-        }
-        val msgCountBefore = messages.size
-
-        // 0. Special handling for get_screen_info: regardless of tier, keep only the latest complete result globally
-        val screenPlaceholder = OBSERVATION_PLACEHOLDERS["get_screen_info"]!!
-        val lastScreenIdx = messages.indexOfLast {
-            it is ToolExecutionResultMessage && it.toolName() == "get_screen_info"
-        }
-        for (i in messages.indices) {
-            val msg = messages[i]
-            if (msg is ToolExecutionResultMessage
-                && msg.toolName() == "get_screen_info"
-                && i != lastScreenIdx
-                && msg.text() != screenPlaceholder
-            ) {
-                messages[i] = ToolExecutionResultMessage.from(msg.id(), msg.toolName(), screenPlaceholder)
-            }
-        }
-
-        // 1. Find indices of all AiMessages; each represents one round
-        val aiIndices = messages.indices.filter { messages[it] is AiMessage }
-        if (aiIndices.size <= KEEP_RECENT_ROUNDS) return
-
-        val totalRounds = aiIndices.size
-
-        for (roundIdx in aiIndices.indices) {
-            val roundFromEnd = totalRounds - roundIdx
-            if (roundFromEnd <= KEEP_RECENT_ROUNDS) break // protected zone
-
-            val aiIndex = aiIndices[roundIdx]
-
-            // Collect ToolExecutionResultMessage indices for this round
-            var j = aiIndex + 1
-            while (j < messages.size && messages[j] is ToolExecutionResultMessage) {
-                compressToolResultMessage(messages, j)
-                j++
-            }
-        }
-
-        // Count total characters after compression
-        val charsAfter = messages.sumOf { msg ->
-            when (msg) {
-                is AiMessage -> (msg.text()?.length ?: 0) + (msg.toolExecutionRequests()?.sumOf { it.arguments()?.length ?: 0 } ?: 0)
-                is ToolExecutionResultMessage -> msg.text().length
-                is UserMessage -> msg.singleText().length
-                is SystemMessage -> msg.text().length
-                else -> 0
-            }
-        }
-        val saved = charsBefore - charsAfter
-        if (saved > 0) {
-            XLog.i(TAG, "Context compressed: ${charsBefore}→${charsAfter} chars, saved ${saved} chars (${saved * 100 / charsBefore}%), rounds=${aiIndices.size}")
-        }
-    }
-
-    /** Compress Tool Result: use placeholder for observation tools, truncate summary for others */
-    private fun compressToolResultMessage(messages: MutableList<ChatMessage>, index: Int) {
-        val msg = messages[index] as ToolExecutionResultMessage
-        val text = msg.text()
-        if (text.length <= 100) return // already short enough, no need to compress
-
-        val placeholder = OBSERVATION_PLACEHOLDERS[msg.toolName()]
-        if (placeholder != null) {
-            messages[index] = ToolExecutionResultMessage.from(msg.id(), msg.toolName(), placeholder)
-            return
-        }
-
-        // Other tools: parse JSON to extract a summary
-        val compressed = summarizeToolResult(text)
-        messages[index] = ToolExecutionResultMessage.from(msg.id(), msg.toolName(), compressed)
-    }
-
-    /** Compress ToolResult JSON into a one-line summary */
-    private fun summarizeToolResult(resultJson: String): String {
-        return try {
-            val mapType = object : TypeToken<Map<String, Any?>>() {}.type
-            val map: Map<String, Any?> = GSON.fromJson(resultJson, mapType)
-            val isSuccess = map["isSuccess"] as? Boolean ?: false
-            if (isSuccess) {
-                val data = map["data"]?.toString() ?: "ok"
-                "✓ " + if (data.length > 80) data.take(80) + "..." else data
-            } else {
-                val error = map["error"]?.toString() ?: "failed"
-                "✗ " + if (error.length > 80) error.take(80) + "..." else error
-            }
-        } catch (_: Exception) {
-            if (resultJson.length > 80) resultJson.take(80) + "..." else resultJson
-        }
-    }
 
     // ==================== Main Execution Loop ====================
 
@@ -689,7 +532,7 @@ class DefaultAgentService : AgentService {
             XLog.i(TAG, "runAgentLoop: preloaded ${toolSpecs.size}/${allToolSpecs.size} tools + catalog")
         } else {
             // LOCAL: relevance-filtered preload (no catalog, no request_tool).
-            activeToolNames.addAll(ToolSelector.selectPreloadNames(rawUserRequest, maxTools = 34))
+            activeToolNames.addAll(ToolSelector.selectPreloadNames(rawUserRequest, maxTools = 20))
             // request_tool only works with progressive disclosure (cloud); drop it
             // for local so the model doesn't waste a turn calling a no-op.
             activeToolNames.remove("request_tool")
@@ -802,12 +645,12 @@ class DefaultAgentService : AgentService {
             callback.onLoopStart(iterations)
 
             // Compress history messages before sending to save tokens
-            compressHistoryForSend(messages)
+            contextCompressor.compressHistoryForSend(messages)
 
             // LLM call (with retry)
             val llmResponse: LlmResponse
             try {
-                llmResponse = chatWithRetry(messages, callback, iterations)
+                llmResponse = retryHandler.chatWithRetry(messages, toolSpecs, callback, iterations)
             } catch (e: Exception) {
                 XLog.e(TAG, "LLM API call failed after retries", e)
                 callback.onError(iterations, RuntimeException(ClawApplication.instance.getString(R.string.agent_api_call_failed, e.message)), totalTokens)
@@ -916,10 +759,16 @@ class DefaultAgentService : AgentService {
                     callback.onComplete(iterations, responseText, totalTokens, actualModelName)
                     return
                 }
-                // Empty response with no tools — something went wrong, finish
+                // Empty response with no tools — something went wrong, finish.
+                // MUST return, like every other completion path. The old `continue`
+                // reported completion and then kept hammering the LLM until
+                // maxIterations: wasted tokens, and because callbackProxy.onComplete
+                // only *stashes* the terminal callback, each later onComplete
+                // overwrote it — so the user got the LAST answer (usually the
+                // max-iterations error) instead of this one.
                 XLog.w(TAG, "runAgentLoop: empty response with no tools, finishing")
                 callback.onComplete(iterations, ClawApplication.instance.getString(R.string.agent_task_completed), totalTokens, actualModelName)
-                continue
+                return
             }
 
             // Reset counter when LLM does use tools
@@ -1035,9 +884,22 @@ class DefaultAgentService : AgentService {
                 // immediately without spending an extra 5 s inference round on get_screen_info.
                 val combinedResultData: String = if (toolName in ACTION_TOOLS) {
                     try {
-                        Thread.sleep(settleTimeForTool(toolName)) // adaptive settle time
                         val screenTool = ToolRegistry.getInstance().getTool("get_screen_info")
-                        val screenAfter = screenTool?.execute(emptyMap())
+                        Thread.sleep(settleTimeForTool(toolName))
+                        var screenAfter = screenTool?.execute(emptyMap())
+                        if (screenAfter != null && screenAfter.isSuccess && !screenAfter.data.isNullOrBlank()) {
+                            val hash1 = screenAfter.data!!.hashCode()
+                            Thread.sleep(200)
+                            val recheck = screenTool?.execute(emptyMap())
+                            if (recheck != null && recheck.isSuccess && !recheck.data.isNullOrBlank()
+                                && recheck.data.hashCode() != hash1) {
+                                Thread.sleep(300)
+                                val stable = screenTool?.execute(emptyMap())
+                                if (stable != null && stable.isSuccess && !stable.data.isNullOrBlank()) {
+                                    screenAfter = stable
+                                }
+                            }
+                        }
                         if (screenAfter != null && screenAfter.isSuccess && !screenAfter.data.isNullOrBlank()) {
                             // Update lastScreenHash for loop detection
                             lastScreenHash = screenAfter.data!!.hashCode()
@@ -1122,7 +984,9 @@ class DefaultAgentService : AgentService {
 
     override fun cancel() {
         cancelled.set(true)
-        if (config.provider == LlmProvider.LOCAL) {
+        // Read the volatile ref once: config may be swapped by updateConfig() on
+        // another thread, and cancel() can legitimately run before initialize().
+        if (configRef?.provider == LlmProvider.LOCAL) {
             // LiteRT native sendMessage is not interrupt-safe; let the current round yield
             // naturally, then surface Task cancelled after the client closes cleanly.
             XLog.i(TAG, "cancel: LOCAL task marked cancelled; waiting for current LiteRT round to finish safely")
@@ -1136,9 +1000,9 @@ class DefaultAgentService : AgentService {
     override fun shutdown() {
         cancel()
         executor?.shutdownNow()
-        if (::llmClient.isInitialized) {
+        llmClientRef?.let { client ->
             try {
-                llmClient.close()
+                client.close()
                 XLog.i(TAG, "LlmClient closed on shutdown")
             } catch (e: Exception) {
                 XLog.w(TAG, "LlmClient close error on shutdown", e)

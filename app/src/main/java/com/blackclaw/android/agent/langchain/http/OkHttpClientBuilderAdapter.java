@@ -98,19 +98,26 @@ public class OkHttpClientBuilderAdapter implements HttpClientBuilder {
             Response response = chain.proceed(request);
             long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startMs);
 
-            // Response: always print body
+            XLog.d(TAG, "<-- " + response.code() + " " + request.url() + " (" + durationMs + "ms)");
+
+            // SSE / streaming responses must NOT be buffered — reading the body
+            // would block until the stream ends and break token-by-token delivery.
             ResponseBody responseBody = response.body();
-            String respStr = "";
-            if (responseBody != null) {
-                MediaType contentType = responseBody.contentType();
-                respStr = responseBody.string();
-                // Re-wrap (string() can only be consumed once)
-                response = response.newBuilder()
-                        .body(ResponseBody.create(contentType, respStr))
-                        .build();
+            String contentType = responseBody != null && responseBody.contentType() != null
+                    ? responseBody.contentType().toString() : "";
+            if (contentType.contains("text/event-stream")) {
+                return response;
             }
 
-            XLog.d(TAG, "<-- " + response.code() + " " + request.url() + " (" + durationMs + "ms)");
+            // Non-streaming: log the body (safe to buffer).
+            String respStr = "";
+            if (responseBody != null) {
+                MediaType ct = responseBody.contentType();
+                respStr = responseBody.string();
+                response = response.newBuilder()
+                        .body(ResponseBody.create(ct, respStr))
+                        .build();
+            }
             if (!respStr.isEmpty()) {
                 if (respStr.length() > 4000) {
                     XLog.d(TAG, "Response body: " + respStr.substring(0, 4000) + "...[truncated, total=" + respStr.length() + "]");

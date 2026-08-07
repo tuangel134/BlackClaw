@@ -65,7 +65,7 @@ rather than relying on per-app integrations.
   search that uses the car's own speech-to-text — answers read aloud.
 - **Remote-controllable.** Drive the phone by messaging it from Telegram,
   Discord, or WeChat — useful for an agent that runs while the device is away.
-- **Broad reach.** 166 built-in tools spanning UI control, device settings,
+- **Broad reach.** 177 built-in tools spanning UI control, device settings,
   messaging, files, network, perception, and automation — browsable in-app via
   Settings → Herramientas → Catálogo de herramientas.
 
@@ -91,7 +91,7 @@ touching the phone.
 
 ---
 
-## Tools at a glance (166)
+## Tools at a glance (177)
 
 | Category | Examples |
 |---|---|
@@ -325,7 +325,7 @@ Agent Core Reliability:**
         │ result                      │ tool calls
         │                             ▼
 ┌───────┴───────┐          ┌──────────────────────┐
-│  LLM           │◀────────│  Tool layer (166)     │
+│  LLM           │◀────────│  Tool layer (177)     │
 │ local / cloud  │ schemas │  a11y · ADB · OCR ·   │
 └───────────────┘          │  net · device · files │
                            └───────────┬───────────┘
@@ -342,7 +342,7 @@ next move without a wasted round.
 
 ### Token-efficient tool disclosure
 
-Sending 166 full tool schemas on every request is expensive and trips cloud rate
+Sending 177 full tool schemas on every request is expensive and trips cloud rate
 limits. BlackClaw uses **progressive disclosure**: a compact one-line catalog of
 every tool is shown in the system prompt, a task-relevant subset is preloaded
 with full schemas, and the model loads anything else on demand via a
@@ -413,7 +413,8 @@ app/
     server/           NanoHTTPD LAN config server
     service/          Accessibility, notification listener, foreground services
     shizuku/          Optional Shizuku backend
-    tool/             Generic tool layer (166 tools)
+    game/             Guarded visual game sessions + normalized coordinates
+    tool/             Generic tool layer (177 tools)
     ui/               Compose UI: chat, settings, themes, skills, auto-replies, ADB
     utils/            Logging, KV storage, contact / UI matching
 docs/                 Skill file specification
@@ -489,6 +490,81 @@ PR guidelines, and conventions.
 ---
 
 ## Changelog
+
+### v1.2.0
+
+- Quick Assist is now a native Android default-assistant integration: it receives
+  the foreground app's AssistStructure and screenshot before the assistant UI
+  appears, then combines that context with accessibility and OCR fallback data.
+- Rebuilt the Quick Assist surface around an obsidian-and-gold visual system,
+  including an animated claw core, dedicated listening/thinking/speaking states,
+  refined controls, transcript bubbles and result cards.
+- Screen understanding now combines ordered OCR with accessibility text, and keeps
+  only short-lived extracted context rather than persisting screenshots.
+- Added a manual refresh path for OpenCode free models and improved model refresh
+  resilience when the upstream free catalog changes.
+- Added a fixed local Linux terminal environment for the agent, with a persistent
+  Termux-style command surface that does not require Shizuku.
+
+- Added Conversation Engine 2.0: chat, Quick Assist, wake-word voice, Android
+  Auto and automation tasks now share a bounded local conversation context.
+  Requests are routed as `CONVERSE`, `READ` or `ACT`, including explicit
+  confirmation metadata for destructive actions.
+- Remote-channel conversations remain isolated per sender by default. A new
+  Settings switch can deliberately bridge them into local assistant memory;
+  the bridge is disabled by default to avoid leaking personal context.
+- Added the first dedicated Emergency Mode foundation. The user preconfigures a
+  trusted SMS contact and message; activation provides a five-second cancel
+  window, sends a timestamped location alert independently of the LLM, records
+  visible audio evidence when permitted, and exposes a persistent Stop action
+  plus an append-only local event log. No real alert is sent during setup.
+- Added `zim_search` and `zim_read` for direct offline knowledge access. They
+  parse local `.zim` files inside BlackClaw, return bounded source-labelled
+  excerpts suitable for local 2B–4B models, and never place a whole archive in
+  the prompt. No external reader app is required.
+- Added `zim_index` and persistent full-content search for local `.zim` files.
+  BlackClaw builds its own SQLite FTS index in resumable atomic batches, shows
+  progress in a foreground notification, supports pause/resume/rebuild, and
+  returns relevant article-body snippets even when the query is not in a title.
+- Added `zim_consult`, BlackClaw's index-free Book Retriever. It analyses the
+  question, locates likely chapters through the ZIM's built-in title tree, reads
+  only a bounded set of candidate articles, ranks their passages and returns
+  source-labelled excerpts. The archive is never copied or loaded into context;
+  the local FTS builder is now explicitly an optional fallback.
+- Added a native ZIM library inside BlackClaw: discover local archives, search
+  titles/content, read articles, manage background indexing and hand a selected
+  topic to Quick Assist without installing or controlling Kiwix.
+- Expanded personal protection with separate Emergency and Discreet modes,
+  fresh five-minute location updates, front/back/concurrent-camera evidence,
+  silent Quick Assist activation, neutral foreground controls and device-bound
+  encrypted audio/video segments.
+- Strengthened adware remediation with evidence-based confidence, enabled-only
+  Accessibility detection, command/package validation, post-action checks and a
+  hard protection boundary for Android system apps, launchers, active
+  Accessibility services and device administrators.
+- Added a unified Automation Engine with persistent IF→THEN rules for incoming
+  notifications and location enter/exit events. Rules can launch ordered agent
+  tasks, ring an immediate wake-up alarm, use cooldowns, and run without asking
+  again after the user explicitly creates them.
+- Scheduled tasks now wake and execute in the background instead of depending
+  on an Activity launch. Spanish timers such as `en 30 minutos`, `hoy a las
+  17:00` and `mañana a las 17:00` are supported.
+- Added an Automations screen with Horarios and Si→Entonces tabs, manual rule
+  creation, enable/disable, test and delete controls. Required confirmations now
+  expose actionable **Sí** and **No** notification buttons.
+- Added guarded game control with `game_observe` and `game_action`. BlackClaw
+  now observes SurfaceView/OpenGL games through screen capture and OCR, uses
+  resolution-independent coordinates, verifies visual changes, and refuses
+  blind or stale action sequences.
+- Game actions that can start battles, spend currency, purchase or upgrade
+  require explicit user confirmation.
+- Added a visible Accessibility-based autoclicker editor that needs no ADB or
+  Shizuku. Users can place taps/swipes over a game, name and save macros, then
+  ask BlackClaw to open the matching game and run them. Playback supports loops
+  up to 30 minutes, speed control, pause/resume/restart/stop and foreground guards.
+- Fixed Android lint errors around Bluetooth permission, predictive Back,
+  Android 12 splash resources, Quick Settings launch behavior and missing
+  Japanese/Chinese translations.
 
 ### v1.1.3
 - **Fixed notification intent routing in chat.** Merely mentioning notifications in a question, explanation, example, or general conversation no longer triggers immediate access to device notifications.

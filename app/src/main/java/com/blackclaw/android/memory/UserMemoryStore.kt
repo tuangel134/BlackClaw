@@ -1,7 +1,5 @@
 package com.blackclaw.android.memory
 
-import com.blackclaw.android.utils.KVUtils
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -40,26 +38,47 @@ object UserMemoryStore {
         }
     }
 
-    @Synchronized
-    fun all(): List<Fact> {
-        val raw = KVUtils.getString(KEY, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).mapNotNull { i ->
-                runCatching { Fact.fromJson(arr.getJSONObject(i)) }.getOrNull()
-            }
-        }.getOrDefault(emptyList())
+    /**
+     * Storage mechanics come from [JsonListStore], including the recency-aware cap.
+     * Supplying [timestampOf] is what stops an actively-maintained fact from being
+     * evicted in favour of an untouched one that merely sits later in the list.
+     */
+    private val store = object : JsonListStore<Fact>(KEY, MAX_FACTS) {
+        override val logTag = "UserMemoryStore"
+        override fun toJson(item: Fact): JSONObject = item.toJson()
+        override fun fromJson(json: JSONObject): Fact? = runCatching { Fact.fromJson(json) }
+            .getOrNull()?.takeIf { it.key.isNotBlank() }
+        override fun timestampOf(item: Fact): Long = item.addedAtMs
     }
 
-    @Synchronized
+    fun all(): List<Fact> = store.all()
+
     private fun saveAll(facts: List<Fact>) {
-        val capped = if (facts.size > MAX_FACTS) facts.takeLast(MAX_FACTS) else facts
-        val arr = JSONArray()
-        capped.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY, arr.toString())
-        KVUtils.sync()
+        store.replaceAll(facts)
     }
+
+    /**
+     * Keep the [max] most recently touched facts.
+     *
+     * WHY NOT `takeLast`: [remember] replaces an existing fact **at its original
+     * index** while refreshing `addedAtMs`, so list position reflects when a key was
+     * first seen, not when it was last updated. Capping by position therefore evicted
+     * facts the user actively maintains in favour of stale ones that merely happened to
+     * be added later. Ordering by `addedAtMs` is what makes "I keep correcting this"
+     * count for something.
+     *
+     * Insertion order is preserved among survivors so the stored file stays stable.
+     */
+    fun capByRecency(facts: List<Fact>, max: Int): List<Fact> {
+        if (max <= 0) return emptyList()
+        if (facts.size <= max) return facts
+        val keep = facts.sortedByDescending { it.addedAtMs }.take(max).map { it.id }.toHashSet()
+        return facts.filter { it.id in keep }
+    }
+
+    /** The [max] most recently touched facts, newest last (reads naturally in a prompt). */
+    fun mostRecent(facts: List<Fact>, max: Int): List<Fact> =
+        capByRecency(facts, max).sortedBy { it.addedAtMs }
 
     /** Add or update a fact. If a fact with the same key already exists, replace it. */
     @Synchronized
@@ -115,9 +134,14 @@ object UserMemoryStore {
         return ranked.map { facts[it.first] }
     }
 
-    /** Build a compact text block to inject into the system prompt. */
+    /**
+     * Build a compact text block to inject into the system prompt.
+     *
+     * Selects by `addedAtMs`, not by list position — see [capByRecency] for why those
+     * differ and why the difference was losing the user's most-maintained facts.
+     */
     fun asPromptSnippet(maxFacts: Int = 30): String {
-        val facts = all().takeLast(maxFacts)
+        val facts = mostRecent(all(), maxFacts)
         if (facts.isEmpty()) return ""
         return buildString {
             append("\n\n## What the user has told you to remember\n")

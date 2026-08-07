@@ -31,9 +31,8 @@ import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
 import java.util.concurrent.Executors
 
 /**
- * BlackClaw's internal terminal UI. Shares the exact same [TerminalEngine]
- * session as the AI's `terminal` tool, so what the user runs here and what the
- * assistant runs are one continuous session (working dir, backend, adb).
+ * BlackClaw's internal terminal UI.  It exposes the fixed local Linux session;
+ * its working directory is intentionally separate from the agent's session.
  */
 class TerminalActivity : BaseActivity() {
 

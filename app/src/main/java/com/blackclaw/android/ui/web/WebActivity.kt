@@ -9,6 +9,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
+import androidx.activity.OnBackPressedCallback
 import com.blackclaw.android.R
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.widget.CommonToolbar
@@ -57,6 +58,11 @@ class WebActivity : BaseActivity() {
         initToolbar(defaultTitle)
         initProgressBar()
         initWebView(url)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else finish()
+            }
+        })
     }
 
     private fun initToolbar(defaultTitle: String?) {
@@ -117,14 +123,6 @@ class WebActivity : BaseActivity() {
             }
 
             loadUrl(url)
-        }
-    }
-
-    override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
         }
     }
 

@@ -50,8 +50,21 @@ class ScreenCaptureService : Service() {
 
         fun isRunning(): Boolean = instance != null
 
-        /** Returns the current PNG bitmap (max 1 frame old) or null. Thread-safe. */
+        /**
+         * Returns the current bitmap (max 1 frame old) or null. Thread-safe.
+         *
+         * NOTE FOR CALLERS: the bitmap is owned by the service and is only valid
+         * until the next call — use it synchronously and do NOT recycle it. If a
+         * caller ever does recycle it, capture() will return null rather than hand
+         * the dead instance to the next caller.
+         */
         fun captureBitmap(): Bitmap? = instance?.capture()
+
+        /**
+         * Stable caller-owned copy for work that outlives the current capture call.
+         * Unlike [captureBitmap], this cannot be recycled by a later frame swap.
+         */
+        fun captureBitmapCopy(): Bitmap? = instance?.captureCopy()
 
         fun stop(context: Context) {
             context.stopService(Intent(context, ScreenCaptureService::class.java))
@@ -145,14 +158,25 @@ class ScreenCaptureService : Service() {
         return Triple(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
     }
 
-    /** Pulls the latest frame from the ImageReader and converts it to a Bitmap. */
+    /**
+     * Pulls the latest frame from the ImageReader and converts it to a Bitmap.
+     *
+     * CONTRACT: the returned bitmap is owned by this service and is valid only
+     * until the next capture() call. Callers must finish with it synchronously
+     * (all current callers — ReadScreenOcrTool, TapOcrTool, GameControlTools —
+     * do) and must not recycle it themselves.
+     *
+     * @Synchronized so two tool threads can't interleave inside the acquire /
+     * convert / swap sequence and recycle each other's frame mid-swap.
+     */
+    @Synchronized
     private fun capture(): Bitmap? {
         val reader = imageReader ?: return null
         val img: Image = try {
-            reader.acquireLatestImage() ?: return latestBitmap.get()
+            reader.acquireLatestImage() ?: return cachedBitmap()
         } catch (e: IllegalStateException) {
             XLog.w(TAG, "acquireLatestImage threw: ${e.message}")
-            return latestBitmap.get()
+            return cachedBitmap()
         }
         val bmp = try {
             val planes = img.planes
@@ -166,9 +190,17 @@ class ScreenCaptureService : Service() {
                 Bitmap.Config.ARGB_8888,
             )
             output.copyPixelsFromBuffer(buffer)
-            // Crop padding columns added by stride alignment
+            // Crop padding columns added by stride alignment.
             if (rowPadding > 0) {
-                Bitmap.createBitmap(output, 0, 0, img.width, img.height)
+                val cropped = Bitmap.createBitmap(output, 0, 0, img.width, img.height)
+                // LEAK FIX: the padded intermediate is ~1080x1920x4B (~8-10 MB) and
+                // used to be dropped on the floor every single capture. GC eventually
+                // frees it, but at capture rates of several frames per agent step the
+                // allocator can't keep up and the process OOMs. Recycle it eagerly.
+                // createBitmap() may return the SAME instance when no crop is needed,
+                // so only recycle when we really got a new one.
+                if (cropped !== output) output.recycle()
+                cropped
             } else output
         } catch (e: Exception) {
             XLog.w(TAG, "Failed to convert Image to Bitmap", e)
@@ -176,8 +208,41 @@ class ScreenCaptureService : Service() {
         } finally {
             img.close()
         }
-        if (bmp != null) latestBitmap.set(bmp)
-        return bmp ?: latestBitmap.get()
+        if (bmp != null) {
+            // LEAK FIX: set() silently dropped the previous frame, leaking another
+            // ~8-10 MB per capture. getAndSet lets us recycle the frame we are
+            // replacing. Guard for the same-instance case (a caller may have handed
+            // the cached frame back) and for a bitmap a caller already recycled.
+            val previous = latestBitmap.getAndSet(bmp)
+            if (previous != null && previous !== bmp && !previous.isRecycled) {
+                previous.recycle()
+            }
+        }
+        return bmp ?: cachedBitmap()
+    }
+
+    @Synchronized
+    private fun captureCopy(): Bitmap? {
+        val frame = capture() ?: return null
+        return runCatching { frame.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
+    }
+
+    /**
+     * Fallback frame, but never a recycled one.
+     *
+     * The cached frame is the same instance we hand to callers, so any caller that
+     * recycles what it received (or a frame we recycled during a swap) would leave
+     * a dead bitmap here and the next caller would blow up with
+     * "Canvas: trying to use a recycled bitmap". Returning null instead lets the
+     * tool report "no frame yet" and retry.
+     */
+    private fun cachedBitmap(): Bitmap? {
+        val cached = latestBitmap.get() ?: return null
+        if (cached.isRecycled) {
+            latestBitmap.compareAndSet(cached, null)
+            return null
+        }
+        return cached
     }
 
     private fun cleanup() {

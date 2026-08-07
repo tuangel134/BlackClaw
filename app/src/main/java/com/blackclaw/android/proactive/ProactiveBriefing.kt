@@ -122,8 +122,9 @@ object ProactiveBriefing {
                 title = "💡 ¿Automatizar un hábito?",
                 body = body, category = "habit", source = "ai",
             )
-            AssistantReceiver.postNotification(
-                ClawApplication.instance, "💡 ¿Automatizar un hábito?", body, highPriority = false)
+            AssistantReceiver.postDecisionNotification(
+                ClawApplication.instance, "💡 ¿Automatizar este hábito?", body,
+                "Programa este hábito semanal: ${HabitTracker.describe(habit)}")
             HabitTracker.markSuggested(habit)
             XLog.i(TAG, "Suggested habit (no auto-create): ${habit.id}")
             return

@@ -1,7 +1,6 @@
 package com.blackclaw.android.agent
 
-import com.blackclaw.android.utils.KVUtils
-import org.json.JSONArray
+import com.blackclaw.android.memory.JsonListStore
 import org.json.JSONObject
 
 /**
@@ -25,35 +24,51 @@ object TaskHistoryStore {
 
     data class Entry(val task: String, val outcome: String, val t: Long)
 
-    @Synchronized
-    fun all(): List<Entry> {
-        val raw = KVUtils.getString(KEY, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val a = JSONArray(raw)
-            (0 until a.length()).map {
-                val o = a.getJSONObject(it)
-                Entry(o.optString("task"), o.optString("outcome"), o.optLong("t"))
-            }
-        }.getOrDefault(emptyList())
+    /**
+     * Storage mechanics come from [JsonListStore]: one lock around the whole
+     * read-modify-write, a log line when a record or the whole blob is unreadable, and
+     * no `sync()` on the write path. The old hand-rolled version fsync'd on every
+     * completed task and marked only its reader `@Synchronized`, so two tasks finishing
+     * together could lose an entry.
+     *
+     * The store keeps entries **oldest first**, which is [JsonListStore]'s convention
+     * and what makes its recency cap behave. This object's own API is newest-first —
+     * see [all] — so the two views are reversed exactly at this boundary rather than
+     * leaving each caller to guess.
+     */
+    private val store = object : JsonListStore<Entry>(KEY, MAX_ENTRIES) {
+        override val logTag = "TaskHistoryStore"
+        override fun toJson(item: Entry): JSONObject = JSONObject().apply {
+            put("task", item.task)
+            put("outcome", item.outcome)
+            put("t", item.t)
+        }
+
+        // A record with no task text cannot resolve a back-reference and cannot be
+        // printed in the snippet, so it is rejected here and logged rather than
+        // filtered silently at every read.
+        override fun fromJson(json: JSONObject): Entry? {
+            val task = json.optString("task").trim()
+            if (task.isEmpty()) return null
+            return Entry(task, json.optString("outcome"), json.optLong("t"))
+        }
+
+        override fun timestampOf(item: Entry): Long = item.t
     }
 
-    @Synchronized
+    /** Recent tasks, **newest first**. */
+    fun all(): List<Entry> = store.all().asReversed()
+
     fun record(task: String, outcome: String) {
         val cleanTask = task.trim().take(160)
         if (cleanTask.isBlank()) return
         val entry = Entry(cleanTask, sanitizeOutcome(outcome), System.currentTimeMillis())
-        val list = all().toMutableList()
-        list.add(0, entry)
-        val deduped = dedupe(list)
-        val capped = if (deduped.size > MAX_ENTRIES) deduped.take(MAX_ENTRIES) else deduped
-        val arr = JSONArray()
-        capped.forEach {
-            arr.put(JSONObject().apply {
-                put("task", it.task); put("outcome", it.outcome); put("t", it.t)
-            })
-        }
-        KVUtils.putString(KEY, arr.toString()); KVUtils.sync()
+        // Deduping is this store's own policy, not the base's: a repeated task is not an
+        // old entry to evict but the same entry happening again, and only the latest
+        // occurrence is worth prompt space. Truncating here too means the list handed
+        // over is already within the cap, so the base's cap never has to break a tie.
+        val merged = dedupe(listOf(entry) + all()).take(MAX_ENTRIES)
+        store.replaceAll(merged.asReversed())
     }
 
     /**
@@ -72,10 +87,8 @@ object TaskHistoryStore {
         return out
     }
 
-    @Synchronized
-    fun clear() {
-        KVUtils.putString(KEY, ""); KVUtils.sync()
-    }
+    /** Wipes the store. Returns how many entries were removed. */
+    fun clear(): Int = store.clear()
 
     /** Prompt snippet of recent tasks within the freshness window. */
     fun asPromptSnippet(now: Long = System.currentTimeMillis(), max: Int = 5): String =

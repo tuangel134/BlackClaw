@@ -29,7 +29,11 @@ class PipelineRouter(private val context: Context) {
         data class Skill(val skillId: String, val params: Map<String, String>, val description: String) : Route()
 
         /** Tier 2/3: Run the full agent loop */
-        data class AgentLoop(val task: String, val app: String? = null) : Route()
+        data class AgentLoop(
+            val task: String,
+            val app: String? = null,
+            val confirmationRequired: Boolean = false,
+        ) : Route()
 
         /** Tier 2: Pure chat response (no phone control) */
         data class Chat(val task: String) : Route()
@@ -42,6 +46,8 @@ class PipelineRouter(private val context: Context) {
      * @return the routing decision
      */
     fun route(task: String): Route {
+        val conversationDecision = com.blackclaw.android.conversation.ConversationRouter.decide(task)
+        XLog.i(TAG, "Conversation route=${conversationDecision.mode} confidence=${conversationDecision.confidence}")
         // Deterministic fast-path can be disabled from Settings (always use the LLM).
         if (!com.blackclaw.android.utils.KVUtils.getBoolean(KEY_FAST_PATH, true)) {
             XLog.i(TAG, "Fast-path disabled in settings → agent loop")
@@ -83,9 +89,18 @@ class PipelineRouter(private val context: Context) {
             return Route.Skill(matchedSkill.id, params, matchedSkill.description)
         }
 
+        if (conversationDecision.mode == com.blackclaw.android.conversation.ConversationRouter.Mode.CONVERSE) {
+            return Route.Chat(task)
+        }
+
         // No deterministic match → Tier 3 agent loop
+        val needsConfirmation = conversationDecision.confirmation ==
+            com.blackclaw.android.conversation.ConversationRouter.Confirmation.REQUIRED
+        if (needsConfirmation) {
+            XLog.w(TAG, "Destructive intent detected, agent loop will require confirmation: $task")
+        }
         XLog.i(TAG, "No deterministic match, falling through to agent loop: $task")
-        return Route.AgentLoop(task)
+        return Route.AgentLoop(task, confirmationRequired = needsConfirmation)
     }
 
     /**

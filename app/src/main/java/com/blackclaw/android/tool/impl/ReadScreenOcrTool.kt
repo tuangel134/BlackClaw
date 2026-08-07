@@ -37,9 +37,12 @@ class ReadScreenOcrTool : BaseTool() {
         }
         val bmp = ScreenCaptureService.captureBitmap()
             ?: return ToolResult.error("No pude capturar la pantalla (todavía no hay frames).")
-        val blocks = ScreenOcr.recognize(bmp)
+        val blocks = ScreenOcr.recognizeScreen(bmp)
+        val ordered = ScreenOcr.readingOrder(blocks, limit = 40)
         return ToolResult.success(
             "Resolución captura: ${bmp.width}x${bmp.height}\n" +
+            "Texto en orden de lectura:\n" +
+            ordered.joinToString("\n") { "• $it" } + "\n\n" +
             ScreenOcr.formatBlocks(blocks)
         )
     }

@@ -2,7 +2,7 @@ package com.blackclaw.android.assistant
 
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.tool.ToolRegistry
-import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.memory.JsonListStore
 import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -105,25 +105,35 @@ object RoutineEngine {
 
     // ── Storage ──
 
-    @Synchronized
-    fun all(): List<Routine> {
-        val raw = KVUtils.getString(KEY_ROUTINES, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).mapNotNull { i ->
-                runCatching { Routine.fromJson(arr.getJSONObject(i)) }.getOrNull()
-            }
-        }.getOrDefault(emptyList())
+    /**
+     * Storage mechanics come from [JsonListStore].
+     *
+     * What this migration actually buys, beyond removing the duplicated
+     * read-parse-write loop:
+     *
+     *  - **No fsync per write.** `saveAll` called `KVUtils.sync()` on every create,
+     *    update and delete, including the `update` that only bumps `runCount` after a
+     *    routine runs. MMKV already survives process death through its mmap.
+     *  - **A routine that fails to parse is logged.** It used to be dropped by a silent
+     *    `getOrNull()`, so a routine the user built could disappear with no trace.
+     *  - **The cap evicts by recency, not by index.** `removeAt(0)` deleted whichever
+     *    routine happened to be stored first, which after any `update` is not the oldest
+     *    one. [timestampOf] makes "oldest" mean oldest.
+     */
+    private val store = object : JsonListStore<Routine>(KEY_ROUTINES, MAX_ROUTINES) {
+        override val logTag = TAG
+        override fun toJson(item: Routine): JSONObject = item.toJson()
+
+        // A routine with no steps cannot run and a nameless one cannot be invoked, so
+        // neither is worth keeping a slot for.
+        override fun fromJson(json: JSONObject): Routine? =
+            runCatching { Routine.fromJson(json) }.getOrNull()
+                ?.takeIf { it.name.isNotBlank() && it.steps.isNotEmpty() }
+
+        override fun timestampOf(item: Routine): Long = item.createdAt
     }
 
-    @Synchronized
-    private fun saveAll(routines: List<Routine>) {
-        val arr = JSONArray()
-        routines.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY_ROUTINES, arr.toString())
-        KVUtils.sync()
-    }
+    fun all(): List<Routine> = store.all()
 
     fun find(id: String): Routine? = all().firstOrNull { it.id == id }
     fun findByName(name: String): Routine? {
@@ -131,34 +141,20 @@ object RoutineEngine {
         return all().firstOrNull { it.name.lowercase().contains(lower) }
     }
 
-    @Synchronized
     fun create(routine: Routine): Routine {
         val withId = if (routine.id.isBlank())
             routine.copy(id = UUID.randomUUID().toString().take(8))
         else routine
-        val list = all().toMutableList()
-        list.add(withId)
-        if (list.size > MAX_ROUTINES) list.removeAt(0)
-        saveAll(list)
+        store.append(withId)
         XLog.i(TAG, "Created routine: ${withId.name} (${withId.steps.size} steps)")
         return withId
     }
 
-    @Synchronized
     fun update(routine: Routine) {
-        val list = all().toMutableList()
-        val idx = list.indexOfFirst { it.id == routine.id }
-        if (idx >= 0) list[idx] = routine else list.add(routine)
-        saveAll(list)
+        store.upsert(routine) { it.id == routine.id }
     }
 
-    @Synchronized
-    fun delete(id: String): Boolean {
-        val list = all().toMutableList()
-        val removed = list.removeAll { it.id == id }
-        if (removed) saveAll(list)
-        return removed
-    }
+    fun delete(id: String): Boolean = store.removeAll { it.id == id } > 0
 
     // ── Execution ──
 

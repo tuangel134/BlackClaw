@@ -14,18 +14,22 @@ import java.util.concurrent.TimeUnit
 /**
  * Keeps the list of OpenCode Zen free models fresh AND verified.
  *
- * Why both:
- *  - The `/models` endpoint lists many models. The "-free" suffix is NOT a
- *    reliable indicator — e.g. qwen3.6-plus-free and minimax-m3-free return
- *    401 with the anonymous "public" token despite the name.
- *  - So we fetch the catalog, take the plausible free candidates, then PROBE
- *    each one with a 1-token completion using `Bearer public`. A model is kept
- *    only if the probe is authorized (HTTP 200 = works, 429 = works but
- *    rate-limited). 401/402/403/404 → dropped.
+ * How it works:
+ *  - Zen's public `/models` catalog is authoritative for the available IDs.
+ *    Its free models currently use the `-free` suffix, with `big-pickle` as
+ *    the documented exception.
+ *  - We select only those candidates and then PROBE each one with a 1-token
+ *    completion using `Bearer public`. A model is kept only if the probe is
+ *    authorized (HTTP 200 = works, 429 = works but rate-limited).
+ *    401/402/403/404 → dropped.
  *
- * The verified list is cached in MMKV with a 24h TTL and used by the model
+ * The verified list is cached in MMKV with a 6h TTL and used by the model
  * picker. A hand-verified seed list ships as the default so the app works even
  * before the first refresh / offline.
+ *
+ * Refresh triggers: app start, app resume, network recovery, Settings open,
+ * and runtime 401/403 errors. This ensures new free models appear and dead
+ * ones are pruned within minutes of an OpenCode catalog change.
  */
 object OpenCodeZenModels {
 
@@ -33,7 +37,10 @@ object OpenCodeZenModels {
     private const val BASE = "https://opencode.ai/zen/v1"
     private const val KEY_CACHE = "opencode_zen_models_v1"
     private const val KEY_CACHE_TS = "opencode_zen_models_ts_v1"
-    private const val TTL_MS = 24L * 60 * 60 * 1000  // 24h
+    private const val TTL_MS = 6L * 60 * 60 * 1000  // 6h
+    private const val BIG_PICKLE_ID = "big-pickle"
+
+    private enum class ProbeState { AVAILABLE, UNAVAILABLE, UNKNOWN }
 
     /** Hand-verified free models (probed 2026-06) — used as seed/offline default.
      *  Note: the `deepseek-v4-flash-free` alias currently hangs on the provider,
@@ -51,6 +58,15 @@ object OpenCodeZenModels {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
     private val worker = Executors.newSingleThreadExecutor()
+    private val refreshLock = Any()
+    private var refreshing = false
+    private val refreshCallbacks = mutableListOf<(RefreshResult) -> Unit>()
+
+    /** The outcome of a catalog refresh. [ids] is always safe to render. */
+    data class RefreshResult(
+        val ids: List<String>,
+        val updated: Boolean,
+    )
 
     /**
      * The current best-known free model id list: cache if fresh, else seed.
@@ -82,24 +98,49 @@ object OpenCodeZenModels {
      * Refresh asynchronously if stale. Safe to call on app start / config open.
      * [onDone] (optional) is invoked on the worker thread with the fresh list.
      */
-    fun refreshIfStale(onDone: ((List<String>) -> Unit)? = null) {
-        if (!isStale()) { onDone?.invoke(modelIds()); return }
+    fun refreshIfStale(onDone: ((RefreshResult) -> Unit)? = null) {
+        if (!isStale()) {
+            onDone?.invoke(RefreshResult(modelIds(), updated = false))
+            return
+        }
         refreshNow(onDone)
     }
 
-    fun refreshNow(onDone: ((List<String>) -> Unit)? = null) {
+    /**
+     * Force a fresh catalog request, regardless of the cache TTL. Concurrent callers
+     * join the same request and all receive its final result instead of being told
+     * that stale data is fresh.
+     */
+    fun refreshNow(onDone: ((RefreshResult) -> Unit)? = null) {
+        synchronized(refreshLock) {
+            onDone?.let(refreshCallbacks::add)
+            if (refreshing) return
+            refreshing = true
+        }
         worker.submit {
             val fresh = runCatching { fetchAndVerify() }.getOrNull()
-            if (!fresh.isNullOrEmpty()) {
+            val result = if (!fresh.isNullOrEmpty()) {
                 writeCache(fresh)
                 maybeAutoSwitchActive(fresh)
                 XLog.i(TAG, "Refreshed free models: ${fresh.joinToString()}")
-                onDone?.invoke(fresh)
+                RefreshResult(fresh, updated = true)
             } else {
                 XLog.w(TAG, "Refresh failed/empty; keeping ${modelIds().size} cached/seed models")
-                onDone?.invoke(modelIds())
+                RefreshResult(modelIds(), updated = false)
             }
+            val callbacks = synchronized(refreshLock) {
+                refreshing = false
+                val pending = refreshCallbacks.toList()
+                refreshCallbacks.clear()
+                pending
+            }
+            callbacks.forEach { callback -> runCatching { callback(result) } }
         }
+    }
+
+    /** Called when network becomes available — refresh if stale. */
+    fun refreshOnNetwork() {
+        if (isStale()) refreshNow()
     }
 
     /** Fetch the catalog, pick candidates, probe each (in parallel), return verified ids. */
@@ -107,20 +148,26 @@ object OpenCodeZenModels {
         val candidates = fetchCandidates()
         if (candidates.isEmpty()) return emptyList()
         // Probe concurrently so a refresh takes ~one timeout, not N×timeout.
-        val pool = Executors.newFixedThreadPool(candidates.size.coerceAtMost(6))
-        val verified = try {
-            candidates.map { id -> pool.submit<Pair<String, Boolean>> { id to probeIsFree(id) } }
+        val pool = Executors.newFixedThreadPool(candidates.size.coerceAtMost(10))
+        val probeResults = try {
+            candidates.map { id -> pool.submit<Pair<String, ProbeState>> { id to probeFreeAccess(id) } }
                 .mapNotNull { runCatching { it.get(25, TimeUnit.SECONDS) }.getOrNull() }
-                .filter { it.second }
-                .map { it.first }
         } finally {
             pool.shutdownNow()
         }
-        // If verification rejected everything (network blip), keep the seed subset.
-        return verified.ifEmpty { candidates.filter { it in SEED } }
+        // A 5xx/timeout is an outage, not evidence that a free model was retired.
+        // Preserve such candidates when at least one probe proves the catalog is
+        // reachable; otherwise leave the last known cache untouched.
+        if (probeResults.none { it.second == ProbeState.AVAILABLE }) return emptyList()
+        val byId = probeResults.toMap()
+        return candidates.filter { byId[it] != ProbeState.UNAVAILABLE }
     }
 
-    /** GET /models → ids that plausibly free (end in -free, or big-pickle). */
+    /**
+     * GET /models → candidate IDs to probe. Do not cap the full catalog before
+     * filtering: Zen places free entries after many paid models, and the old
+     * `ids.take(40)` meant that a catalog refresh never reached any free model.
+     */
     private fun fetchCandidates(): List<String> {
         val req = Request.Builder()
             .url("$BASE/models")
@@ -134,17 +181,36 @@ object OpenCodeZenModels {
             val ids = mutableListOf<String>()
             for (i in 0 until arr.length()) {
                 val id = arr.getJSONObject(i).optString("id")
-                if (id.endsWith("-free") || id == "big-pickle") ids.add(id)
+                if (id.isNotBlank()) ids.add(id)
             }
-            return ids
+            return selectFreeCandidates(ids)
         }
     }
 
     /**
-     * Probe a model with a 1-token completion. Authorized (free) if the server
-     * returns 200 (works) or 429 (works, rate-limited). 401/402/403 → not free.
+     * Zen currently labels all public free IDs with `-free`, except Big Pickle.
+     * Keep this pure so catalog changes can be regression-tested without Android
+     * storage or network dependencies. Big Pickle stays first as the preferred
+     * general-purpose fallback.
      */
-    private fun probeIsFree(modelId: String): Boolean {
+    internal fun selectFreeCandidates(catalogIds: List<String>): List<String> {
+        val free = catalogIds
+            .asSequence()
+            .map(String::trim)
+            .map(String::lowercase)
+            .filter(String::isNotEmpty)
+            .filter { it.endsWith("-free") || it == BIG_PICKLE_ID }
+            .distinct()
+            .toList()
+        return free.sortedWith(compareBy<String> { it != BIG_PICKLE_ID }.thenBy { it })
+    }
+
+    /**
+     * Probe a model with a 1-token completion. 200/429 prove public access;
+     * 401/402/403/404 prove it is unavailable. Network faults and 5xx responses
+     * are unknown so an OpenCode incident never prunes a working cached model.
+     */
+    private fun probeFreeAccess(modelId: String): ProbeState {
         val payload = JSONObject().apply {
             put("model", modelId)
             put("max_tokens", 1)
@@ -160,13 +226,17 @@ object OpenCodeZenModels {
             .build()
         return try {
             client.newCall(req).execute().use { resp ->
-                val ok = resp.code == 200 || resp.code == 429
-                XLog.d(TAG, "probe $modelId -> ${resp.code} (${if (ok) "free" else "blocked"})")
-                ok
+                val state = when (resp.code) {
+                    200, 429 -> ProbeState.AVAILABLE
+                    401, 402, 403, 404 -> ProbeState.UNAVAILABLE
+                    else -> ProbeState.UNKNOWN
+                }
+                XLog.d(TAG, "probe $modelId -> ${resp.code} ($state)")
+                state
             }
         } catch (e: Exception) {
             XLog.d(TAG, "probe $modelId failed: ${e.message}")
-            false
+            ProbeState.UNKNOWN
         }
     }
 
@@ -182,10 +252,16 @@ object OpenCodeZenModels {
         if (!provider.equals("OPENCODE_ZEN", ignoreCase = true)) return
         val active = KVUtils.getLlmModelName()
         if (active.isBlank() || active in fresh) return
-        val replacement = fresh.firstOrNull { it == "big-pickle" }
+        val replacement = fresh.firstOrNull { it == BIG_PICKLE_ID }
             ?: fresh.firstOrNull { it == "deepseek-v4-flash-free" }
             ?: fresh.firstOrNull() ?: return
-        KVUtils.setLlmModelName(replacement)
+        // Keep the active *and* default cloud selection in sync. Writing only the
+        // active key made a stale free model return after switching to local and back.
+        com.blackclaw.android.agent.llm.ModelConfigRepository.activateCloudSelection(
+            modelId = replacement,
+            explicitProviderName = CloudProvider.OPENCODE_ZEN.name,
+            explicitBaseUrl = BASE,
+        )
         KVUtils.sync()
         XLog.i(TAG, "Active free model '$active' no longer free — auto-switched to '$replacement'")
     }
@@ -212,7 +288,7 @@ object OpenCodeZenModels {
     private fun prettyName(id: String): String {
         // big-pickle is OpenCode Zen's reliable alias for DeepSeek V4 Flash
         // (its completions report model="deepseek-v4-flash").
-        if (id == "big-pickle") return "DeepSeek V4 Flash (Big Pickle)"
+        if (id == BIG_PICKLE_ID) return "DeepSeek V4 Flash (Big Pickle)"
         val base = id.removeSuffix("-free")
         val nice = base.split("-", ".").joinToString(" ") {
             it.replaceFirstChar { c -> c.uppercase() }

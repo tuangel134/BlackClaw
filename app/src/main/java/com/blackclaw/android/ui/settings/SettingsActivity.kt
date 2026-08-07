@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -108,6 +109,9 @@ class SettingsActivity : BaseActivity() {
                 onOpenAdbPro = { startActivity(Intent(this, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
                 onOpenTerminal = { startActivity(Intent(this, com.blackclaw.android.ui.terminal.TerminalActivity::class.java)) },
                 onOpenSecurity = { startActivity(Intent(this, com.blackclaw.android.ui.security.SecurityActivity::class.java)) },
+                onOpenMemoryPrivacy = { startActivity(Intent(this, MemoryPrivacyActivity::class.java)) },
+                onOpenEmergency = { startActivity(Intent(this, EmergencySettingsActivity::class.java)) },
+                onOpenZimLibrary = { startActivity(Intent(this, com.blackclaw.android.knowledge.ZimLibraryActivity::class.java)) },
                 onOpenTelegram = { ChannelConfigActivity.start(this, ChannelConfigActivity.ChannelType.TELEGRAM) },
                 onToggleExternalAutomation = {
                     val newState = !KVUtils.isExternalAutomationEnabled()
@@ -180,6 +184,9 @@ private fun ModernSettingsScreen(
     onOpenAdbPro: () -> Unit,
     onOpenTerminal: () -> Unit,
     onOpenSecurity: () -> Unit,
+    onOpenMemoryPrivacy: () -> Unit,
+    onOpenEmergency: () -> Unit,
+    onOpenZimLibrary: () -> Unit,
     onOpenTelegram: () -> Unit,
     onToggleExternalAutomation: () -> Unit,
     onReportBug: () -> Unit,
@@ -199,7 +206,15 @@ private fun ModernSettingsScreen(
         com.blackclaw.android.autoreply.AutoReplyProfileStore.all().count { it.enabled }
     }
     val externalAutomation = remember { KVUtils.isExternalAutomationEnabled() }
+    var remoteMemoryBridge by remember {
+        mutableStateOf(com.blackclaw.android.conversation.ConversationRepository.remoteBridgeEnabled)
+    }
+    val sharedTurnCount = remember { com.blackclaw.android.conversation.ConversationRepository.all().count {
+        it.trust == com.blackclaw.android.conversation.ConversationRepository.Trust.LOCAL } }
     val globalPromptLen = remember { KVUtils.getGlobalPrompt().length }
+    val memoryItems = remember {
+        com.blackclaw.android.memory.MemoryInventory.totalCount()
+    }
 
     Scaffold(
         containerColor = colors.background,
@@ -340,6 +355,22 @@ private fun ModernSettingsScreen(
                 )
             }
 
+            // ── Privacidad ─────────────────────────────────────────────────────
+            // Sits next to the model settings, not under "Avanzado": what the app has
+            // learned is sent with every prompt, so it belongs beside the thing that
+            // sends it — and a privacy control the user cannot find is not a control.
+            SettingsSection(title = "Privacidad", colors = colors) {
+                NavRow(
+                    icon = Icons.Outlined.Shield,
+                    title = "Lo que sé de ti",
+                    subtitle = "Ver y borrar el perfil aprendido, hechos y resúmenes",
+                    trailing = if (memoryItems == 0) "Vacío" else "$memoryItems",
+                    trailingHighlight = memoryItems > 0,
+                    colors = colors,
+                    onClick = onOpenMemoryPrivacy,
+                )
+            }
+
             // ── Apariencia ─────────────────────────────────────────────────────
             SettingsSection(title = "Apariencia", colors = colors) {
                 NavRow(
@@ -367,7 +398,7 @@ private fun ModernSettingsScreen(
                 NavRow(
                     icon = Icons.Outlined.Schedule,
                     title = "Tareas programadas",
-                    subtitle = "Recordatorios y crones",
+                    subtitle = "Horarios, crones y reglas Si → Entonces",
                     trailing = if (scheduledCount == 0) "Ninguna" else "$scheduledCount",
                     trailingHighlight = scheduledCount > 0,
                     colors = colors,
@@ -381,6 +412,16 @@ private fun ModernSettingsScreen(
                     trailing = "$toolCount",
                     colors = colors,
                     onClick = onOpenToolBrowser,
+                )
+                Divider(colors)
+                NavRow(
+                    icon = Icons.AutoMirrored.Outlined.MenuBook,
+                    title = "Biblioteca offline ZIM",
+                    subtitle = "Consulta Wikipedia y otras bibliotecas sin internet",
+                    trailing = "Abrir",
+                    trailingHighlight = true,
+                    colors = colors,
+                    onClick = onOpenZimLibrary,
                 )
                 Divider(colors)
                 NavRow(
@@ -411,6 +452,16 @@ private fun ModernSettingsScreen(
             // ── Avanzado ───────────────────────────────────────────────────────
             val ctx = androidx.compose.ui.platform.LocalContext.current
             SettingsSection(title = "Avanzado", colors = colors) {
+                NavRow(
+                    icon = Icons.Outlined.Warning,
+                    title = "Modo emergencia",
+                    subtitle = "Contacto de confianza, ubicación, SMS y evidencia de audio visible",
+                    trailing = if (com.blackclaw.android.emergency.EmergencyConfig.isReady) "Listo" else "Configurar",
+                    trailingHighlight = com.blackclaw.android.emergency.EmergencyConfig.isReady,
+                    colors = colors,
+                    onClick = onOpenEmergency,
+                )
+                Divider(colors)
                 val shizukuState = remember { com.blackclaw.android.shizuku.ShizukuManager.state(ctx) }
                 NavRow(
                     icon = Icons.Outlined.Bolt,
@@ -443,8 +494,8 @@ private fun ModernSettingsScreen(
                 SwitchRow(
                     icon = Icons.Outlined.Code,
                     title = "Terminal interno",
-                    subtitle = "Una terminal propia para ti y la IA: shell local/privilegiado y " +
-                        "adb por WiFi (adb pair/connect/shell) sin PC.",
+                    subtitle = "Linux fijo con bash, Python, Git y curl sin Shizuku ni ADB. " +
+                        "La consola manual conserva el Modo Pro opcional.",
                     checked = terminalOn,
                     colors = colors,
                 ) { on ->
@@ -456,7 +507,7 @@ private fun ModernSettingsScreen(
                     NavRow(
                         icon = Icons.Outlined.Code,
                         title = "Abrir terminal",
-                        subtitle = "Sesión compartida con la IA",
+                        subtitle = "Linux local; sesión separada de la IA",
                         colors = colors,
                         onClick = onOpenTerminal,
                     )
@@ -523,6 +574,18 @@ private fun ModernSettingsScreen(
                     colors = colors,
                     onClick = onToggleExternalAutomation,
                 )
+                Divider(colors)
+                SwitchRow(
+                    icon = Icons.Outlined.Security,
+                    title = "Compartir memoria local con canales remotos",
+                    subtitle = "Apagado por seguridad · $sharedTurnCount turnos locales. Al activarlo, " +
+                        "cada contacto remoto sigue aislado, pero puede usar contexto local reciente.",
+                    checked = remoteMemoryBridge,
+                    colors = colors,
+                ) { enabled ->
+                    remoteMemoryBridge = enabled
+                    com.blackclaw.android.conversation.ConversationRepository.remoteBridgeEnabled = enabled
+                }
             }
 
             // ── Acerca de ──────────────────────────────────────────────────────

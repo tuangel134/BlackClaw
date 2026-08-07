@@ -44,6 +44,14 @@ class VoiceWakeService : Service() {
         private const val NOTIF_ID = 73010
         /** Resume the wake loop after the assist panel closes. */
         const val ACTION_RESUME_WAKE = "com.blackclaw.android.RESUME_WAKE"
+        @Volatile private var liveInstance: VoiceWakeService? = null
+
+        fun decisionHandled(id: String) {
+            liveInstance?.takeIf { it.pendingDecisionId == id }?.apply {
+                pendingDecisionId = null
+                pendingConfirm = null
+            }
+        }
 
         fun start(ctx: Context) {
             val i = Intent(ctx, VoiceWakeService::class.java)
@@ -60,6 +68,7 @@ class VoiceWakeService : Service() {
     @Volatile private var runningTask = false
     @Volatile private var pendingConfirm: String? = null   // destructive command awaiting "sí"
     @Volatile private var pendingConfirmWhisper = false
+    @Volatile private var pendingDecisionId: String? = null
 
     private var telephonyManager: TelephonyManager? = null
     private var phoneListener: PhoneStateListener? = null
@@ -69,6 +78,7 @@ class VoiceWakeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        liveInstance = this
         startForegroundNotif()
         registerCallStateWatcher()
         VoiceInputManager.setStateListener { state -> updateNotif(state) }
@@ -88,6 +98,7 @@ class VoiceWakeService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        if (liveInstance === this) liveInstance = null
         runCatching { VoiceInputManager.setStateListener(null) }
         runCatching { VoiceInputManager.stopWakeLoop() }
         unregisterCallStateWatcher()
@@ -126,6 +137,11 @@ class VoiceWakeService : Service() {
         val pending = pendingConfirm
         if (pending != null) {
             pendingConfirm = null
+            pendingDecisionId?.let { id ->
+                com.blackclaw.android.assistant.AssistantDecisionStore.discard(id)
+                (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).cancel(id.hashCode())
+            }
+            pendingDecisionId = null
             val low = command.lowercase()
             val yes = listOf("sí", "si", "confirmo", "confirma", "hazlo", "dale", "adelante", "ok", "vale", "claro")
             val confirmed = yes.any { low.contains(it) }
@@ -148,6 +164,12 @@ class VoiceWakeService : Service() {
             pendingConfirm = command
             pendingConfirmWhisper = whisper
             say("¿Seguro que quieres que haga eso, jefe? Dime sí para continuar.", whisper)
+            pendingDecisionId = com.blackclaw.android.assistant.AssistantReceiver.postDecisionNotification(
+                this,
+                "BlackClaw necesita confirmación",
+                command.take(180),
+                command,
+            )
             VoiceInputManager.armFollowUp(8000L)  // listen for the yes/no
             return
         }
@@ -180,7 +202,8 @@ class VoiceWakeService : Service() {
         updateNotif("processing")
         val taskId = "voice-" + UUID.randomUUID().toString().take(8)
         runCatching {
-            appViewModel.startTask(command, taskId, autoReturnToChat = false) { event ->
+            appViewModel.startTask(command, taskId, autoReturnToChat = false,
+                surface = com.blackclaw.android.conversation.ConversationRepository.Surface.VOICE) { event ->
                 when (event) {
                     is TaskEvent.Completed -> { speakResult(event.answer, whisper); runningTask = false }
                     is TaskEvent.Failed -> {

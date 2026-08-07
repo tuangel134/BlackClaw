@@ -298,6 +298,7 @@ class ComposeChatActivity : ComponentActivity() {
             )
         }
         maybeStartVoiceWakeLoop()
+        runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
     }
 
     /**

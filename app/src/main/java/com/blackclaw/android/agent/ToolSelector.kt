@@ -87,8 +87,9 @@ object ToolSelector {
         ),
         Category(
             triggers = listOf("cron", "programa", "schedule", "cada dia", "cada día", "diariamente",
-                "periodic", "repite", "automatiza"),
-            tools = listOf("assistant_reminder", "schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"),
+                "periodic", "repite", "automatiza", "si llego", "si recibo", "cuando me escriba"),
+            tools = listOf("assistant_reminder", "schedule_task", "list_scheduled_tasks",
+                "cancel_scheduled_task", "automation_rule", "get_location"),
         ),
         Category(
             triggers = listOf("volumen", "volume", "brillo", "brightness", "wifi", "bluetooth",
@@ -98,6 +99,14 @@ object ToolSelector {
         Category(
             triggers = listOf("foto", "camara", "cámara", "camera", "selfie", "graba", "video"),
             tools = listOf("open_camera"),
+        ),
+        Category(
+            triggers = listOf("emergencia", "emergency", "auxilio", "peligro", "discreto", "discreet"),
+            tools = listOf("emergency_mode", "get_location", "send_sms"),
+        ),
+        Category(
+            triggers = listOf("wikipedia offline", "archivo zim", "zim", "enciclopedia offline"),
+            tools = listOf("zim_consult", "zim_search", "zim_read", "zim_index"),
         ),
         Category(
             triggers = listOf("musica", "música", "reproduce", "play", "pausa", "media", "cancion",
@@ -171,6 +180,7 @@ object ToolSelector {
             triggers = listOf("juego", "game", "rapido", "rápido", "shell", "adb", "comando",
                 "tap rapido", "dispara", "auto click", "autoclick"),
             tools = listOf("shell_exec", "fast_tap", "fast_swipe", "tap_burst", "force_stop_app",
+                "game_observe", "game_action", "game_record_macro", "game_macro", "game_autoclicker",
                 "read_screen_ocr", "tap_ocr", "execute_plan"),
         ),
         Category(
@@ -311,6 +321,13 @@ object ToolSelector {
             triggers = listOf("salir", "salgo", "cita", "reunion", "reunión", "llegar a tiempo",
                 "avisame para salir", "trafico", "tráfico", "leave", "appointment"),
             tools = listOf("assistant_leave_reminder", "assistant_appointment", "assistant_event", "assistant_reminder"),
+        ),
+        Category(
+            triggers = listOf("canción", "cancion", "song", "qué canción", "que cancion", "what song",
+                "reconoce", "recognize", "identifica", "qué suena", "que suena", "qué musica",
+                "que musica", "quien canta", "quién canta", "como se llama la cancion",
+                "cómo se llama la canción", "nombre de la canción", "nombre de la cancion"),
+            tools = listOf("recognize_song", "play_music", "media_control"),
         ),
     )
 

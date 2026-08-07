@@ -2,18 +2,23 @@ package com.blackclaw.android.tool.impl;
 
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
 import android.provider.Settings;
+
+import androidx.core.content.ContextCompat;
 
 import com.blackclaw.android.ClawApplication;
 import com.blackclaw.android.tool.BaseTool;
@@ -166,6 +171,12 @@ public class GetDeviceInfoTool extends BaseTool {
 
         StringBuilder sb = new StringBuilder();
         sb.append("Bluetooth: enabled");
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && ContextCompat.checkSelfPermission(ClawApplication.Companion.getInstance(),
+                Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return ToolResult.success("Bluetooth: enabled (paired devices unavailable — grant Nearby devices permission)");
+        }
 
         try {
             Set<BluetoothDevice> bonded = adapter.getBondedDevices();

@@ -8,6 +8,8 @@ import android.location.LocationManager
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.blackclaw.android.ClawApplication
+import com.blackclaw.android.cards.AssistCard
+import com.blackclaw.android.cards.AssistCardCodec
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
@@ -56,7 +58,7 @@ class GetLocationTool : BaseTool() {
             } catch (_: SecurityException) {}
         }
         if (best != null && (System.currentTimeMillis() - best.time) < 5L * 60_000L) {
-            return ToolResult.success(formatLocation(best))
+            return located(best)
         }
 
         // Request a fresh fix with timeout
@@ -77,13 +79,33 @@ class GetLocationTool : BaseTool() {
             val ok = latch.await(8, TimeUnit.SECONDS)
             try { lm.removeUpdates(listener) } catch (_: Exception) {}
             val result = fresh ?: best
-            if (result != null) ToolResult.success(formatLocation(result))
+            if (result != null) located(result)
             else if (!ok) ToolResult.error("Tiempo de espera agotado, sin fix de ubicación.")
             else ToolResult.error("No se obtuvo ubicación.")
         } catch (e: Exception) {
             ToolResult.error("Error de ubicación: ${e.message}")
         }
     }
+
+    /**
+     * The same sentence as before, plus a card the UI can draw as a map.
+     *
+     * The coordinates were already here and were only ever formatted into text, so the
+     * panel had a location it could not show on a map.
+     */
+    private fun located(loc: Location): ToolResult = ToolResult.successWithCards(
+        data = formatLocation(loc),
+        cards = AssistCardCodec.encode(
+            listOf(
+                AssistCard.Place(
+                    name = "Tu ubicación",
+                    lat = loc.latitude,
+                    lon = loc.longitude,
+                    detail = "Precisión ±%.0f m · %s".format(loc.accuracy, loc.provider ?: "?"),
+                )
+            )
+        ),
+    )
 
     private fun formatLocation(loc: Location): String {
         val ageSec = ((System.currentTimeMillis() - loc.time) / 1000L).coerceAtLeast(0)

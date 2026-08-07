@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.security.AppRiskScanner
+import com.blackclaw.android.security.AdCulpritDetector
 import com.blackclaw.android.security.SecurityActions
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
@@ -68,14 +69,16 @@ private fun SecurityScreen(
 ) {
     var loading by remember { mutableStateOf(true) }
     var apps by remember { mutableStateOf<List<AppRiskScanner.AppRisk>>(emptyList()) }
+    var adSuspects by remember { mutableStateOf<List<AdCulpritDetector.Suspect>>(emptyList()) }
     var reloadKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(reloadKey) {
         loading = true
         val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            AppRiskScanner.scan().filter { it.level != AppRiskScanner.Level.LOW }
+            AppRiskScanner.scan().filter { it.level != AppRiskScanner.Level.LOW } to AdCulpritDetector.detect()
         }
-        apps = result
+        apps = result.first
+        adSuspects = result.second
         loading = false
     }
 
@@ -143,6 +146,27 @@ private fun SecurityScreen(
                     }
                 }
                 Spacer(Modifier.height(14.dp))
+                adSuspects.firstOrNull()?.let { suspect ->
+                    Surface(
+                        color = Color(0xFFE05252).copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE05252).copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("Culpable más probable · ${suspect.confidence}%", fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold, color = Color(0xFFE05252))
+                            Text("${suspect.label} · ${suspect.pkg}", fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                            suspect.reasons.take(3).forEach {
+                                Text("• $it", fontSize = 12.sp, color = colors.textSecondary)
+                            }
+                            Text("La confianza combina interrupciones observadas, superposición, icono oculto y fecha de instalación.",
+                                fontSize = 11.sp, color = colors.textTertiary)
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
                 Text("APPS A REVISAR (${apps.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold,
                     color = colors.textTertiary)
                 Spacer(Modifier.height(6.dp))

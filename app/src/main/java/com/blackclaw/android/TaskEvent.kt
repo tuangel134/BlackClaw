@@ -19,6 +19,18 @@ sealed class TaskEvent {
     /** Tool execution result. */
     data class ToolResult(val toolName: String, val success: Boolean, val detail: String) : TaskEvent()
 
+    /**
+     * Structured results a surface can draw as cards.
+     *
+     * Separate from [ToolResult] because that one is a status line: its detail is
+     * truncated to 300 characters and its tool name is replaced with a localised display
+     * name, both of which are right for a progress row and fatal for a payload.
+     *
+     * @param payload an [com.blackclaw.android.cards.AssistCardCodec] payload. A surface
+     *   that does not draw cards simply ignores this event.
+     */
+    data class ToolCards(val payload: String) : TaskEvent()
+
     /** Agent loop started a new round. */
     data class LoopStart(val round: Int) : TaskEvent()
 

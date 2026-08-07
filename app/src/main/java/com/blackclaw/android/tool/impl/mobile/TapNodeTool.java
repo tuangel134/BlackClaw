@@ -66,6 +66,10 @@ public class TapNodeTool extends BaseTool {
         String boundsError = validateCoordinates(x, y);
         if (boundsError != null) return ToolResult.error(boundsError);
         boolean success = service.performTap(x, y);
+        if (!success && com.blackclaw.android.adb.PrivilegedShell.INSTANCE.isAvailable()) {
+            String out = com.blackclaw.android.adb.PrivilegedShell.INSTANCE.exec("input tap " + x + " " + y, 3000);
+            success = out != null;
+        }
         return success ? ToolResult.success("Tapped node " + nodeId + " at (" + x + ", " + y + ")")
                 : ToolResult.error("Failed to tap node " + nodeId + " at (" + x + ", " + y + ")");
     }

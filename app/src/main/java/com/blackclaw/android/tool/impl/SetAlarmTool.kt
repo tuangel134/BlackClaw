@@ -3,6 +3,9 @@ package com.blackclaw.android.tool.impl
 import android.content.Intent
 import android.provider.AlarmClock
 import com.blackclaw.android.ClawApplication
+import com.blackclaw.android.cards.AssistCard
+import com.blackclaw.android.cards.AssistCardCodec
+import com.blackclaw.android.cards.SummaryKind
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
@@ -49,7 +52,11 @@ class SetAlarmTool : BaseTool() {
                     }
                     ctx.startActivity(intent)
                     val labelStr = if (label.isNotEmpty()) " (\"$label\")" else ""
-                    ToolResult.success("Alarm set for %02d:%02d%s".format(hour, minute, labelStr))
+                    val result = "Alarm set for %02d:%02d%s".format(hour, minute, labelStr)
+                    ToolResult.successWithCards(result, AssistCardCodec.encode(listOf(AssistCard.Summary(
+                        SummaryKind.TIMER, "Alarma programada", "%02d:%02d".format(hour, minute),
+                        label.ifBlank { "Se abrirá la alarma del sistema." },
+                    ))))
                 }
                 "timer" -> {
                     val secs = optionalInt(params, "duration_seconds", 0)
@@ -61,7 +68,12 @@ class SetAlarmTool : BaseTool() {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     ctx.startActivity(intent)
-                    ToolResult.success("Timer started for ${secs}s")
+                    val minutes = secs / 60
+                    val value = if (minutes > 0 && secs % 60 == 0) "$minutes min" else "$secs s"
+                    ToolResult.successWithCards("Timer started for ${secs}s", AssistCardCodec.encode(listOf(AssistCard.Summary(
+                        SummaryKind.TIMER, "Temporizador iniciado", value,
+                        label.ifBlank { "Se ejecutará en la app de reloj." },
+                    ))))
                 }
                 else -> ToolResult.error("mode must be 'alarm' or 'timer'")
             }

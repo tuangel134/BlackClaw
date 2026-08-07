@@ -76,15 +76,60 @@ class TaskOrchestrator(
 
     fun tryAcquireTask(messageId: String, channel: Channel, taskText: String = "",
                        autoReturnToChat: Boolean = (channel == Channel.LOCAL)): Boolean {
-        return taskSessionStore.tryAcquire(
+        val acquired = taskSessionStore.tryAcquire(
             messageId = messageId,
             channel = channel,
             taskText = taskText,
             autoReturnToChat = autoReturnToChat,
         )
+        // Screen must stay awake only WHILE a task runs. Acquiring here (the single
+        // gate every entry point goes through) and releasing in releaseTask() gives
+        // us a strict pair; previously the lock was taken once at app start and
+        // never released, pinning the display on for 10 min on every cold boot.
+        if (acquired) {
+            acquireTaskWakeLock()
+            // Publish provenance so the tool layer can refuse arbitrary-command tools
+            // for anything that did not originate on this device. Same single gate, so
+            // no entry point can start a task without setting it.
+            com.blackclaw.android.tool.guard.ToolExecutionContext.setOrigin(originOf(channel))
+        }
+        return acquired
     }
 
-    private fun releaseTask(): TaskSessionState = taskSessionStore.release()
+    /**
+     * Map a channel onto a trust origin.
+     *
+     * LOCAL covers in-app chat, voice and the car surface — the user is present.
+     * Everything arriving over a messaging channel is untrusted even when the sender
+     * is the verified owner, because the agent's own inputs (screen text,
+     * notifications, fetched pages) can steer the model.
+     */
+    private fun originOf(channel: Channel): com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin =
+        when (channel) {
+            Channel.LOCAL -> com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.LOCAL
+            Channel.TELEGRAM, Channel.DISCORD, Channel.WECHAT ->
+                com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.REMOTE
+        }
+
+    private fun releaseTask(): TaskSessionState {
+        // Release before returning so every terminal path (complete, error, cancel,
+        // blocked, Tier-1 shortcut) gives the wake lock back exactly once.
+        releaseTaskWakeLock()
+        // Fail closed: with no task running, an unattributed tool call is treated as
+        // strictly as a remote one.
+        com.blackclaw.android.tool.guard.ToolExecutionContext.reset()
+        return taskSessionStore.release()
+    }
+
+    private fun acquireTaskWakeLock() {
+        runCatching { ClawApplication.appViewModelInstance.acquireScreenWakeLock() }
+            .onFailure { XLog.w(TAG, "Could not acquire screen wake lock for task", it) }
+    }
+
+    private fun releaseTaskWakeLock() {
+        runCatching { ClawApplication.appViewModelInstance.releaseScreenWakeLock() }
+            .onFailure { XLog.w(TAG, "Could not release screen wake lock after task", it) }
+    }
 
     fun isTaskRunning(): Boolean = taskSessionStore.isTaskRunning()
 
@@ -138,6 +183,7 @@ class TaskOrchestrator(
 
         // Tier 1: Deterministic routing
         val route = pipelineRouter.route(task)
+        var confirmationRequired = false
         when (route) {
             is PipelineRouter.Route.DirectIntent -> {
                 XLog.i(TAG, "Pipeline Tier 1: DirectIntent — ${route.description}")
@@ -229,8 +275,14 @@ class TaskOrchestrator(
                     XLog.w(TAG, "Skill ${route.skillId} not found, falling through to agent loop")
                 }
             }
-            is PipelineRouter.Route.Chat, is PipelineRouter.Route.AgentLoop -> {
-                // Fall through to agent loop
+            is PipelineRouter.Route.Chat -> {
+                // Fall through to agent loop (chat mode)
+            }
+            is PipelineRouter.Route.AgentLoop -> {
+                confirmationRequired = route.confirmationRequired
+                if (confirmationRequired) {
+                    XLog.w(TAG, "Pipeline: destructive intent flagged, injecting confirmation gate")
+                }
             }
         }
 
@@ -260,7 +312,16 @@ class TaskOrchestrator(
 
         var floatingShown = false
 
-        val agentPrompt = agentPromptOverride?.takeIf { it.isNotBlank() } ?: task
+        val basePrompt = agentPromptOverride?.takeIf { it.isNotBlank() } ?: task
+        val agentPrompt = if (confirmationRequired) {
+            "[SAFETY GATE] The user's request was classified as potentially destructive. " +
+            "You MUST first explain what you are about to do and ask the user to confirm explicitly " +
+            "before executing ANY action. Do NOT call any tool until the user says yes. " +
+            "If the user does not confirm, call finish(summary=\"Cancelled by user\") immediately.\n\n" +
+            basePrompt
+        } else {
+            basePrompt
+        }
         agentService.executeTask(agentPrompt, object : AgentCallback {
             override fun onLoopStart(round: Int) {
                 flushRoundBuffer()
@@ -323,6 +384,12 @@ class TaskOrchestrator(
 
                 val displayName = com.blackclaw.android.tool.ToolRegistry.getInstance().getDisplayName(toolName)
                 taskEventCallback?.invoke(TaskEvent.ToolResult(displayName, success, data ?: ""))
+                // Emitted separately and whole. The status event above is deliberately
+                // truncated for a progress row; putting a payload through that path would
+                // cut it mid-JSON and it would decode to nothing.
+                if (success && result.hasCards) {
+                    taskEventCallback?.invoke(TaskEvent.ToolCards(result.cards!!))
+                }
 
                 if (toolId == "finish" && result.data?.isNotEmpty() == true) {
                     flushRoundBuffer()

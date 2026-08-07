@@ -47,7 +47,8 @@ class CarTaskScreen(
         started = true
         val taskId = "car-" + UUID.randomUUID().toString().take(8)
         runCatching {
-            appViewModel.startTask(command, taskId) { event ->
+            appViewModel.startTask(command, taskId,
+                surface = com.blackclaw.android.conversation.ConversationRepository.Surface.ANDROID_AUTO) { event ->
                 when (event) {
                     is TaskEvent.Completed -> finishWith(State.DONE, event.answer.ifBlank { "Listo." })
                     is TaskEvent.Failed -> finishWith(State.ERROR, "No pude completarlo: ${event.error}")

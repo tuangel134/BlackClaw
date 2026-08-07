@@ -227,4 +227,34 @@
     <string name="custom_local_model_url_not_set">未設定</string>
     <string name="custom_local_model_url_set">カスタム URL 設定済み</string>
     <string name="custom_local_model_url_invalid">URL は http:// または https:// で始まる必要があります</string>
+    <!-- ユーザー作成スキル -->
+    <string name="skills_title">マイスキル</string>
+    <string name="skills_subtitle">再利用可能な自動化を作成</string>
+    <string name="skills_empty">スキルはまだありません。＋を押して作成してください。</string>
+    <string name="skills_create">スキルを作成</string>
+    <string name="skills_edit">スキルを編集</string>
+    <string name="skills_delete">スキルを削除</string>
+    <string name="skills_run">実行</string>
+    <string name="skill_field_name">名前</string>
+    <string name="skill_field_description">説明</string>
+    <string name="skill_field_prompt">プロンプト（AIが行うこと）</string>
+    <string name="skill_field_trigger">トリガー（ユーザーのフレーズ）</string>
+    <string name="skill_saved">スキルを保存しました</string>
+    <string name="skill_deleted">スキルを削除しました</string>
+    <string name="quick_tasks_title">クイックテンプレート</string>
+    <string name="quick_tasks_toggle">テンプレートを切り替え</string>
+    <string name="settings_section_permissions">権限</string>
+    <string name="settings_section_appearance">外観</string>
+    <string name="settings_section_tools">ツール</string>
+    <string name="settings_section_remote">リモート操作</string>
+    <string name="settings_section_about">このアプリについて</string>
+    <string name="settings_section_skills">スキル</string>
+    <string name="settings_theme">テーマ</string>
+    <string name="settings_manage_tools">ツールを管理</string>
+    <string name="settings_external_automation">外部自動化</string>
+    <string name="settings_telegram_bot">Telegram ボット</string>
+    <string name="settings_report_bug">不具合を報告</string>
+    <string name="settings_share_debug_report">デバッグレポートを共有</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_task_budget">タスク予算</string>
 </resources>

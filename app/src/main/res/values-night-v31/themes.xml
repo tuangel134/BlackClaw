@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BlackClaw.Splash" parent="Theme.BlackClaw">
+        <item name="android:windowBackground">@color/colorBgPrimary</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">@color/colorBgPrimary</item>
+    </style>
+</resources>

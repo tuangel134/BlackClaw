@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -18,7 +19,12 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Required by app discovery and generic cross-app automation. BlackClaw is
+         sideloaded rather than distributed under Play's restricted policy. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
@@ -38,12 +44,54 @@
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Custom permission guarding the external automation entrypoints.
+
+         WHY: .automation.ExternalAutomationActivity and
+         .automation.ExternalAutomationReceiver were exported with no permission at
+         all. Reaching them starts an arbitrary agent task, and an agent task can
+         read the screen, notifications, SMS and clipboard and then call tools — so
+         an unguarded export is a full remote-control channel for any installed app
+         holding zero permissions of its own.
+
+         ExternalAutomationEntrypoint.isTargetedToBlackClaw() looked like a gate but
+         is not one: it inspects where the intent is going, not where it came from,
+         so any app satisfies it with intent.setPackage("com.blackclaw.android").
+         And the user-facing enable switch is a single global boolean, so turning it
+         on for one automation app turned it on for all of them.
+
+         protectionLevel="signature" means the system only grants this to apps signed
+         with the same key, and it enforces that before our process is even woken —
+         which is the property no in-app check can provide. Cost is stated in the
+         report: third-party automation apps (Tasker, MacroDroid) cannot hold a
+         signature permission, so they are blocked at this layer. The per-caller
+         allowlist in KVUtils narrows callers that DO hold it. -->
+    <permission
+        android:name="com.blackclaw.android.permission.AUTOMATION"
+        android:protectionLevel="signature"
+        android:label="@string/app_name" />
+    <uses-permission android:name="com.blackclaw.android.permission.AUTOMATION" />
 
     <!-- Device features -->
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="true" />
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.concurrent"
+        android:required="false" />
 
     <!-- Android Auto (Car App Library). Not required so phones without a car
          connection still install the app. -->
@@ -116,6 +164,26 @@
             android:name=".ui.settings.SettingsActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.settings.EmergencySettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.settings.MemoryPrivacyActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.settings.EmergencyEvidenceActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.settings.EmergencyEvidencePlayerActivity"
+            android:exported="false" />
+        <activity
+            android:name=".knowledge.ZimLibraryActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".ui.skills.SkillsActivity"
             android:exported="false"
@@ -198,6 +266,38 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <!-- Native default-assistant contract.  The session receives Android's
+             pre-overlay AssistStructure/screenshot; QuickAssist then renders the
+             conversation panel without losing the app the user was looking at. -->
+        <service
+            android:name=".ui.assist.BlackClawVoiceInteractionService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service" />
+        </service>
+        <service
+            android:name=".ui.assist.BlackClawVoiceInteractionSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <!-- Required by the voice-interaction XML on Android 11 and earlier.
+             Interactive dictation remains in the visible QuickAssist panel. -->
+        <service
+            android:name=".ui.assist.BlackClawRecognitionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SPEECH_RECOGNITION_SERVICE">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
         <activity
             android:name=".assistant.AlarmRingActivity"
             android:exported="false"
@@ -264,6 +364,17 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@style/Theme.Transparent" />
+        <!-- Caller must hold com.blackclaw.android.permission.AUTOMATION (signature).
+             The activity deliberately does NOT carry that permission. A signature
+             permission is enforced by the system before our code runs, so a
+             third-party automation app (Tasker, MacroDroid) could never reach us at
+             all — and driving BlackClaw from Tasker is a documented feature, not an
+             oversight to close. Instead the activity enforces consent in code, in
+             AutomationCallerPolicy: a valid AutomationToken (a secret the user copies
+             out of Settings), or a caller package on the user's allowlist. Both are
+             things an attacking app cannot produce. Note getCallingPackage() is null
+             for the plain startActivity that Tasker uses, which is exactly why the
+             token exists and why an origin-only rule was not sufficient. -->
         <activity
             android:name=".automation.ExternalAutomationActivity"
             android:exported="true"
@@ -285,9 +396,13 @@
             </intent-filter>
         </receiver>
 
+        <!-- The broadcast path gets NO per-caller check: a BroadcastReceiver is never
+             told who sent the broadcast. The signature permission below is therefore
+             the whole of the access control here, not a first layer of it. -->
         <receiver
             android:name=".automation.ExternalAutomationReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.blackclaw.android.permission.AUTOMATION">
             <intent-filter>
                 <action android:name="com.blackclaw.android.RUN_TASK" />
                 <action android:name="com.blackclaw.android.RUN_CHAT" />
@@ -331,6 +446,20 @@
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
+        <service
+            android:name=".emergency.EmergencyService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone|location|specialUse" />
+        <service
+            android:name=".knowledge.ZimIndexService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <receiver
+            android:name=".emergency.EmergencyReceiver"
+            android:exported="false" />
+
         <!-- 定时守护 -->
         <service
             android:name=".service.KeepAliveJobService"
@@ -373,6 +502,14 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.blackclaw.android.ASSISTANT_FIRE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".assistant.AssistantDecisionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.blackclaw.android.DECISION_YES" />
+                <action android:name="com.blackclaw.android.DECISION_NO" />
             </intent-filter>
         </receiver>
 

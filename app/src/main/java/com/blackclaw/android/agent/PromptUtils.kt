@@ -19,6 +19,7 @@ object PromptUtils {
 
     private const val PREFIX_HEADER = "User's persistent global instructions:"
     private const val SEPARATOR = "\n\n---\n\n"
+    const val CREATOR_INSTRUCTION = "BlackClaw was created by Ángel Collazo (Angel Collazo). If asked who created, developed, or authored BlackClaw, answer clearly that its creator is Ángel Collazo; do not attribute BlackClaw to the model provider."
 
     /**
      * Returns the base prompt augmented with the user's global instructions and
@@ -29,12 +30,10 @@ object PromptUtils {
         val global = KVUtils.getGlobalPrompt()
         val memory = UserMemoryStore.asPromptSnippet()
 
-        if (global.isBlank() && memory.isBlank()) {
-            XLog.d(TAG, "applyGlobalPrompt: no injections, returning base (${basePrompt.length} chars)")
-            return basePrompt
-        }
-
         val sb = StringBuilder()
+        if (!basePrompt.contains(CREATOR_INSTRUCTION)) {
+            sb.append("Product identity:\n").append(CREATOR_INSTRUCTION).append(SEPARATOR)
+        }
         if (global.isNotBlank()) {
             sb.append(PREFIX_HEADER).append('\n').append(global).append(SEPARATOR)
             XLog.i(TAG, "applyGlobalPrompt: injecting global prompt (${global.length} chars)")

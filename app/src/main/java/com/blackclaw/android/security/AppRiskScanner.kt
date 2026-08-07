@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.view.accessibility.AccessibilityManager
+import android.accessibilityservice.AccessibilityServiceInfo
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.utils.XLog
 
@@ -134,7 +135,7 @@ object AppRiskScanner {
 
     private fun accessibilityServicePackages(context: Context): Set<String> = runCatching {
         val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        am.installedAccessibilityServiceList.mapNotNull {
+        am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK).mapNotNull {
             it.resolveInfo?.serviceInfo?.packageName
         }.toSet()
     }.getOrDefault(emptySet())

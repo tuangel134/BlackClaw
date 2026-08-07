@@ -5,6 +5,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import com.blackclaw.android.ClawApplication
+import com.blackclaw.android.cards.AssistCard
+import com.blackclaw.android.cards.AssistCardCodec
+import com.blackclaw.android.cards.SummaryKind
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
@@ -40,14 +43,19 @@ class PowerInfoTool : BaseTool() {
         val charge = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) / 1000
         sb.append("Contador de carga: ").append(charge).append(" mAh\n")
 
+        var temperature: String? = null
+        var health: String? = null
+        var plug: String? = null
+        var chargingStatus: String? = null
         intent?.let {
             val voltage = it.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
             if (voltage > 0) sb.append("Voltaje: ").append(voltage).append(" mV\n")
             val tempRaw = it.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
-            sb.append("Temperatura: %.1f°C\n".format(tempRaw / 10.0))
+            temperature = "%.1f°C".format(tempRaw / 10.0)
+            sb.append("Temperatura: ").append(temperature).append("\n")
             val tech = it.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY)
             if (!tech.isNullOrBlank()) sb.append("Tecnología: ").append(tech).append("\n")
-            val health = when (it.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)) {
+            health = when (it.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)) {
                 BatteryManager.BATTERY_HEALTH_GOOD -> "Buena"
                 BatteryManager.BATTERY_HEALTH_OVERHEAT -> "Sobrecalentada"
                 BatteryManager.BATTERY_HEALTH_DEAD -> "Muerta"
@@ -57,22 +65,31 @@ class PowerInfoTool : BaseTool() {
                 else -> "Desconocida"
             }
             sb.append("Estado: ").append(health).append("\n")
-            val plug = when (it.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)) {
+            plug = when (it.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)) {
                 BatteryManager.BATTERY_PLUGGED_USB -> "USB"
                 BatteryManager.BATTERY_PLUGGED_AC -> "Cargador"
                 BatteryManager.BATTERY_PLUGGED_WIRELESS -> "Inalámbrica"
                 else -> "No conectada"
             }
             sb.append("Conexión: ").append(plug).append("\n")
-            val status = when (it.getIntExtra(BatteryManager.EXTRA_STATUS, -1)) {
+            chargingStatus = when (it.getIntExtra(BatteryManager.EXTRA_STATUS, -1)) {
                 BatteryManager.BATTERY_STATUS_CHARGING -> "Cargando"
                 BatteryManager.BATTERY_STATUS_DISCHARGING -> "Descargando"
                 BatteryManager.BATTERY_STATUS_FULL -> "Llena"
                 BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "No carga"
                 else -> "Desconocido"
             }
-            sb.append("Status: ").append(status)
+            sb.append("Status: ").append(chargingStatus)
         }
-        return ToolResult.success(sb.toString())
+        val detail = listOfNotNull(chargingStatus, plug, temperature, health).joinToString(" · ")
+        return ToolResult.successWithCards(
+            sb.toString(),
+            AssistCardCodec.encode(listOf(AssistCard.Summary(
+                kind = SummaryKind.BATTERY,
+                label = "Batería",
+                value = "$pct%",
+                detail = detail,
+            ))),
+        )
     }
 }

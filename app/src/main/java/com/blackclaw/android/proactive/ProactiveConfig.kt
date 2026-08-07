@@ -29,6 +29,7 @@ object ProactiveConfig {
     private const val KEY_WATCH_ALL_APPS = "proactive_watch_all_apps"
     private const val KEY_WATCHED_APPS = "proactive_watched_apps"
     private const val KEY_MUTED_APPS = "proactive_muted_apps"
+    private const val KEY_NEVER_AUTO_MUTE_MIGRATED = "proactive_never_auto_mute_v1"
     // ── Efficiency ──
     private const val KEY_PREFILTER = "proactive_prefilter"
     private const val KEY_MAX_CLASSIFY_HOUR = "proactive_max_classify_hour"
@@ -112,9 +113,7 @@ object ProactiveConfig {
         set(v) { KVUtils.putString(KEY_WATCHED_APPS, v); KVUtils.sync() }
 
     fun isAppWatched(pkg: String): Boolean {
-        // A learned-mute always wins: apps the assistant stopped watching (because
-        // the user almost always ignored them) are skipped even in watch-all mode.
-        if (isAppMuted(pkg)) return false
+        restoreLegacyAutoMutedApps()
         if (watchAllApps) return true
         return watchedApps.split(",").map { it.trim() }.any { it.isNotEmpty() && it == pkg }
     }
@@ -138,6 +137,15 @@ object ProactiveConfig {
     }
 
     fun clearMutedApps() { mutedApps = "" }
+
+    /** One-time recovery from the removed auto-mute policy. */
+    @Synchronized
+    fun restoreLegacyAutoMutedApps() {
+        if (KVUtils.getBoolean(KEY_NEVER_AUTO_MUTE_MIGRATED, false)) return
+        clearMutedApps()
+        KVUtils.putBoolean(KEY_NEVER_AUTO_MUTE_MIGRATED, true)
+        KVUtils.sync()
+    }
 
     // ──────────────────────── Efficiency ────────────────────────
 
@@ -222,11 +230,9 @@ object ProactiveConfig {
         get() = KVUtils.getBoolean("proactive_speak_alerts", true)
         set(v) { KVUtils.putBoolean("proactive_speak_alerts", v); KVUtils.sync() }
 
-    /** Auto-create detected habits (recurring alarms/reminders) without asking.
-     *  Off by default: recurring alarms appearing unannounced are high-surprise,
-     *  so by default the assistant only SUGGESTS them once and waits. */
+    /** Auto-create detected habits. Explicitly detected, reversible habits are low-risk. */
     var autoCreateHabits: Boolean
-        get() = KVUtils.getBoolean("proactive_auto_create_habits", false)
+        get() = KVUtils.getBoolean("proactive_auto_create_habits", true)
         set(v) { KVUtils.putBoolean("proactive_auto_create_habits", v); KVUtils.sync() }
 
     // ──────────────────────── Weekly finance summary ────────────────────────

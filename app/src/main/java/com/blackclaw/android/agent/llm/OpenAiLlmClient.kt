@@ -21,10 +21,11 @@ class OpenAiLlmClient(
 ) : LlmClient {
 
     private companion object {
-        /** Cap output tokens. Tool-calling replies are short; this protects
-         *  against runaway generations and reduces total tokens counted against
-         *  rate limits (Groq counts input+output). */
-        const val MAX_OUTPUT_TOKENS = 1500
+        /** Cap output tokens. Reasoning models (free tier) spend ~200 tokens on
+         *  internal reasoning before producing content/tool-calls, so we need
+         *  headroom beyond the actual reply. 4096 covers reasoning + a full
+         *  multi-paragraph answer or several tool calls. */
+        const val MAX_OUTPUT_TOKENS = 4096
     }
 
     private val chatModel: ChatModel by lazy { buildChatModel() }

@@ -138,6 +138,21 @@ private fun AdbProScreen(
 
             Spacer(Modifier.height(16.dp))
 
+            // Consent for arbitrary-command tools. Lives here because ToolRiskPolicy's
+            // refusal message points the user at "Ajustes → Modo Pro" by name, and
+            // without this card those tools are unreachable.
+            Text("PERMISOS DE LA IA",
+                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                color = colors.textTertiary, letterSpacing = 0.8.sp,
+                modifier = Modifier.padding(bottom = 8.dp))
+            PrivilegedToolsCard()
+
+            Spacer(Modifier.height(12.dp))
+
+            AutomationTokenCard()
+
+            Spacer(Modifier.height(20.dp))
+
             // ── Pairing flow (only when not yet paired) ───────────
             if (state == AdbController.State.NOT_PAIRED || state == AdbController.State.ERROR) {
                 Text("CÓMO EMPAREJAR (1 sola vez)",

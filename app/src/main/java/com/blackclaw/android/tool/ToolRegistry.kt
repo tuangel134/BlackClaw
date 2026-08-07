@@ -64,6 +64,7 @@ object ToolRegistry {
         register(ScheduleTaskTool())
         register(ListScheduledTasksTool())
         register(CancelScheduledTaskTool())
+        register(AutomationRuleTool())
 
         // Native Assistant hub — reminders, alarms, notes, events, alerts, finance.
         // The AI writes here instead of bouncing out to external Clock/Calendar apps.
@@ -171,6 +172,7 @@ object ToolRegistry {
         register(SpeakTextTool())
         register(MediaControlTool())
         register(FlashlightTool())
+        register(EmergencyModeTool())
         register(VibrateTool())
         register(SystemNotifyTool())
         register(HttpFetchTool())
@@ -194,6 +196,11 @@ object ToolRegistry {
         register(QrGenerateTool())
         register(WriteFileTool())
         register(ReadFileTool())
+        register(RecognizeSongTool())
+        register(ZimConsultTool())
+        register(ZimSearchTool())
+        register(ZimReadTool())
+        register(ZimIndexTool())
         register(Base64Tool())
         register(RandomTool())
         register(TranslateTool())
@@ -224,6 +231,11 @@ object ToolRegistry {
         // Perception (game / surface support via screen capture + OCR)
         register(ReadScreenOcrTool())
         register(TapOcrTool())
+        register(GameObserveTool())
+        register(GameActionTool())
+        register(GameRecordMacroTool())
+        register(GameMacroTool())
+        register(GameAutoclickerTool())
         // Photo OCR + receipt scanning (vision over shared images)
         register(OcrImageTool())
         register(ScanReceiptTool())
@@ -277,22 +289,76 @@ object ToolRegistry {
 
     fun getAllTools(): List<BaseTool> = tools.values.toList()
 
+    private val toolExecutor = java.util.concurrent.Executors.newCachedThreadPool { r ->
+        Thread(r, "tool-exec").apply { isDaemon = true }
+    }
+
+    private const val DEFAULT_TIMEOUT_MS = 30_000L
+    private val LONG_RUNNING_TOOLS = setOf(
+        "web_search", "web_answer", "http_fetch", "remote_shell", "remote_connect",
+        "translate", "read_screen_ocr", "tap_ocr", "ocr_image", "scan_receipt",
+        "zim_consult", "zim_search", "zim_index", "network_speed", "ping_host",
+        "game_observe", "execute_plan", "terminal",
+    )
+    private const val LONG_TIMEOUT_MS = 120_000L
+
+    /**
+     * Single choke point for tool execution, and therefore the right place for the
+     * risk gate.
+     *
+     * The gate used to live only inside the agent loop, so every other caller —
+     * `ExecutePlanTool`, `DebugTaskReceiver`, the config server's debug endpoint —
+     * reached every tool ungated. Enforcing here means all of them inherit it.
+     */
     fun executeTool(name: String, params: Map<String, Any>): ToolResult {
         val tool = tools[name] ?: return ToolResult.error("Unknown tool: $name")
 
-        // Per-task TTL cache for stable read-only tools (saves time + tokens
-        // when the LLM redundantly re-queries within one task).
+        // Provenance gate. Arbitrary-command tools are unreachable from a remote or
+        // unattributed request, and locally require a recent, expiring opt-in.
+        val decision = com.blackclaw.android.tool.guard.ToolRiskPolicy.evaluate(
+            toolName = name,
+            origin = com.blackclaw.android.tool.guard.ToolExecutionContext.origin,
+            privilegedArmed = com.blackclaw.android.tool.guard.PrivilegedToolConsent.isArmed(),
+        )
+        if (decision is com.blackclaw.android.tool.guard.ToolRiskPolicy.Decision.Deny) {
+            com.blackclaw.android.utils.XLog.w(
+                "ToolRegistry",
+                "Blocked '$name' (origin=${com.blackclaw.android.tool.guard.ToolExecutionContext.origin}): ${decision.reason}",
+            )
+            return ToolResult.error(decision.reason)
+        }
+        // Profile learning. This is the only place every execution path passes through
+        // (agent loop, skills, plans, Tier-1 shortcuts, debug), which is why the
+        // previous approach — recording from one Activity — left UserProfile's
+        // topApps/topContacts branches permanently unreachable. No-ops for tools that
+        // say nothing about the user's habits.
+        runCatching { com.blackclaw.android.memory.UserProfile.recordToolUse(name, params) }
+
+        if (com.blackclaw.android.tool.guard.ToolRiskPolicy.shouldAudit(name)) {
+            com.blackclaw.android.utils.XLog.i(
+                "ToolRegistry",
+                "Running '$name' (tier=${com.blackclaw.android.tool.guard.ToolRiskPolicy.classify(name)}, " +
+                    "origin=${com.blackclaw.android.tool.guard.ToolExecutionContext.origin})",
+            )
+        }
+
         ToolResultCache.get(name, params)?.let { cached ->
             return cached
         }
 
+        val timeoutMs = if (name in LONG_RUNNING_TOOLS) LONG_TIMEOUT_MS else DEFAULT_TIMEOUT_MS
         return try {
-            val result = tool.executeWithWaitAfter(params)
+            val future = toolExecutor.submit<ToolResult> { tool.executeWithWaitAfter(params) }
+            val result = future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
             ToolResultCache.put(name, params, result)
             result
+        } catch (e: java.util.concurrent.TimeoutException) {
+            com.blackclaw.android.utils.XLog.e("ToolRegistry", "Tool '$name' timed out after ${timeoutMs}ms")
+            ToolResult.error("Tool '$name' timed out after ${timeoutMs / 1000}s. The action may still be in progress.")
         } catch (e: Exception) {
-            com.blackclaw.android.utils.XLog.e("ToolRegistry", "Tool '$name' execution failed with params=$params", e)
-            ToolResult.error("Tool execution failed: ${e.message}")
+            val cause = (e as? java.util.concurrent.ExecutionException)?.cause ?: e
+            com.blackclaw.android.utils.XLog.e("ToolRegistry", "Tool '$name' execution failed with params=$params", cause)
+            ToolResult.error("Tool execution failed: ${cause.message}")
         }
     }
 

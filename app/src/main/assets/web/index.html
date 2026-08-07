@@ -145,6 +145,23 @@ input:focus {
 
   <div id="loading" class="loading" data-i18n="loading"></div>
 
+  <!--
+    Access-code gate. The server listens on loopback, which every app on the phone
+    can reach, so the code has to come from somewhere off-channel: it is shown on
+    the phone screen and typed in here. Without it /api/* returns 401.
+  -->
+  <div id="authGate" class="card" style="display:none">
+    <div class="card-title"><span class="dot"></span><span data-i18n="auth_title"></span></div>
+    <p class="subtitle" data-i18n="auth_hint"></p>
+    <div class="field">
+      <label data-i18n="auth_label"></label>
+      <input id="accessCode" type="text" autocomplete="off" spellcheck="false"
+             autocapitalize="characters" placeholder="XXXX-XXXX-XXXX" />
+    </div>
+    <div id="authError" class="toast error" style="display:none;position:static;transform:none;margin-bottom:12px"></div>
+    <button id="unlockBtn" class="btn" data-i18n="auth_unlock"></button>
+  </div>
+
   <div id="content" style="display:none">
     <div class="card llm">
       <div class="card-title"><span class="dot"></span><span data-i18n="llm_title"></span></div>
@@ -275,6 +292,12 @@ const i18nMessages = {
     save_success: '配置已保存，通道将自动重连',
     save_failed: '保存失败',
     unknown_error: '未知错误',
+    auth_title: '需要访问码',
+    auth_hint: '在手机上打开 BlackClaw → 设置 → 局域网配置，输入屏幕上显示的访问码。',
+    auth_label: '访问码',
+    auth_unlock: '解锁',
+    auth_bad_code: '访问码无效。请检查手机屏幕上显示的代码。',
+    auth_locked: '失败次数过多。请在手机上重新启动配置服务器。',
   },
   'en': {
     title: 'BlackClaw Config',
@@ -307,6 +330,12 @@ const i18nMessages = {
     save_success: 'Saved. Channels will reconnect automatically.',
     save_failed: 'Save failed',
     unknown_error: 'Unknown error',
+    auth_title: 'Access code required',
+    auth_hint: 'On your phone open BlackClaw → Settings → LAN config, and enter the access code shown on screen.',
+    auth_label: 'Access code',
+    auth_unlock: 'Unlock',
+    auth_bad_code: 'Invalid access code. Check the code shown on your phone screen.',
+    auth_locked: 'Too many failed attempts. Restart the config server from your phone.',
   },
   'ja': {
     title: 'BlackClaw 設定',
@@ -339,6 +368,12 @@ const i18nMessages = {
     save_success: '設定を保存しました。チャネルは自動的に再接続されます。',
     save_failed: '保存に失敗しました',
     unknown_error: '不明なエラー',
+    auth_title: 'アクセスコードが必要',
+    auth_hint: 'スマートフォンで BlackClaw → 設定 → LAN 設定 を開き、画面に表示されたアクセスコードを入力してください。',
+    auth_label: 'アクセスコード',
+    auth_unlock: 'ロック解除',
+    auth_bad_code: 'アクセスコードが無効です。スマートフォンの画面に表示されたコードを確認してください。',
+    auth_locked: '失敗が多すぎます。スマートフォンで設定サーバーを再起動してください。',
   },
 };
 
@@ -389,9 +424,43 @@ function togglePassword(inputId, btn) {
 const fields = ['dingtalkAppKey', 'dingtalkAppSecret', 'feishuAppId', 'feishuAppSecret', 'qqAppId', 'qqAppSecret', 'discordBotToken', 'telegramBotToken'];
 const llmFields = ['llmApiKey', 'llmBaseUrl', 'llmModelName'];
 
+// ====== Access code ======
+// Held in sessionStorage only: it dies with the tab and is never written to disk.
+// The server rotates the code on every start, so a stale one just yields a 401.
+function getCode() {
+  return (sessionStorage.getItem('blackclaw_code') || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+function setCode(v) {
+  sessionStorage.setItem('blackclaw_code', (v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase());
+}
+function authHeaders(extra) {
+  return Object.assign({ 'Authorization': 'Bearer ' + getCode() }, extra || {});
+}
+function showGate(message) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'none';
+  document.getElementById('authGate').style.display = 'block';
+  const err = document.getElementById('authError');
+  if (message) { err.textContent = message; err.style.display = 'block'; }
+  else { err.style.display = 'none'; }
+  document.getElementById('accessCode').focus();
+}
+
 async function load() {
+  if (!getCode()) { showGate(null); return; }
   try {
-    const [chanRes, llmRes] = await Promise.all([fetch('/api/channels'), fetch('/api/llm')]);
+    const [chanRes, llmRes] = await Promise.all([
+      fetch('/api/channels', { headers: authHeaders() }),
+      fetch('/api/llm', { headers: authHeaders() })
+    ]);
+    if (chanRes.status === 401 || llmRes.status === 401) {
+      showGate(t('auth_bad_code'));
+      return;
+    }
+    if (chanRes.status === 429 || llmRes.status === 429) {
+      showGate(t('auth_locked'));
+      return;
+    }
     const chanJson = await chanRes.json();
     const llmJson = await llmRes.json();
     if (chanJson.code === 0 && chanJson.data) {
@@ -407,6 +476,7 @@ async function load() {
       });
     }
     document.getElementById('loading').style.display = 'none';
+    document.getElementById('authGate').style.display = 'none';
     document.getElementById('content').style.display = 'block';
   } catch (e) {
     document.getElementById('loading').textContent = t('load_failed');
@@ -429,9 +499,13 @@ async function save() {
       if (el) llmBody[f] = el.value.trim();
     });
     const [chanRes, llmRes] = await Promise.all([
-      fetch('/api/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(chanBody) }),
-      fetch('/api/llm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(llmBody) })
+      fetch('/api/channels', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(chanBody) }),
+      fetch('/api/llm', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(llmBody) })
     ]);
+    if (chanRes.status === 401 || llmRes.status === 401) {
+      showGate(t('auth_bad_code'));
+      return;
+    }
     const chanJson = await chanRes.json();
     const llmJson = await llmRes.json();
     if (chanJson.code === 0 && llmJson.code === 0) {
@@ -456,6 +530,19 @@ function showToast(msg, type) {
   requestAnimationFrame(() => { el.classList.add('show'); });
   setTimeout(() => { el.classList.remove('show'); }, 2500);
 }
+
+// ====== Access-code gate wiring ======
+document.getElementById('unlockBtn').addEventListener('click', () => {
+  const entered = document.getElementById('accessCode').value;
+  if (!entered.trim()) { showGate(t('auth_bad_code')); return; }
+  setCode(entered);
+  document.getElementById('authGate').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+  load();
+});
+document.getElementById('accessCode').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('unlockBtn').click();
+});
 
 load();
 </script>

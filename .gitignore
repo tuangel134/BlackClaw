@@ -16,6 +16,7 @@ keystore.properties
 /.idea/
 *.mp4
 !docs/*.mp4
+tools/__pycache__/
 
 # Build fingerprint (auto-generated)
 app/src/main/assets/.pcfp

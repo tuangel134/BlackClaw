@@ -47,8 +47,8 @@ object VoskSingleShot {
         onError: (String) -> Unit = {},
         onRms: (Float) -> Unit = {},
         onPartial: (String) -> Unit = {},
-        timeoutMs: Long = 10_000L,
-        silenceMs: Long = 1400L,
+        timeoutMs: Long = 12_000L,
+        silenceMs: Long = 1800L,
     ) {
         if (running) { onError("Ya estoy escuchando."); return }
         if (!isReady()) { onError("El modelo de voz offline no está listo."); return }
@@ -89,7 +89,7 @@ object VoskSingleShot {
                     val rms = WhisperMode.rmsOf(buf, n)
                     main.post { onRms(((20 * Math.log10(rms.coerceAtLeast(1.0)) - 40) / 10).toFloat().coerceIn(0f, 1f)) }
                     if (rms < ambient * 1.5) ambient = (ambient * 0.95 + rms * 0.05).coerceIn(80.0, 4000.0)
-                    val hasVoice = rms > ambient * 2.2 + 150.0
+                    val hasVoice = rms > ambient * 1.9 + 120.0
                     val now = System.currentTimeMillis()
                     if (hasVoice) { heardSpeech = true; lastVoiceAt = now }
 

@@ -9,6 +9,8 @@ import androidx.core.content.ContextCompat
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
+import com.blackclaw.android.cards.AssistCard
+import com.blackclaw.android.cards.AssistCardCodec
 import com.blackclaw.android.tool.ToolResult
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -56,11 +58,58 @@ class WeatherTool : BaseTool() {
             } else {
                 geocode(name) ?: return ToolResult.error("No encontré '$name'.")
             }
-            val forecast = fetchForecast(lat, lon) ?: return ToolResult.error("No pude leer el tiempo.")
-            ToolResult.success("Tiempo en $label:\n$forecast")
+            val reading = fetchReading(lat, lon) ?: return ToolResult.error("No pude leer el tiempo.")
+            // The sentence is derived from the reading rather than being the only place
+            // the numbers exist. Before this, the values were formatted away inside the
+            // fetch and nothing downstream could ever see them again.
+            ToolResult.successWithCards(
+                data = "Tiempo en $label:\n${describe(reading)}",
+                cards = AssistCardCodec.encode(listOf(cardFor(reading, label, lat, lon))),
+            )
         } catch (e: Exception) {
             ToolResult.error("Weather falló: ${e.message}")
         }
+    }
+
+    /** One observation, before anything decides how to say it. */
+    private data class Reading(
+        val tempC: Double,
+        val code: Int,
+        val isDay: Boolean,
+        val feelsC: Double?,
+        val humidityPct: Int?,
+        val windKph: Double?,
+        val precipMm: Double?,
+        val rainChancePct: Int?,
+    )
+
+    private fun cardFor(r: Reading, label: String, lat: Double, lon: Double) = AssistCard.Weather(
+        place = label,
+        tempC = r.tempC,
+        conditionCode = r.code,
+        // Words come from here so there is exactly one WMO-to-Spanish table in the app;
+        // a second one in the UI would drift from this the first time either was edited.
+        // The emoji is dropped because the card already draws an icon chosen from the
+        // code, and two symbols for one fact reads as a mistake.
+        condition = conditionWords(r.code, r.isDay),
+        isDay = r.isDay,
+        feelsLikeC = r.feelsC,
+        humidityPct = r.humidityPct,
+        windKph = r.windKph,
+        rainChancePct = r.rainChancePct,
+        lat = lat,
+        lon = lon,
+    )
+
+    private fun describe(r: Reading): String {
+        val sb = StringBuilder()
+        sb.append("Ahora: ${describeCode(r.code, r.isDay)}, %.1f°C".format(r.tempC))
+        r.feelsC?.let { sb.append(" (sensación %.1f°C)".format(it)) }
+        r.humidityPct?.let { sb.append(", humedad ${it}%") }
+        r.windKph?.let { sb.append(", viento %.0f km/h".format(it)) }
+        r.precipMm?.takeIf { it > 0 }?.let { sb.append(", precipitación %.1f mm".format(it)) }
+        r.rainChancePct?.takeIf { it > 0 }?.let { sb.append("\nProb. lluvia hoy: hasta ${it}%") }
+        return sb.toString()
     }
 
     private fun lastKnownLocation(): Pair<Double, Double>? {
@@ -97,7 +146,16 @@ class WeatherTool : BaseTool() {
         }
     }
 
-    private fun fetchForecast(lat: Double, lon: Double): String? {
+    /**
+     * The condition in words, without the trailing emoji [describeCode] appends.
+     *
+     * Trimming the non-letter tail keeps a single source for the wording instead of a
+     * parallel table that would have to be edited twice.
+     */
+    private fun conditionWords(code: Int, day: Boolean): String =
+        describeCode(code, day).trimEnd { !it.isLetter() }.trim()
+
+    private fun fetchReading(lat: Double, lon: Double): Reading? {
         val url = "https://api.open-meteo.com/v1/forecast?" +
             "latitude=$lat&longitude=$lon" +
             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m" +
@@ -118,23 +176,27 @@ class WeatherTool : BaseTool() {
             val code = current.optInt("weather_code", -1)
             val isDay = current.optInt("is_day", 1) == 1
 
-            val sb = StringBuilder()
-            sb.append("Ahora: ${describeCode(code, isDay)}, %.1f°C".format(temp))
-            if (!feels.isNaN()) sb.append(" (sensación %.1f°C)".format(feels))
-            if (hum >= 0) sb.append(", humedad ${hum}%")
-            if (!wind.isNaN()) sb.append(", viento %.0f km/h".format(wind))
-            if (!precip.isNaN() && precip > 0) sb.append(", precipitación %.1f mm".format(precip))
-            if (hourly != null) {
-                val maxRain = hourly.optJSONArray("precipitation_probability")?.let { arr ->
-                    var max = 0
-                    for (i in 0 until arr.length()) {
-                        max = maxOf(max, arr.optInt(i))
-                    }
-                    max
-                } ?: 0
-                if (maxRain > 0) sb.append("\nProb. lluvia hoy: hasta ${maxRain}%")
-            }
-            sb.toString()
+            // A reading without a temperature is not a reading. Everything else is
+            // genuinely optional and stays null rather than being faked with a sentinel
+            // that the card would then have to know to hide.
+            if (temp.isNaN()) return null
+
+            val maxRain = hourly?.optJSONArray("precipitation_probability")?.let { arr ->
+                var max = 0
+                for (i in 0 until arr.length()) max = maxOf(max, arr.optInt(i))
+                max
+            } ?: 0
+
+            Reading(
+                tempC = temp,
+                code = code,
+                isDay = isDay,
+                feelsC = feels.takeUnless { it.isNaN() },
+                humidityPct = hum.takeIf { it >= 0 },
+                windKph = wind.takeUnless { it.isNaN() },
+                precipMm = precip.takeUnless { it.isNaN() },
+                rainChancePct = maxRain.takeIf { it > 0 },
+            )
         }
     }
 

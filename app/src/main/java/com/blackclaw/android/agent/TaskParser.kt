@@ -44,6 +44,7 @@ object TaskParser {
             ?: matchPlayMusicEs(esn(lower), task)
             ?: matchNavigateEs(esn(lower), task)
             ?: matchRideEs(esn(lower), task)
+            ?: matchGameAutoclickerEs(esn(lower))
             ?: matchOpenAppEs(esn(lower), task)
             ?: matchOpenApp(lower, task, installedPackages)
     }
@@ -152,6 +153,47 @@ object TaskParser {
             action = "ride", intent = null,
             toolName = "open_app_action", toolParams = params,
             description = if (dest.isNotBlank()) "Pidiendo $app a $dest" else "Abriendo $app"
+        )
+    }
+
+    private fun matchGameAutoclickerEs(lower: String): ParseResult? {
+        if (Regex("""(?:abre|muestra|pon)\s+(?:el\s+)?(?:autoclicker|auto\s*clicker)""")
+                .containsMatchIn(lower) && !lower.contains("inicia")) {
+            return ParseResult(
+                action = "game_autoclicker", intent = null,
+                toolName = "game_autoclicker", toolParams = mapOf("operation" to "open"),
+                description = "Abriendo el autoclicker flotante",
+            )
+        }
+        val control = Regex("""(?:pausa|reanuda|reinicia|deten|detiene|para)\s+(?:el\s+)?(?:autoclicker|macro)""")
+            .find(lower)?.groupValues?.firstOrNull()
+        if (control != null) {
+            val operation = when {
+                control.startsWith("pausa") -> "pause"
+                control.startsWith("reanuda") -> "resume"
+                control.startsWith("reinicia") -> "restart"
+                else -> "stop"
+            }
+            return ParseResult(
+                action = "game_macro", intent = null,
+                toolName = "game_macro", toolParams = mapOf("operation" to operation),
+                description = "Controlando el autoclicker",
+            )
+        }
+        val play = Regex("""(?:inicia|ejecuta|arranca|reproduce)\s+(?:el\s+)?(?:autoclicker|macro)\s+(.+)$""")
+            .find(lower) ?: return null
+        var name = play.groupValues[1].trim().trim('.', ',')
+        val loop = Regex("""\s+(?:en\s+)?bucle$""").containsMatchIn(name)
+        name = name.replace(Regex("""\s+(?:en\s+)?bucle$"""), "").trim()
+        if (name.isBlank()) return null
+        return ParseResult(
+            action = "game_macro", intent = null,
+            toolName = "game_macro",
+            toolParams = mapOf(
+                "operation" to "play", "name" to name, "loop" to loop,
+                "max_duration_minutes" to 10, "confirmed" to true,
+            ),
+            description = "Iniciando autoclicker '$name'${if (loop) " en bucle" else ""}",
         )
     }
 

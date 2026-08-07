@@ -13,6 +13,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.activity.compose.setContent
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,14 +53,6 @@ class AlarmRingActivity : BaseActivity() {
     private var vibrator: Vibrator? = null
     private var lockDismiss = false
 
-    @Deprecated("Back must not bypass a challenge alarm")
-    override fun onBackPressed() {
-        // If this is a challenge ("important") alarm, ignore Back so the user
-        // can't escape without solving it. Normal alarms allow back = dismiss.
-        if (lockDismiss) return
-        super.onBackPressed()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Show over lock screen + turn the screen on.
@@ -82,6 +75,12 @@ class AlarmRingActivity : BaseActivity() {
         val itemId = intent.getStringExtra(EXTRA_ITEM_ID)
         val challengeKind = itemId?.let { AssistantStore.find(it)?.challenge } ?: "none"
         lockDismiss = challengeKind.isNotBlank() && challengeKind != "none"
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                // A challenge alarm cannot be bypassed with the system Back gesture.
+                if (!lockDismiss) stopAndFinish()
+            }
+        })
 
         startRinging()
 

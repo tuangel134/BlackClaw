@@ -1,5 +1,9 @@
 [versions]
 agp = "9.1.0"
+# Kotlin language/compiler version. The Compose compiler plugin version MUST
+# track this: keeping both behind one ref means an AGP bump that changes the
+# bundled Kotlin can't silently desync the Compose plugin.
+kotlin = "2.1.21"
 coreKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.1.5"
@@ -8,23 +12,30 @@ appcompat = "1.6.1"
 material = "1.10.0"
 langchain4j = "1.12.2"
 okhttp = "4.12.0"
-retrofit = "2.11.0"
 gson = "2.13.2"
 constraintlayout = "2.1.4"
 utilcode = "1.31.1"
-ok2curl = "0.8.0"
-lifecycle = "2.6.2"
+lifecycle = "2.8.7"
 mmkv = "2.3.0"
-adapter = "4.3.0"
 glide = "5.0.5"
-transformations = "4.3.0"
 easyfloat = "2.0.4"
 zxing = "3.5.3"
-oapi = "2.5.3"
-dingtalk = "1.3.12"
 nanohttpd = "2.3.1"
 jsch = "0.2.18"
 carApp = "1.4.0"
+composeBom = "2025.05.00"
+activityCompose = "1.9.3"
+androidxMedia = "1.7.0"
+litertlm = "0.10.0"
+mlkitTextRecognition = "16.0.1"
+zstdJni = "1.5.7-11"
+xz = "1.12"
+shizuku = "13.1.5"
+bouncycastle = "1.81"
+libadb = "3.1.1"
+sunSecurityAndroid = "1.1"
+conscrypt = "2.5.3"
+vosk = "0.3.47"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -38,27 +49,34 @@ langchain4j-openai = { group = "dev.langchain4j", name = "langchain4j-open-ai", 
 langchain4j-anthropic = { group = "dev.langchain4j", name = "langchain4j-anthropic", version.ref = "langchain4j" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
-retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
-retrofit-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 utilcode = { group = "com.blankj", name = "utilcodex", version.ref = "utilcode" }
-ok2curl = { module = "com.github.mrmike:ok2curl", version.ref = "ok2curl" }
 lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 mmkv = { module = "com.tencent:mmkv-static", version.ref = "mmkv" }
-adapter = { module = "com.drakeet.multitype:multitype", version.ref = "adapter" }
 glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
-glide-transformations = { module = "jp.wasabeef:glide-transformations", version.ref = "transformations" }
 easyfloat = { module = "com.github.princekin-f:EasyFloat", version.ref = "easyfloat" }
 zxing = { module = "com.google.zxing:core", version.ref = "zxing" }
-oapi-sdk = { module = "com.larksuite.oapi:oapi-sdk", version.ref = "oapi" }
-dingtalk = { module = "com.dingtalk.open:app-stream-client", version.ref = "dingtalk" }
 nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
 jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
 car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
 car-app-projected = { module = "androidx.car.app:app-projected", version.ref = "carApp" }
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-media = { group = "androidx.media", name = "media", version.ref = "androidxMedia" }
+litertlm = { module = "com.google.ai.edge.litertlm:litertlm-android", version.ref = "litertlm" }
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitTextRecognition" }
+zstd-jni = { module = "com.github.luben:zstd-jni", version.ref = "zstdJni" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
+shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
+shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
+bcpkix = { module = "org.bouncycastle:bcpkix-jdk15to18", version.ref = "bouncycastle" }
+libadb-android = { module = "com.github.MuntashirAkon:libadb-android", version.ref = "libadb" }
+sun-security-android = { module = "com.github.MuntashirAkon:sun-security-android", version.ref = "sunSecurityAndroid" }
+conscrypt-android = { module = "org.conscrypt:conscrypt-android", version.ref = "conscrypt" }
+vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "vosk" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

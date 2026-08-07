@@ -431,6 +431,26 @@ class LlmConfigActivity : BaseActivity() {
         }
         updateTabStyles()
 
+        // This control is deliberately created next to the dynamic model cards,
+        // rather than hidden in a menu: Zen's free catalog changes often and the
+        // user needs an explicit way to re-check it without waiting for the TTL.
+        val refreshZenModelsButton = TextView(this).apply {
+            text = "↻ Actualizar modelos gratis"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(getColor(R.color.colorBrandPrimary))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), getColor(R.color.colorBrandPrimary))
+            }
+            contentDescription = "Actualizar modelos gratis de BlackClaw Free"
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) }
+        }
+
         // Render model cards for current provider
         fun renderModels() {
             modelListLayout.removeAllViews()
@@ -447,6 +467,14 @@ class LlmConfigActivity : BaseActivity() {
             val modelList = if (selectedProvider == CloudProvider.OPENCODE_ZEN)
                 com.blackclaw.android.agent.OpenCodeZenModels.models()
             else selectedProvider.models
+            if (selectedProvider == CloudProvider.OPENCODE_ZEN) {
+                // A refresh can retire the currently highlighted model. Do not keep
+                // an invisible selection that would be saved back as a dead model.
+                if (selectedModelId !in modelList.map(CloudModel::id)) {
+                    selectedModelId = modelList.firstOrNull()?.id.orEmpty()
+                }
+                modelListLayout.addView(refreshZenModelsButton)
+            }
             modelList.forEach { model ->
                 val isSelected = model.id == selectedModelId
                 val card = CardView(this).apply {
@@ -520,13 +548,39 @@ class LlmConfigActivity : BaseActivity() {
         }
         renderModels()
 
+        refreshZenModelsButton.setOnClickListener {
+            if (selectedProvider != CloudProvider.OPENCODE_ZEN) return@setOnClickListener
+            refreshZenModelsButton.isEnabled = false
+            refreshZenModelsButton.text = "↻ Actualizando modelos…"
+            com.blackclaw.android.agent.OpenCodeZenModels.refreshNow { result ->
+                runOnUiThread {
+                    refreshZenModelsButton.isEnabled = true
+                    refreshZenModelsButton.text = "↻ Actualizar modelos gratis"
+                    if (selectedProvider == CloudProvider.OPENCODE_ZEN) {
+                        renderModels()
+                        val message = if (result.updated) {
+                            "${result.ids.size} modelos gratis actualizados"
+                        } else {
+                            "No se pudo actualizar; se conserva la lista disponible"
+                        }
+                        Toast.makeText(this@LlmConfigActivity, message, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
         // Provider tab switch — load per-provider saved API key
         fun switchProvider(provider: CloudProvider, colors: ThemeManager.ChatColors) {
             selectedProvider = provider
+            val savedModelIsAvailable = when (provider) {
+                CloudProvider.OPENCODE_ZEN -> cloudSeed.modelName in com.blackclaw.android.agent.OpenCodeZenModels.modelIds()
+                else -> provider.models.any { it.id == cloudSeed.modelName }
+            }
             selectedModelId = when {
                 provider == CloudProvider.CUSTOM -> cloudSeed.modelName
-                provider == cloudSeed.provider && provider.models.any { it.id == cloudSeed.modelName } -> cloudSeed.modelName
-                else -> provider.models.firstOrNull()?.id ?: ""
+                provider == cloudSeed.provider && savedModelIsAvailable -> cloudSeed.modelName
+                provider == CloudProvider.OPENCODE_ZEN -> com.blackclaw.android.agent.OpenCodeZenModels.modelIds().firstOrNull().orEmpty()
+                else -> provider.models.firstOrNull()?.id.orEmpty()
             }
             updateTabStyles()
             renderModels()
@@ -570,7 +624,9 @@ class LlmConfigActivity : BaseActivity() {
                     val modelId = if (selectedProvider == CloudProvider.CUSTOM) etModelName.text.toString().trim()
                         else selectedModelId
                     // Quick test: just validate the key format
-                    if (apiKey.length < 10) throw RuntimeException("API key too short")
+                    if (apiKey.length < 10 && selectedProvider != CloudProvider.OPENCODE_ZEN) {
+                        throw RuntimeException("API key too short")
+                    }
                     if (modelId.isEmpty()) throw RuntimeException("No model selected")
                     runOnUiThread {
                         tvStatus.text = "✓ Ready to save"

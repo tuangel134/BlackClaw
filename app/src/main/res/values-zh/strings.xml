@@ -227,4 +227,34 @@
     <string name="custom_local_model_url_not_set">未设置</string>
     <string name="custom_local_model_url_set">已设置自定义 URL</string>
     <string name="custom_local_model_url_invalid">URL 必须以 http:// 或 https:// 开头</string>
+    <!-- 用户创建的技能 -->
+    <string name="skills_title">我的技能</string>
+    <string name="skills_subtitle">创建可复用的自动化</string>
+    <string name="skills_empty">还没有技能。点击＋创建第一个技能。</string>
+    <string name="skills_create">创建技能</string>
+    <string name="skills_edit">编辑技能</string>
+    <string name="skills_delete">删除技能</string>
+    <string name="skills_run">运行</string>
+    <string name="skill_field_name">名称</string>
+    <string name="skill_field_description">描述</string>
+    <string name="skill_field_prompt">提示词（AI 应执行的操作）</string>
+    <string name="skill_field_trigger">触发语（用户说的话）</string>
+    <string name="skill_saved">技能已保存</string>
+    <string name="skill_deleted">技能已删除</string>
+    <string name="quick_tasks_title">快捷模板</string>
+    <string name="quick_tasks_toggle">切换模板</string>
+    <string name="settings_section_permissions">权限</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_section_tools">工具</string>
+    <string name="settings_section_remote">远程控制</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_section_skills">技能</string>
+    <string name="settings_theme">主题</string>
+    <string name="settings_manage_tools">管理工具</string>
+    <string name="settings_external_automation">外部自动化</string>
+    <string name="settings_telegram_bot">Telegram 机器人</string>
+    <string name="settings_report_bug">报告问题</string>
+    <string name="settings_share_debug_report">分享调试报告</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_task_budget">任务预算</string>
 </resources>

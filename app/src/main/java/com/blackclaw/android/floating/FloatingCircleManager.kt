@@ -71,6 +71,22 @@ object FloatingCircleManager {
         x: Int? = null,
         y: Int? = null
     ) {
+        // MUST run on the UI thread, like every other method in this object.
+        // EasyFloat.show() inflates the layout and calls WindowManager.addView();
+        // inflation builds a Handler, which throws
+        // "Can't create handler inside thread that has not called Looper.prepare()"
+        // when invoked from TaskOrchestrator's agent-executor thread or a channel
+        // polling thread — both of which call show()/ensureShowing() directly.
+        // ThreadUtils.runOnUiThread runs inline when already on main, so behaviour
+        // for existing main-thread callers is unchanged.
+        ThreadUtils.runOnUiThread { showOnUiThread(application, x, y) }
+    }
+
+    private fun showOnUiThread(
+        application: Application,
+        x: Int?,
+        y: Int?
+    ) {
         XLog.i("FloatingCircle", "show() called, isShowing=$isShowing")
         if (isShowing || EasyFloat.getFloatView(FLOAT_TAG) != null) {
             isShowing = true
@@ -176,13 +192,17 @@ object FloatingCircleManager {
      * ComposeChatActivity.onCreate), re-show it so task status is visible.
      */
     fun ensureShowing() {
-        if (!isShowing && EasyFloat.getFloatView(FLOAT_TAG) == null) {
-            val app = appRef
-            if (app != null) {
-                XLog.i("FloatingCircle", "ensureShowing: re-showing dismissed float")
-                show(app)
-            } else {
-                XLog.w("FloatingCircle", "ensureShowing: no appRef, cannot re-show")
+        // Same reason as show(): EasyFloat.getFloatView + inflation are main-thread
+        // only, and this is called from background task/channel threads.
+        ThreadUtils.runOnUiThread {
+            if (!isShowing && EasyFloat.getFloatView(FLOAT_TAG) == null) {
+                val app = appRef
+                if (app != null) {
+                    XLog.i("FloatingCircle", "ensureShowing: re-showing dismissed float")
+                    showOnUiThread(app, null, null)
+                } else {
+                    XLog.w("FloatingCircle", "ensureShowing: no appRef, cannot re-show")
+                }
             }
         }
     }

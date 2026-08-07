@@ -13,12 +13,29 @@ import com.blackclaw.android.utils.XLog
 import fi.iki.elonen.NanoHTTPD
 
 /**
- * LAN HTTP configuration server
- * Provides an H5 page for configuring channel keys in a desktop browser
+ * Local HTTP configuration server. Serves a page for editing channel and LLM
+ * settings from a desktop browser on the same machine.
+ *
+ * ## Security
+ *
+ * Binds to `127.0.0.1`, but on Android loopback is **not** isolated per app — any
+ * installed app with `INTERNET` can reach it. Every API route under `/api` therefore
+ * requires [sessionToken], which is generated on the device and displayed on the
+ * phone screen. That is the one credential an on-device attacker cannot obtain over
+ * the same channel.
+ *
+ * Deliberately absent: `Access-Control-Allow-Origin`. The config page is served by
+ * this server, so its own requests are same-origin and need no CORS header. Sending
+ * `*` (as this class used to) let any plain-HTTP page in any browser on the device
+ * read the API key cross-origin.
+ *
+ * See [ConfigServerPolicy] for the decision logic and the reasoning behind each rule.
  */
 class ConfigServer(
     private val context: Context,
-    port: Int = PORT
+    port: Int = PORT,
+    /** Injected so [ConfigServerManager] can keep one token across port retries. */
+    val sessionToken: String,
 ) : NanoHTTPD("127.0.0.1", port) {
 
     companion object {
@@ -26,66 +43,121 @@ class ConfigServer(
         const val PORT = 9527
         private const val MIME_HTML = "text/html"
         private const val MIME_JSON = "application/json"
+        private const val HEADER_AUTH = "authorization"
     }
 
     private val gson = Gson()
 
-    override fun serve(session: IHTTPSession): Response {
-        // CORS preflight request
-        if (session.method == Method.OPTIONS) {
-            return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, ""))
-        }
+    /** Auth failure throttling, guarded by [authLock]. */
+    private val authLock = Any()
+    private var authFailures = 0
+    private var firstAuthFailureAtMs = 0L
 
+    override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         val method = session.method
 
+        // No CORS headers anywhere, so a preflight simply gets a bare 200 and the
+        // browser then refuses the cross-origin request — which is the intent.
+        if (method == Method.OPTIONS) {
+            return newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "")
+        }
+
         return try {
             when {
+                // The HTML shell carries no secrets and is what tells the user to
+                // enter the code shown on their phone, so it stays unauthenticated.
                 (uri == "/" || uri == "/index.html") && method == Method.GET -> serveHtml()
-                uri == "/api/channels" && method == Method.GET -> handleGetChannels()
-                uri == "/api/channels" && method == Method.POST -> handlePostChannels(session)
-                uri == "/api/llm" && method == Method.GET -> handleGetLlm()
-                uri == "/api/llm" && method == Method.POST -> handlePostLlm(session)
                 uri == "/debug.html" && method == Method.GET && BuildConfig.DEBUG -> serveDebugHtml()
-                uri == "/api/debug/tools" && method == Method.GET && BuildConfig.DEBUG -> handleGetTools()
-                uri == "/api/debug/execute" && method == Method.POST && BuildConfig.DEBUG -> handleExecuteTool(session)
-                uri == "/api/debug/screen-full" && method == Method.GET && BuildConfig.DEBUG -> handleGetScreenFull()
-                uri.startsWith("/api/debug/file") && method == Method.GET && BuildConfig.DEBUG -> handleServeFile(session)
-                else -> corsResponse(
-                    newFixedLengthResponse(
-                        Response.Status.NOT_FOUND, MIME_JSON,
-                        """{"code":-1,"message":"not found"}"""
-                    )
-                )
+
+                uri.startsWith("/api/") -> requireAuth(session) {
+                    when {
+                        uri == "/api/channels" && method == Method.GET -> handleGetChannels()
+                        uri == "/api/channels" && method == Method.POST -> handlePostChannels(session)
+                        uri == "/api/llm" && method == Method.GET -> handleGetLlm()
+                        uri == "/api/llm" && method == Method.POST -> handlePostLlm(session)
+                        uri == "/api/debug/tools" && method == Method.GET && BuildConfig.DEBUG -> handleGetTools()
+                        uri == "/api/debug/execute" && method == Method.POST && BuildConfig.DEBUG -> handleExecuteTool(session)
+                        uri == "/api/debug/screen-full" && method == Method.GET && BuildConfig.DEBUG -> handleGetScreenFull()
+                        uri.startsWith("/api/debug/file") && method == Method.GET && BuildConfig.DEBUG -> handleServeFile(session)
+                        else -> notFound()
+                    }
+                }
+
+                else -> notFound()
             }
         } catch (e: Exception) {
             XLog.e(TAG, "Server error: ${e.message}")
-            corsResponse(
-                newFixedLengthResponse(
-                    Response.Status.INTERNAL_ERROR, MIME_JSON,
-                    """{"code":-1,"message":"${e.message}"}"""
-                )
+            // Do not echo the exception message: it can carry file paths or config
+            // values, and this response is reachable by any app on the device.
+            newFixedLengthResponse(
+                Response.Status.INTERNAL_ERROR, MIME_JSON,
+                """{"code":-1,"message":"internal error"}"""
             )
         }
+    }
+
+    private fun notFound(): Response = newFixedLengthResponse(
+        Response.Status.NOT_FOUND, MIME_JSON, """{"code":-1,"message":"not found"}"""
+    )
+
+    /**
+     * Gate every API route under `/api` on the session token, with throttling so the
+     * token cannot be brute-forced by a local process hammering loopback.
+     */
+    private fun requireAuth(session: IHTTPSession, block: () -> Response): Response {
+        val now = System.currentTimeMillis()
+        synchronized(authLock) {
+            if (ConfigServerPolicy.isAuthLockedOut(authFailures, firstAuthFailureAtMs, now)) {
+                XLog.w(TAG, "Auth locked out after $authFailures failures")
+                return newFixedLengthResponse(
+                    Response.Status.TOO_MANY_REQUESTS, MIME_JSON,
+                    """{"code":-1,"message":"too many failed attempts, restart the server from the phone"}"""
+                )
+            }
+        }
+
+        val presented = ConfigServerPolicy.extractToken(session.headers?.get(HEADER_AUTH))
+        if (!ConfigServerPolicy.tokensMatch(sessionToken, presented)) {
+            synchronized(authLock) {
+                val (failures, firstAt) =
+                    ConfigServerPolicy.registerAuthFailure(authFailures, firstAuthFailureAtMs, now)
+                authFailures = failures
+                firstAuthFailureAtMs = firstAt
+            }
+            XLog.w(TAG, "Rejected unauthenticated request to ${session.uri}")
+            return newFixedLengthResponse(
+                Response.Status.UNAUTHORIZED, MIME_JSON,
+                """{"code":-1,"message":"missing or invalid access code"}"""
+            )
+        }
+
+        synchronized(authLock) {
+            authFailures = 0
+            firstAuthFailureAtMs = 0L
+        }
+        return block()
     }
 
     private fun serveHtml(): Response {
         val inputStream = context.assets.open("web/index.html")
         val html = inputStream.bufferedReader().use { it.readText() }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_HTML, html))
+        return newFixedLengthResponse(Response.Status.OK, MIME_HTML, html)
     }
 
     private fun handleGetChannels(): Response {
+        // MASKED, never cleartext. A bot token is enough to take over the channel,
+        // and POST already round-trips masked values untouched via isMaskedValue().
         val data = JsonObject().apply {
-            addProperty("discordBotToken", KVUtils.getDiscordBotToken())
-            addProperty("telegramBotToken", KVUtils.getTelegramBotToken())
+            addProperty("discordBotToken", ConfigServerPolicy.maskSecret(KVUtils.getDiscordBotToken()))
+            addProperty("telegramBotToken", ConfigServerPolicy.maskSecret(KVUtils.getTelegramBotToken()))
         }
         val result = JsonObject().apply {
             addProperty("code", 0)
             add("data", data)
             addProperty("message", "ok")
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     private fun handlePostChannels(session: IHTTPSession): Response {
@@ -97,11 +169,9 @@ class ConfigServer(
         val json = try {
             gson.fromJson(body, JsonObject::class.java)
         } catch (e: Exception) {
-            return corsResponse(
-                newFixedLengthResponse(
-                    Response.Status.BAD_REQUEST, MIME_JSON,
-                    """{"code":-1,"message":"invalid json"}"""
-                )
+            return newFixedLengthResponse(
+                Response.Status.BAD_REQUEST, MIME_JSON,
+                """{"code":-1,"message":"invalid json"}"""
             )
         }
 
@@ -111,7 +181,7 @@ class ConfigServer(
         // Discord config
         if (json.has("discordBotToken")) {
             val value = json.get("discordBotToken").asString
-            if (!isMaskedValue(value)) {
+            if (!ConfigServerPolicy.isMaskedValue(value)) {
                 KVUtils.setDiscordBotToken(value)
                 reinitDiscord = true
             }
@@ -120,7 +190,7 @@ class ConfigServer(
         // Telegram config
         if (json.has("telegramBotToken")) {
             val value = json.get("telegramBotToken").asString
-            if (!isMaskedValue(value)) {
+            if (!ConfigServerPolicy.isMaskedValue(value)) {
                 KVUtils.setTelegramBotToken(value)
                 reinitTelegram = true
             }
@@ -143,13 +213,13 @@ class ConfigServer(
             addProperty("code", 0)
             addProperty("message", "ok")
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     private fun handleGetLlm(): Response {
-        val apiKey = KVUtils.getLlmApiKey()
+        // MASKED. This endpoint used to hand out the API key in cleartext.
         val data = JsonObject().apply {
-            addProperty("llmApiKey", apiKey)
+            addProperty("llmApiKey", ConfigServerPolicy.maskSecret(KVUtils.getLlmApiKey()))
             addProperty("llmBaseUrl", KVUtils.getLlmBaseUrl())
             addProperty("llmModelName", KVUtils.getLlmModelName())
         }
@@ -158,7 +228,7 @@ class ConfigServer(
             add("data", data)
             addProperty("message", "ok")
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     private fun handlePostLlm(session: IHTTPSession): Response {
@@ -169,22 +239,36 @@ class ConfigServer(
         val json = try {
             gson.fromJson(body, JsonObject::class.java)
         } catch (e: Exception) {
-            return corsResponse(
-                newFixedLengthResponse(
-                    Response.Status.BAD_REQUEST, MIME_JSON,
-                    """{"code":-1,"message":"invalid json"}"""
-                )
+            return newFixedLengthResponse(
+                Response.Status.BAD_REQUEST, MIME_JSON,
+                """{"code":-1,"message":"invalid json"}"""
             )
         }
 
         if (json.has("llmApiKey")) {
             val value = json.get("llmApiKey").asString
-            if (!isMaskedValue(value)) {
+            if (!ConfigServerPolicy.isMaskedValue(value)) {
                 KVUtils.setLlmApiKey(value)
             }
         }
         if (json.has("llmBaseUrl")) {
-            KVUtils.setLlmBaseUrl(json.get("llmBaseUrl").asString)
+            val value = json.get("llmBaseUrl").asString
+            // Writing this unchecked was the worst hole in this class: repointing the
+            // agent at an attacker's endpoint hands them every prompt (screen text,
+            // notifications, clipboard) plus control of every tool call, turning a
+            // config write into persistent device control.
+            val rejection = ConfigServerPolicy.llmBaseUrlRejectionReason(value)
+            if (rejection != null) {
+                XLog.w(TAG, "Rejected unsafe llmBaseUrl")
+                val payload = JsonObject().apply {
+                    addProperty("code", -1)
+                    addProperty("message", rejection)
+                }
+                return newFixedLengthResponse(
+                    Response.Status.BAD_REQUEST, MIME_JSON, payload.toString()
+                )
+            }
+            KVUtils.setLlmBaseUrl(value.trim())
         }
         if (json.has("llmModelName")) {
             val value = json.get("llmModelName").asString.trim()
@@ -197,18 +281,16 @@ class ConfigServer(
             addProperty("code", 0)
             addProperty("message", "ok")
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     // ==================== Debug (DEBUG builds only) ====================
     
     private fun handleGetScreenFull(): Response {
         val service = com.blackclaw.android.service.ClawAccessibilityService.getInstance()
-            ?: return corsResponse(
-                newFixedLengthResponse(
-                    Response.Status.OK, MIME_JSON,
-                    """{"code":-1,"message":"Accessibility service is not running"}"""
-                )
+            ?: return newFixedLengthResponse(
+                Response.Status.OK, MIME_JSON,
+                """{"code":-1,"message":"Accessibility service is not running"}"""
             )
         val tree = service.screenTreeFull
         val data = JsonObject().apply {
@@ -219,13 +301,13 @@ class ConfigServer(
             addProperty("code", 0)
             add("data", data)
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     private fun serveDebugHtml(): Response {
         val inputStream = context.assets.open("web/debug.html")
         val html = inputStream.bufferedReader().use { it.readText() }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_HTML, html))
+        return newFixedLengthResponse(Response.Status.OK, MIME_HTML, html)
     }
 
     private fun handleGetTools(): Response {
@@ -253,7 +335,7 @@ class ConfigServer(
             addProperty("code", 0)
             add("data", arr)
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     private fun handleExecuteTool(session: IHTTPSession): Response {
@@ -264,19 +346,15 @@ class ConfigServer(
         val json = try {
             gson.fromJson(body, JsonObject::class.java)
         } catch (e: Exception) {
-            return corsResponse(
-                newFixedLengthResponse(
-                    Response.Status.BAD_REQUEST, MIME_JSON,
-                    """{"code":-1,"message":"invalid json"}"""
-                )
+            return newFixedLengthResponse(
+                Response.Status.BAD_REQUEST, MIME_JSON,
+                """{"code":-1,"message":"invalid json"}"""
             )
         }
 
-        val toolName = json.get("tool")?.asString ?: return corsResponse(
-            newFixedLengthResponse(
-                Response.Status.BAD_REQUEST, MIME_JSON,
-                """{"code":-1,"message":"missing tool name"}"""
-            )
+        val toolName = json.get("tool")?.asString ?: return newFixedLengthResponse(
+            Response.Status.BAD_REQUEST, MIME_JSON,
+            """{"code":-1,"message":"missing tool name"}"""
         )
 
         val params = mutableMapOf<String, Any>()
@@ -312,25 +390,22 @@ class ConfigServer(
             addProperty("code", 0)
             add("data", data)
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString()))
+        return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
     }
 
     private fun handleServeFile(session: IHTTPSession): Response {
-        val path = session.parms["path"] ?: return corsResponse(
-            newFixedLengthResponse(
-                Response.Status.BAD_REQUEST, MIME_JSON,
-                """{"code":-1,"message":"missing path param"}"""
-            )
+        val path = session.parms["path"] ?: return newFixedLengthResponse(
+            Response.Status.BAD_REQUEST, MIME_JSON,
+            """{"code":-1,"message":"missing path param"}"""
         )
-        // Security check: only allow access to files inside the cache directory
-        val cacheDir = context.cacheDir.absolutePath
+        // Confine to the cache dir using CANONICAL paths. The previous check compared
+        // absolutePath prefixes, which does not resolve "..", so a path like
+        // <cache>/../files/mmkv/mmkv.default passed and served the plaintext key store.
         val file = java.io.File(path)
-        if (!file.exists() || !file.absolutePath.startsWith(cacheDir)) {
-            return corsResponse(
-                newFixedLengthResponse(
-                    Response.Status.NOT_FOUND, MIME_JSON,
-                    """{"code":-1,"message":"file not found or access denied"}"""
-                )
+        if (!file.isFile || !ConfigServerPolicy.isPathContained(context.cacheDir, file)) {
+            return newFixedLengthResponse(
+                Response.Status.NOT_FOUND, MIME_JSON,
+                """{"code":-1,"message":"file not found or access denied"}"""
             )
         }
         val mime = when (file.extension.lowercase()) {
@@ -339,29 +414,6 @@ class ConfigServer(
             "webp" -> "image/webp"
             else -> "application/octet-stream"
         }
-        return corsResponse(newFixedLengthResponse(Response.Status.OK, mime, file.inputStream(), file.length()))
-    }
-
-    /**
-     * Mask: show only last 4 characters, replace the rest with *
-     */
-    private fun maskSecret(secret: String): String {
-        if (secret.isEmpty()) return ""
-        if (secret.length <= 4) return secret
-        return "*".repeat(secret.length - 4) + secret.takeLast(4)
-    }
-
-    /**
-     * Check whether a value has been masked (contains *)
-     */
-    private fun isMaskedValue(value: String): Boolean {
-        return value.contains("*")
-    }
-
-    private fun corsResponse(response: Response): Response {
-        response.addHeader("Access-Control-Allow-Origin", "*")
-        response.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        response.addHeader("Access-Control-Allow-Headers", "Content-Type")
-        return response
+        return newFixedLengthResponse(Response.Status.OK, mime, file.inputStream(), file.length())
     }
 }

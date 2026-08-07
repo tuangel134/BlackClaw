@@ -1,8 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network security policy.
+
+    WHY THIS MATTERS
+    ================
+    This file used to carry `cleartextTrafficPermitted="true"` on base-config, i.e.
+    globally. That is a platform-level opt-out of TLS enforcement for every outbound
+    HTTP connection the app makes. The failure mode is not theoretical: BlackClaw
+    ships `Authorization: Bearer <api-key>` headers to the LLM endpoint alongside the
+    entire prompt stream (screen OCR, notification text, clipboard contents, SMS),
+    and it fires user-configured webhooks. On hostile Wi-Fi, anyone on-path could
+    read all of it and rewrite the responses — and rewriting an LLM response means
+    choosing which tools the agent invokes on the device. So a downgrade here is not
+    a confidentiality bug only, it is remote control.
+
+    Denying cleartext by default means the platform rejects the connection before a
+    single byte leaves, independently of whatever the app-layer validators do or
+    forget to do. That is the point: it is the backstop for the paths nobody
+    validated.
+
+    LOOPBACK EXEMPTION
+    ==================
+    127.0.0.1 / ::1 / localhost stay permitted because two things genuinely live
+    there and neither serves TLS:
+      - the embedded config server (server/ConfigServer.kt binds 127.0.0.1)
+      - on-device model runtimes (llama.cpp / ollama style servers on the phone)
+    Traffic that never leaves the device cannot be intercepted on the network, so
+    there is nothing for TLS to protect against in that hop.
+
+    KNOWN REGRESSION — http:// MODEL SERVERS ON THE LAN
+    ===================================================
+    server/ConfigServerPolicy.isSafeLlmBaseUrl() deliberately accepts http:// to
+    RFC1918 / link-local addresses, because pointing BlackClaw at ollama running on
+    a desktop (e.g. http://192.168.1.50:11434) is a documented, first-class use
+    case. Android's network security config CANNOT express an address range: a
+    <domain> entry is a literal hostname or a literal IP, so 192.168.0.0/16 would
+    mean enumerating 65k entries. There is no wildcard.
+
+    We accept the break rather than keep the global hole. Consequence, stated
+    plainly: with this config a LAN http:// base URL is accepted by the app-layer
+    validator and then refused by the platform with
+      javax.net.ssl / java.net.UnknownServiceException:
+      "CLEARTEXT communication to 192.168.1.50 not permitted by network security policy"
+    Users in that situation must either put TLS in front of their model server or
+    reach it over loopback (adb reverse / a local tunnel). The app-layer validator
+    was left as-is on purpose — it is not ours to weaken, and it still guards the
+    https case — but the two layers now disagree about LAN http, and the platform
+    layer is the one that wins.
+-->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- Default for every destination: TLS required, system CAs only. -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!-- On-device only. Never leaves the handset, so there is no on-path attacker
+         for TLS to defend against. Scoped to literal loopback addresses — no
+         includeSubdomains, no LAN ranges. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
 </network-security-config>

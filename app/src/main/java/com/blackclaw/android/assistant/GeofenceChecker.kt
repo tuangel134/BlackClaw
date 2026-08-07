@@ -29,18 +29,25 @@ object GeofenceChecker {
 
     /** True if there's at least one active location reminder. */
     fun hasActiveGeofences(): Boolean =
-        AssistantStore.byType(AssistantItemType.REMINDER).any { it.radiusM > 0 && !it.done }
+        AssistantStore.byType(AssistantItemType.REMINDER).any { it.radiusM > 0 && !it.done } ||
+            com.blackclaw.android.automation.AutomationRuleStore.list().any {
+                it.enabled && it.trigger != com.blackclaw.android.automation.AutomationRuleStore.Trigger.NOTIFICATION
+            }
 
     /** Check all geofence reminders against current location. Call from the
      *  keep-alive tick. Non-blocking-safe (uses last known location only). */
     fun check(context: Context) {
         val geofences = AssistantStore.byType(AssistantItemType.REMINDER)
             .filter { it.radiusM > 0 && !it.done }
-        if (geofences.isEmpty()) return
+        val hasAutomationLocations = com.blackclaw.android.automation.AutomationRuleStore.list().any {
+            it.enabled && it.trigger != com.blackclaw.android.automation.AutomationRuleStore.Trigger.NOTIFICATION
+        }
+        if (geofences.isEmpty() && !hasAutomationLocations) return
 
         val loc = lastKnownLocation(context) ?: run {
             XLog.d(TAG, "No location available for geofence check"); return
         }
+        runCatching { com.blackclaw.android.automation.AutomationEngine.onLocation(context, loc) }
 
         for (g in geofences) {
             val dist = FloatArray(1)

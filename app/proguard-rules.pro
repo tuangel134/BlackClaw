@@ -26,15 +26,59 @@
 }
 
 
-# Agent 相关（反射/SPI）
+# ============================================================
+# BlackClaw app classes
+# ------------------------------------------------------------
+# These used to be three blanket `-keep class com.blackclaw.android.{agent,
+# tool,channel}.** { *; }` rules, i.e. the entire core of the app (tool/ alone
+# is ~142 files) excluded from shrinking AND obfuscation, which largely
+# cancelled out isMinifyEnabled=true. Audit of the stated "reflection/SPI"
+# justification:
+#
+#   * Tools are NOT constructed reflectively. ToolRegistry.registerAllTools()
+#     calls register(SomeTool()) explicitly for every single tool, so no tool
+#     class needs a keep to be instantiable.
+#   * Tool identity does not depend on class names: every getName() returns a
+#     literal string ("assistant_reminder", "run_routine", ...), and
+#     LangChain4jToolBridge builds ToolSpecifications from getName() /
+#     getDescription() / ToolParameter getters — never from reflection.
+#   * Channel handlers are constructed explicitly in ChannelManager.init()
+#     (DiscordChannelHandler(...), TelegramChannelHandler(...), ...). The
+#     DingTalk/Lark SDK reflective callbacks that originally justified the
+#     channel keep no longer exist — those SDKs have been removed.
+#   * The only Class.forName()/Proxy use in the app targets android.media.*
+#     framework classes (RecognizeSongTool), not app classes.
+#   * No META-INF/services descriptors exist in this project, so nothing is
+#     ServiceLoader/SPI-loaded.
+#
+# What genuinely still needs keeping is Gson field-name mapping. This project
+# uses no @SerializedName anywhere, so any class Gson reflects over must keep
+# its field names verbatim or the emitted/consumed JSON keys get renamed.
+
+# ToolResult is Gson-serialized and handed to the LLM, and
+# AgentContextCompressor.summarizeToolResult() reads the keys "isSuccess",
+# "data" and "error" by literal name. Renaming these fields silently breaks
+# tool-result compression in release only.
+-keep class com.blackclaw.android.tool.ToolResult { *; }
+
+# RepeatActionsTool.ActionStep is Gson-DESERIALIZED from LLM-supplied JSON
+# ({"tool":...,"params":{...}}), so its field names are part of the wire format.
+# The no-arg constructor is kept so Gson doesn't have to fall back to Unsafe.
+-keep class com.blackclaw.android.tool.impl.RepeatActionsTool$ActionStep {
+    <init>();
+    <fields>;
+}
+
+# OkHttp bridge for LangChain4j's HttpClientBuilder. It is constructed
+# explicitly in LlmClientFactory (not SPI-loaded), but it implements
+# third-party interfaces and is only three classes, so keeping it verbatim
+# costs almost nothing and removes a whole class of release-only risk.
 -keep class com.blackclaw.android.agent.langchain.http.** { *; }
--keep class com.blackclaw.android.agent.** { *; }
 
-# Tool 注册（反射）
--keep class com.blackclaw.android.tool.** { *; }
-
-# Channel（钉钉/飞书回调，保留泛型签名）
--keep class com.blackclaw.android.channel.** { *; }
+# Declared in AndroidManifest.xml. AGP normally generates keep rules for
+# manifest components automatically; stated explicitly so the rule survives
+# any change in that behaviour.
+-keep class com.blackclaw.android.tool.impl.ClipboardReaderActivity { <init>(...); }
 
 # ============================================================
 # Gson
@@ -62,18 +106,12 @@
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
 
 # ============================================================
-# Retrofit
+# Misc
+# (Retrofit rules removed with the Retrofit dependency — it had zero imports.)
 # ============================================================
--dontwarn retrofit2.**
--keep class retrofit2.** { *; }
 -keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
--keepclassmembers,allowshrinking,allowobfuscation interface * {
-    @retrofit2.http.* <methods>;
-}
 -dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
 -dontwarn kotlin.Unit
--dontwarn retrofit2.KotlinExtensions
--dontwarn retrofit2.KotlinExtensions$*
 
 # ============================================================
 # LangChain4j
@@ -147,50 +185,14 @@
 
 
 # ============================================================
-# 飞书 Lark OAPI SDK
+# The Lark (com.larksuite.oapi:oapi-sdk) and DingTalk
+# (com.dingtalk.open:app-stream-client) server-side SDKs had zero imports in
+# the app and were removed from the build, together with everything they
+# dragged in transitively: Netty (+tcnative), Apache HttpClient/Commons,
+# Log4j/Log4j2, Jetty ALPN/NPN and javax.naming. Their -keep/-dontwarn rules
+# went with them — verified absent from releaseRuntimeClasspath.
+# (-keepattributes Signature is already declared in the 通用配置 block above.)
 # ============================================================
--dontwarn com.lark.oapi.**
--keep class com.lark.oapi.** { *; }
-
-# ============================================================
-# 钉钉 DingTalk Stream SDK
-# ============================================================
--dontwarn com.dingtalk.**
--keep class com.dingtalk.** { *; }
--keep interface com.dingtalk.** { *; }
-# 保留 callback 泛型签名（SDK 通过反射检查泛型参数）
--keep,allowobfuscation,allowshrinking class * implements com.dingtalk.open.app.api.callback.OpenDingTalkCallbackListener
--keepattributes Signature
-
-# ============================================================
-# 飞书/钉钉 SDK 依赖的服务端类（Android 不存在，忽略即可）
-# ============================================================
-# javax.naming (LDAP/JNDI - Apache HttpClient HostnameVerifier)
--dontwarn javax.naming.**
-
-# Apache HttpClient
--dontwarn org.apache.http.**
--dontwarn org.apache.commons.**
-
-# Log4j / Log4j2
--dontwarn org.apache.log4j.**
--dontwarn org.apache.logging.log4j.**
-
-# Netty (shade 包 + 原始包)
--dontwarn shade.io.netty.**
--dontwarn io.netty.**
--keep class shade.io.netty.** { *; }
--keep class io.netty.** { *; }
-
-# Netty tcnative (OpenSSL 绑定)
--dontwarn shade.io.netty.internal.tcnative.**
--dontwarn io.netty.internal.tcnative.**
-
-# Jetty ALPN / NPN
--dontwarn org.eclipse.jetty.alpn.**
--dontwarn org.eclipse.jetty.npn.**
-
-# JetBrains Annotations
 -dontwarn org.jetbrains.annotations.**
 
 # ============================================================
@@ -198,12 +200,6 @@
 # ============================================================
 -dontwarn com.google.zxing.**
 -keep class com.google.zxing.** { *; }
-
-# ============================================================
-# MultiType (drakeet)
-# ============================================================
--dontwarn com.drakeet.multitype.**
--keep class com.drakeet.multitype.** { *; }
 
 # ============================================================
 # BlankJ UtilCode
@@ -217,12 +213,6 @@
 # ============================================================
 -dontwarn com.lzf.easyfloat.**
 -keep class com.lzf.easyfloat.** { *; }
-
-# ============================================================
-# ok2curl
-# ============================================================
--dontwarn com.moczul.ok2curl.**
--keep class com.moczul.ok2curl.** { *; }
 
 # ============================================================
 # Kotlin / Coroutines
@@ -254,8 +244,5 @@
 -keep class org.vosk.** { *; }
 -keepclassmembers class org.vosk.** { *; }
 
-# ============================================================
-# glide-transformations (wasabeef)
-# ============================================================
--dontwarn jp.wasabeef.glide.**
--keep class jp.wasabeef.glide.** { *; }
+# (glide-transformations / jp.wasabeef rules removed with the dependency —
+#  it had zero imports.)

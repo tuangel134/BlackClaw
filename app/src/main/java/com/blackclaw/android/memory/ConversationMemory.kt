@@ -1,6 +1,5 @@
 package com.blackclaw.android.memory
 
-import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -40,30 +39,50 @@ object ConversationMemory {
                 id = o.optString("id", ""),
                 summary = o.optString("summary", ""),
                 timestamp = o.optLong("timestamp", 0L),
-                topics = (0 until o.optJSONArray("topics")?.length()!!).map {
-                    o.optJSONArray("topics")!!.getString(it)
-                },
+                topics = readTopics(o),
             )
+
+            /**
+             * Topics are optional.
+             *
+             * The previous version was `(0 until o.optJSONArray("topics")?.length()!!)`,
+             * which throws NPE the moment the key is absent — and because [all] wraps
+             * each entry in `runCatching`, the failure was invisible: the entry was
+             * dropped permanently and silently. Any record written by an older build,
+             * a migration, or a hand edit would vanish. It also called `optJSONArray`
+             * once per element.
+             */
+            private fun readTopics(o: JSONObject): List<String> {
+                val arr = o.optJSONArray("topics") ?: return emptyList()
+                return (0 until arr.length()).mapNotNull { i ->
+                    arr.optString(i, "").takeIf { it.isNotBlank() }
+                }
+            }
         }
     }
 
-    @Synchronized
-    fun all(): List<Entry> {
-        val raw = KVUtils.getString(KEY, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).mapNotNull { i ->
-                runCatching { Entry.fromJson(arr.getJSONObject(i)) }.getOrNull()
-            }
-        }.getOrDefault(emptyList())
+    /**
+     * Storage mechanics live in [JsonListStore]: locking around the whole
+     * read-modify-write, timestamp-aware capping, no fsync per write, and a log line
+     * when a record fails to parse instead of it disappearing silently.
+     */
+    private val store = object : JsonListStore<Entry>(KEY, MAX_ENTRIES) {
+        override val logTag = TAG
+        override fun toJson(item: Entry): JSONObject = item.toJson()
+        override fun fromJson(json: JSONObject): Entry? =
+            Entry.fromJson(json).takeIf { it.summary.isNotBlank() }
+        override fun timestampOf(item: Entry): Long = item.timestamp
     }
 
+    fun all(): List<Entry> = store.all()
+
     /**
-     * Record a conversation summary. Called when user starts a new chat or
-     * the conversation is saved/closed.
+     * Record a conversation summary. Called when the user starts a new chat or the
+     * conversation is saved/closed.
+     *
+     * Keyed on [conversationId], so re-recording the same conversation replaces its
+     * entry rather than accumulating near-duplicates.
      */
-    @Synchronized
     fun record(conversationId: String, summary: String, topics: List<String> = emptyList()) {
         if (summary.isBlank()) return
         val entry = Entry(
@@ -72,18 +91,12 @@ object ConversationMemory {
             timestamp = System.currentTimeMillis(),
             topics = topics.take(5),
         )
-        val list = all().toMutableList()
-        // Replace if same conversation, otherwise append
-        val idx = list.indexOfFirst { it.id == conversationId }
-        if (idx >= 0) list[idx] = entry else list.add(entry)
-        // Cap
-        val capped = if (list.size > MAX_ENTRIES) list.takeLast(MAX_ENTRIES) else list
-        val arr = JSONArray()
-        capped.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY, arr.toString())
-        KVUtils.sync()
+        store.upsert(entry) { it.id == conversationId }
         XLog.d(TAG, "Recorded conversation memory: ${entry.id} (${entry.summary.take(50)}...)")
     }
+
+    /** Drop every stored summary. Returns how many were removed. */
+    fun forgetAll(): Int = store.clear()
 
     /**
      * Build a prompt snippet with recent conversation context.
@@ -108,24 +121,65 @@ object ConversationMemory {
      * For more sophisticated summaries, the LLM can be used.
      */
     fun extractSummary(messages: List<Pair<String, String>>): String {
-        // messages = list of (role, content)
         if (messages.isEmpty()) return ""
-        // Extract user messages and last assistant response
-        val userMsgs = messages.filter { it.first == "USER" }.map { it.second }
-        val lastAssistant = messages.lastOrNull { it.first == "ASSISTANT" }?.second ?: ""
-
+        val userMsgs = messages.filter { it.first == "USER" }
+            .map { it.second.trim().replace(Regex("\\s+"), " ") }
+            .filter { it.isNotBlank() }
         if (userMsgs.isEmpty()) return ""
+        val lastAssistant = messages.lastOrNull { it.first == "ASSISTANT" }
+            ?.second?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
 
-        val sb = StringBuilder()
-        // First user message = main topic
-        sb.append("Usuario pidió: ${userMsgs.first().take(100)}")
-        if (userMsgs.size > 1) {
-            sb.append(" (+${userMsgs.size - 1} más)")
+        // WHY THIS IS NOT JUST first + last: these entries are the ONLY memory of a
+        // conversation once it ends, and the previous version kept the first request and
+        // the last reply and discarded everything in between — for a twenty-turn voice
+        // session that is almost the whole conversation. Distinct requests are what a
+        // later session needs in order to resolve a back-reference, so we keep as many
+        // as fit and say plainly how many were dropped instead of silently losing them.
+        val distinct = dedupeRequests(userMsgs)
+        val budget = MAX_SUMMARY_LENGTH - lastAssistantCost(lastAssistant)
+        val kept = ArrayList<String>()
+        var used = "Usuario pidió: ".length
+        for (request in distinct) {
+            val piece = request.take(PER_REQUEST_CHARS)
+            val cost = piece.length + if (kept.isEmpty()) 0 else SEPARATOR.length
+            if (used + cost > budget) break
+            kept.add(piece)
+            used += cost
         }
-        if (lastAssistant.isNotBlank()) {
-            sb.append(". Resultado: ${lastAssistant.take(100)}")
+        if (kept.isEmpty()) kept.add(distinct.first().take(PER_REQUEST_CHARS))
+
+        return buildString {
+            append("Usuario pidió: ").append(kept.joinToString(SEPARATOR))
+            val dropped = distinct.size - kept.size
+            if (dropped > 0) append(" (+$dropped más)")
+            if (lastAssistant.isNotBlank()) {
+                append(". Resultado: ").append(lastAssistant.take(LAST_REPLY_CHARS))
+            }
+        }.take(MAX_SUMMARY_LENGTH)
+    }
+
+    private const val PER_REQUEST_CHARS = 70
+    private const val LAST_REPLY_CHARS = 90
+    private const val SEPARATOR = " · "
+
+    private fun lastAssistantCost(lastAssistant: String): Int =
+        if (lastAssistant.isBlank()) 0 else ". Resultado: ".length + LAST_REPLY_CHARS
+
+    /**
+     * Collapse near-duplicate requests, keeping first occurrence.
+     *
+     * Voice sessions repeat themselves constantly — the recogniser mishears, the user
+     * rephrases. Five variants of the same request would otherwise crowd out the four
+     * genuinely different things that were asked.
+     */
+    fun dedupeRequests(requests: List<String>): List<String> {
+        val seen = HashSet<String>()
+        val out = ArrayList<String>(requests.size)
+        for (r in requests) {
+            val fingerprint = r.lowercase().filter { it.isLetterOrDigit() || it == ' ' }.take(40)
+            if (seen.add(fingerprint)) out.add(r)
         }
-        return sb.toString().take(MAX_SUMMARY_LENGTH)
+        return out
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.blackclaw.android.proactive
 
+import com.blackclaw.android.memory.JsonListStore
 import com.blackclaw.android.utils.KVUtils
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,18 +24,22 @@ object ProactiveMemory {
     private const val KEY_CLASSIFY_TIMES = "proactive_classify_times" // JSON array of epoch ms
     private const val KEY_CORRECTIONS = "proactive_corrections"  // JSON obj: category -> {rejects, quickRejects, lastT}
     private const val KEY_PKG_STATS = "proactive_pkg_stats"      // JSON obj: pkg -> {total, ignores}
-    private const val KEY_PKG_PROPOSED = "proactive_pkg_proposed" // JSON array of pkgs already proposed to mute
     private const val MAX_PREFS = 25
     private const val MAX_RECENT = 8
-
-    /** Mute proposal triggers once a package has this many notifications, mostly ignored. */
-    const val MUTE_MIN_TOTAL = 5
-    const val MUTE_IGNORE_RATIO = 0.85
+    private const val ONE_HOUR_MS = 3_600_000L
 
     /** A deletion within this window of creation counts as a "quick reject" (stronger signal). */
     const val QUICK_REJECT_MS = 10 * 60 * 1000L
 
     // ── Learned preferences ──
+    //
+    // Kept hand-rolled, and deliberately. This is an array of bare strings, while
+    // JsonListStore stores each item as a JSON object. Moving it would rewrite
+    // ["no me avises de promociones"] as [{"v":"no me avises de promociones"}], and every
+    // existing user's array would then fail to parse — throwing away learnings the
+    // assistant accumulated over weeks to save a dozen lines here. The same reasoning
+    // covers KEY_CORRECTIONS and KEY_PKG_STATS below, which are maps rather than lists
+    // and have no list-shaped equivalent at all.
     @Synchronized
     fun learnedPreferences(): List<String> {
         val raw = KVUtils.getString(KEY_PREFS, "")
@@ -66,33 +71,43 @@ object ProactiveMemory {
     // ── Recent events (for relating messages) ──
     data class RecentEvent(val t: Long, val pkg: String, val title: String, val text: String, val action: String)
 
-    @Synchronized
-    fun recentEvents(): List<RecentEvent> {
-        val raw = KVUtils.getString(KEY_RECENT, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val a = JSONArray(raw)
-            (0 until a.length()).map {
-                val o = a.getJSONObject(it)
-                RecentEvent(o.optLong("t"), o.optString("pkg"), o.optString("title"),
-                    o.optString("text"), o.optString("action"))
-            }
-        }.getOrDefault(emptyList())
+    /**
+     * The one list here that is a list of records, so the one that moves to
+     * [JsonListStore]. Notably this removes an fsync from the notification path: events
+     * are recorded from a `NotificationListenerService` callback, which is exactly where
+     * a synchronous flush is most expensive and least useful.
+     *
+     * Stored oldest first — [JsonListStore]'s convention — while [recentEvents] keeps
+     * returning newest first, since that is the order the classifier prompt reads them in.
+     */
+    private val recentStore = object : JsonListStore<RecentEvent>(KEY_RECENT, MAX_RECENT) {
+        override val logTag = "ProactiveMemory"
+        override fun toJson(item: RecentEvent): JSONObject = JSONObject().apply {
+            put("t", item.t)
+            put("pkg", item.pkg)
+            put("title", item.title)
+            put("text", item.text)
+            put("action", item.action)
+        }
+
+        override fun fromJson(json: JSONObject): RecentEvent? = RecentEvent(
+            t = json.optLong("t"),
+            pkg = json.optString("pkg"),
+            title = json.optString("title"),
+            text = json.optString("text"),
+            action = json.optString("action"),
+        )
+
+        override fun timestampOf(item: RecentEvent): Long = item.t
     }
 
-    @Synchronized
+    /** Recently processed notifications, **newest first**. */
+    fun recentEvents(): List<RecentEvent> = recentStore.all().asReversed()
+
     fun recordEvent(pkg: String, title: String, text: String, action: String) {
-        val list = recentEvents().toMutableList()
-        list.add(0, RecentEvent(System.currentTimeMillis(), pkg, title.take(80), text.take(160), action))
-        while (list.size > MAX_RECENT) list.removeAt(list.size - 1)
-        val arr = JSONArray()
-        list.forEach {
-            arr.put(JSONObject().apply {
-                put("t", it.t); put("pkg", it.pkg); put("title", it.title)
-                put("text", it.text); put("action", it.action)
-            })
-        }
-        KVUtils.putString(KEY_RECENT, arr.toString()); KVUtils.sync()
+        recentStore.append(
+            RecentEvent(System.currentTimeMillis(), pkg, title.take(80), text.take(160), action)
+        )
         // Per-package tally (persistent) for preference learning.
         if (pkg.isNotBlank()) recordPkgStat(pkg, action == "ignore")
     }
@@ -107,59 +122,64 @@ object ProactiveMemory {
             }
     }
 
-    // ── Rolling action rate limit ──
-    @Synchronized
-    fun canAct(maxPerHour: Int): Boolean {
-        val now = System.currentTimeMillis()
-        val cutoff = now - 3_600_000L
-        val times = actionTimes().filter { it >= cutoff }
-        return times.size < maxPerHour
+    /**
+     * A rolling count of when something happened, used for the per-hour limits.
+     *
+     * ## Why not [JsonListStore]
+     *
+     * This looks like the same shape and is not. [JsonListStore] stores records as JSON
+     * objects and keeps the newest N; this stores bare epoch numbers and keeps whatever
+     * falls inside a time window, with no fixed count. Bending it to fit would mean
+     * rewriting `[1770000000000, …]` as `[{"t":…}, …]`, and the old array would then read
+     * back as unparseable — silently resetting the rate limiter for every existing user.
+     *
+     * So: a second, smaller abstraction rather than one abstraction wearing a disguise.
+     * The duplication that mattered — two byte-identical copies of read-filter-append,
+     * each ending in an fsync — is gone either way.
+     */
+    private class RollingWindow(private val key: String, private val windowMs: Long) {
+        private val lock = Any()
+
+        /** Timestamps inside the window. */
+        fun current(now: Long = System.currentTimeMillis()): List<Long> = synchronized(lock) {
+            read().filter { it >= now - windowMs }
+        }
+
+        /** Records [now] and prunes anything that has aged out. */
+        fun record(now: Long = System.currentTimeMillis()) = synchronized(lock) {
+            val kept = read().filter { it >= now - windowMs } + now
+            val array = JSONArray()
+            kept.forEach { array.put(it) }
+            KVUtils.putString(key, array.toString())
+            // No sync(). Both callers run on notification delivery; an fsync there costs
+            // more than the worst case of losing a rate-limit tick on a hard power cut.
+        }
+
+        private fun read(): List<Long> {
+            val raw = KVUtils.getString(key, "")
+            if (raw.isBlank()) return emptyList()
+            return runCatching {
+                val a = JSONArray(raw)
+                (0 until a.length()).map { a.optLong(it) }.filter { it > 0L }
+            }.getOrDefault(emptyList())
+        }
     }
 
-    @Synchronized
-    fun recordAction() {
-        val now = System.currentTimeMillis()
-        val cutoff = now - 3_600_000L
-        val times = actionTimes().filter { it >= cutoff }.toMutableList()
-        times.add(now)
-        val arr = JSONArray(); times.forEach { arr.put(it) }
-        KVUtils.putString(KEY_ACTION_TIMES, arr.toString()); KVUtils.sync()
-    }
+    private val actionWindow = RollingWindow(KEY_ACTION_TIMES, ONE_HOUR_MS)
 
-    private fun actionTimes(): List<Long> {
-        val raw = KVUtils.getString(KEY_ACTION_TIMES, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val a = JSONArray(raw); (0 until a.length()).map { a.getLong(it) }
-        }.getOrDefault(emptyList())
-    }
+    /**
+     * Separate window from actions: this bounds how often the LLM is woken even when it
+     * decides to do nothing, which is what protects against a notification storm.
+     */
+    private val classifyWindow = RollingWindow(KEY_CLASSIFY_TIMES, ONE_HOUR_MS)
 
-    // ── Rolling classification (LLM call) rate limit ──
-    // Separate from the action cap: this bounds how often we wake the LLM, even
-    // when it decides to do nothing. Protects against notification storms.
-    @Synchronized
-    fun canClassify(maxPerHour: Int): Boolean {
-        val cutoff = System.currentTimeMillis() - 3_600_000L
-        return classifyTimes().count { it >= cutoff } < maxPerHour
-    }
+    fun canAct(maxPerHour: Int): Boolean = actionWindow.current().size < maxPerHour
 
-    @Synchronized
-    fun recordClassification() {
-        val now = System.currentTimeMillis()
-        val cutoff = now - 3_600_000L
-        val times = classifyTimes().filter { it >= cutoff }.toMutableList()
-        times.add(now)
-        val arr = JSONArray(); times.forEach { arr.put(it) }
-        KVUtils.putString(KEY_CLASSIFY_TIMES, arr.toString()); KVUtils.sync()
-    }
+    fun recordAction() = actionWindow.record()
 
-    private fun classifyTimes(): List<Long> {
-        val raw = KVUtils.getString(KEY_CLASSIFY_TIMES, "")
-        if (raw.isBlank()) return emptyList()
-        return runCatching {
-            val a = JSONArray(raw); (0 until a.length()).map { a.getLong(it) }
-        }.getOrDefault(emptyList())
-    }
+    fun canClassify(maxPerHour: Int): Boolean = classifyWindow.current().size < maxPerHour
+
+    fun recordClassification() = classifyWindow.record()
 
     // ── Correction learning ──
     // When the user deletes something the assistant created, that's negative
@@ -258,10 +278,9 @@ object ProactiveMemory {
     }
 
     // ── Per-package preference learning ──
-    // We tally, per notifying app, how many of its notifications the assistant
-    // ended up ignoring. When an app is almost always ignored, that's a strong
-    // hint the user doesn't care about it — so the assistant can PROPOSE (once)
-    // to stop watching it, instead of waking the LLM on every one of its pings.
+    // We tally ignored notifications for adaptive local filtering and diagnostics.
+    // This signal must never disable monitoring: a later notification from the
+    // same app can still be urgent even if the previous hundred were irrelevant.
 
     data class PkgStat(val total: Int, val ignores: Int) {
         val ignoreRatio: Double get() = if (total == 0) 0.0 else ignores.toDouble() / total
@@ -281,47 +300,6 @@ object ProactiveMemory {
     fun pkgStat(pkg: String): PkgStat {
         val o = pkgStatsObj().optJSONObject(pkg) ?: return PkgStat(0, 0)
         return PkgStat(o.optInt("total"), o.optInt("ignores"))
-    }
-
-    /**
-     * Pure: should we propose muting this app? True when it has enough history
-     * and is ignored most of the time. Extracted for unit testing.
-     */
-    fun shouldProposeMute(
-        stat: PkgStat,
-        minTotal: Int = MUTE_MIN_TOTAL,
-        ignoreRatio: Double = MUTE_IGNORE_RATIO,
-    ): Boolean = stat.total >= minTotal && stat.ignoreRatio >= ignoreRatio
-
-    /**
-     * The first watched package that's a good mute candidate and hasn't been
-     * proposed yet. Returns null if none. Side-effect-free except for reading.
-     */
-    @Synchronized
-    fun nextMuteCandidate(): String? {
-        val obj = pkgStatsObj()
-        val proposed = proposedMutes()
-        for (pkg in obj.keys()) {
-            if (pkg in proposed) continue
-            if (shouldProposeMute(pkgStat(pkg))) return pkg
-        }
-        return null
-    }
-
-    @Synchronized
-    fun markMuteProposed(pkg: String) {
-        val set = proposedMutes().toMutableSet()
-        set.add(pkg)
-        val arr = JSONArray(); set.forEach { arr.put(it) }
-        KVUtils.putString(KEY_PKG_PROPOSED, arr.toString()); KVUtils.sync()
-    }
-
-    private fun proposedMutes(): Set<String> {
-        val raw = KVUtils.getString(KEY_PKG_PROPOSED, "")
-        if (raw.isBlank()) return emptySet()
-        return runCatching {
-            val a = JSONArray(raw); (0 until a.length()).map { a.getString(it) }.toSet()
-        }.getOrDefault(emptySet())
     }
 
     private fun pkgStatsObj(): JSONObject {

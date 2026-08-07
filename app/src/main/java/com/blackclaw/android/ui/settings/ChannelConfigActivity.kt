@@ -1,17 +1,10 @@
 package com.blackclaw.android.ui.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.text.method.HideReturnsTransformationMethod
-import android.text.method.PasswordTransformationMethod
-import android.view.View
-import android.widget.EditText
-import android.widget.ImageView
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultCaller
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContract
@@ -20,137 +13,80 @@ import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.channel.ChannelManager
 import com.blackclaw.android.server.ConfigServerManager
 import com.blackclaw.android.utils.KVUtils
-import com.blackclaw.android.widget.CommonToolbar
-import com.blackclaw.android.widget.KButton
 
 /**
- * Channel config screen (Discord/Telegram bot token configuration)
+ * Channel config screen (Discord/Telegram bot token + owner pairing).
+ *
+ * The UI is [ChannelConfigScreen]; this class only maps the Activity-result contract
+ * onto it. The contract is unchanged, so every existing caller and launcher keeps
+ * working — the previous XML layout (`activity_channel_config.xml`) and its
+ * findViewById plumbing are gone.
  */
 class ChannelConfigActivity : BaseActivity() {
 
-    private lateinit var etInput1: EditText
-    private lateinit var etInput2: EditText
-    private var isPasswordVisible = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_channel_config)
 
+        @Suppress("DEPRECATION")
         val channelType = intent.getSerializableExtra(EXTRA_CHANNEL_TYPE) as? ChannelType
             ?: run {
                 finish()
                 return
             }
 
-        initToolbar(channelType)
-        initViews(channelType)
-    }
+        val channel = when (channelType) {
+            ChannelType.DISCORD -> com.blackclaw.android.channel.Channel.DISCORD
+            ChannelType.TELEGRAM -> com.blackclaw.android.channel.Channel.TELEGRAM
+        }
+        val currentToken = when (channelType) {
+            ChannelType.DISCORD -> KVUtils.getDiscordBotToken()
+            ChannelType.TELEGRAM -> KVUtils.getTelegramBotToken()
+        }
 
-    private fun initToolbar(channelType: ChannelType) {
-        findViewById<CommonToolbar>(R.id.toolbar).apply {
-            setTitle(when (channelType) {
-                ChannelType.DISCORD -> getString(R.string.channel_config_discord_title)
-                ChannelType.TELEGRAM -> getString(R.string.channel_config_telegram_title)
-            })
-            showBackButton(true) { finish() }
+        setContent {
+            com.blackclaw.android.ui.settings.ChannelConfigScreen(
+                channel = channel,
+                title = when (channelType) {
+                    ChannelType.DISCORD -> getString(R.string.channel_config_discord_title)
+                    ChannelType.TELEGRAM -> getString(R.string.channel_config_telegram_title)
+                },
+                tokenHint = when (channelType) {
+                    ChannelType.DISCORD -> getString(R.string.channel_config_discord_hint1)
+                    ChannelType.TELEGRAM -> getString(R.string.channel_config_telegram_hint1)
+                },
+                helpText = when (channelType) {
+                    ChannelType.DISCORD -> getString(R.string.channel_config_discord_tip)
+                    ChannelType.TELEGRAM -> getString(R.string.channel_config_telegram_tip)
+                },
+                initialToken = currentToken,
+                lanAddress = ConfigServerManager.getAddress(),
+                lanAccessCode = ConfigServerManager.accessCodeForDisplay(),
+                onBack = { finish() },
+                onSave = { token -> saveToken(channelType, token) },
+            )
         }
     }
 
-    private fun initViews(channelType: ChannelType) {
-        val tvTip = findViewById<TextView>(R.id.tvTip)
-        val tvLabel1 = findViewById<TextView>(R.id.tvLabel1)
-        val tvLabel2 = findViewById<TextView>(R.id.tvLabel2)
-        etInput1 = findViewById(R.id.etInput1)
-        etInput2 = findViewById(R.id.etInput2)
-        val ivToggle = findViewById<ImageView>(R.id.ivTogglePassword)
-
+    private fun saveToken(channelType: ChannelType, token: String) {
         when (channelType) {
             ChannelType.DISCORD -> {
-                tvTip.text = getString(R.string.channel_config_discord_tip)
-                tvLabel1.text = "Bot Token"
-                tvLabel2.visibility = View.GONE
-                (etInput2.parent.parent as View).visibility = View.GONE
-                etInput1.hint = getString(R.string.channel_config_discord_hint1)
-                etInput1.setText(KVUtils.getDiscordBotToken())
+                KVUtils.setDiscordBotToken(token)
+                ChannelManager.reinitDiscordFromStorage()
             }
             ChannelType.TELEGRAM -> {
-                tvTip.text = getString(R.string.channel_config_telegram_tip)
-                tvLabel1.text = "Bot Token"
-                tvLabel2.visibility = View.GONE
-                (etInput2.parent.parent as View).visibility = View.GONE
-                etInput1.hint = getString(R.string.channel_config_telegram_hint1)
-                etInput1.setText(KVUtils.getTelegramBotToken())
+                KVUtils.setTelegramBotToken(token)
+                ChannelManager.reinitTelegramFromStorage()
             }
         }
-
-        // Toggle password visibility
-        ivToggle.setOnClickListener {
-            isPasswordVisible = !isPasswordVisible
-            if (isPasswordVisible) {
-                etInput2.transformationMethod = HideReturnsTransformationMethod.getInstance()
-                ivToggle.setImageResource(R.drawable.ic_visibility_on)
-            } else {
-                etInput2.transformationMethod = PasswordTransformationMethod.getInstance()
-                ivToggle.setImageResource(R.drawable.ic_visibility_off)
-            }
-            etInput2.setSelection(etInput2.text.length)
-        }
-
-        findViewById<KButton>(R.id.btnSave).setOnClickListener {
-            onSaveClicked(channelType)
-        }
-
-        // LAN config hint
-        val tvLanHint = findViewById<TextView>(R.id.tvLanConfigHint)
-        val ivCopy = findViewById<ImageView>(R.id.ivCopyAddress)
-        val address = ConfigServerManager.getAddress()
-        if (ConfigServerManager.isRunning() && address != null) {
-            val url = "http://$address"
-            tvLanHint.text = getString(R.string.channel_config_lan_hint_running, url)
-            ivCopy.visibility = View.VISIBLE
-            ivCopy.setOnClickListener {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("lan_config_url", url))
-                Toast.makeText(this, R.string.channel_config_lan_copied, Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            tvLanHint.text = getString(R.string.channel_config_lan_hint)
-            ivCopy.visibility = View.GONE
-        }
-    }
-
-    private fun onSaveClicked(channelType: ChannelType) {
-        val value1 = etInput1.text.toString().trim()
-        val value2 = etInput2.text.toString().trim()
-
-        when (channelType) {
-            ChannelType.DISCORD -> {
-                KVUtils.setDiscordBotToken(value1)
-            }
-            ChannelType.TELEGRAM -> {
-                KVUtils.setTelegramBotToken(value1)
-            }
-        }
-
-        // Reconnect only the corresponding channel; do not affect other channels
-        when (channelType) {
-            ChannelType.DISCORD -> ChannelManager.reinitDiscordFromStorage()
-            ChannelType.TELEGRAM -> ChannelManager.reinitTelegramFromStorage()
-        }
-
-        // Return config result
-        val isConfigured = value1.isNotEmpty()
+        // Contract preserved: callers still get the same result payload they always did.
         val result = ChannelConfigResult(
             channelType = channelType,
-            isConfigured = isConfigured
+            isConfigured = token.isNotEmpty(),
         )
-        val intent = Intent().apply {
-            putExtra(EXTRA_RESULT_CONFIG, result)
-        }
-        setResult(RESULT_OK, intent)
+        setResult(RESULT_OK, Intent().apply { putExtra(EXTRA_RESULT_CONFIG, result) })
         Toast.makeText(this, R.string.channel_config_saved, Toast.LENGTH_SHORT).show()
-        finish()
     }
+
 
     enum class ChannelType {
         DISCORD, TELEGRAM

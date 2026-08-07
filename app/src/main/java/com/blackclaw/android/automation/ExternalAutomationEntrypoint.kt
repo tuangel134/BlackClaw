@@ -77,6 +77,26 @@ object ExternalAutomationEntrypoint {
         return true
     }
 
+    /**
+     * Whether the intent was addressed to us explicitly, i.e. it names BlackClaw as
+     * its DESTINATION rather than relying on implicit action matching.
+     *
+     * ## This is NOT an access control
+     *
+     * It validates destination, never origin. Both fields it reads — `component` and
+     * `package` — are set by whoever built the intent, so any app on the device
+     * satisfies this check with a single line:
+     *
+     *     intent.setPackage("com.blackclaw.android")
+     *
+     * The only thing it buys is filtering out broadcasts that merely happened to
+     * match our action filter, which is hygiene, not security. Authorisation lives
+     * in two other places: the `signature` permission on the exported components in
+     * AndroidManifest.xml, and [AutomationCallerPolicy] applied against
+     * `getCallingPackage()` in [ExternalAutomationActivity]. Do not add trust to
+     * this function; there is nothing trustworthy in an intent's own description of
+     * where it is headed.
+     */
     private fun isTargetedToBlackClaw(context: Context, intent: Intent): Boolean {
         val packageName = context.packageName
         val component = intent.component

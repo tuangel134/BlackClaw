@@ -170,7 +170,7 @@ class TaskFlowController(
         uiState.isAwaitingReply.value = true
         uiState.isTaskRunning.value = false
         XLog.i(TAG, "sendTask: isProcessing=TRUE")
-        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, "..."))
+        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, ChatMessage.PENDING))
 
         val taskId = "task_${System.currentTimeMillis()}"
 
@@ -179,7 +179,8 @@ class TaskFlowController(
 
             activity.runOnUiThread {
                 try {
-                    appViewModel.startTask(text, taskId, agentPromptOverride = agentPromptOverride) { event ->
+                    appViewModel.startTask(text, taskId, agentPromptOverride = agentPromptOverride,
+                        surface = com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT) { event ->
                         activity.runOnUiThread { handleTaskEvent(event) }
                     }
                 } catch (e: Exception) {
@@ -196,10 +197,19 @@ class TaskFlowController(
         addUser(text)
         uiState.isAwaitingReply.value = true
         uiState.isTaskRunning.value = false
-        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, "..."))
+        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, ChatMessage.PENDING))
 
         executor.submit {
             try {
+                // This path bypasses TaskOrchestrator's task lock, so nothing else has
+                // declared provenance. The user is demonstrably in the chat UI, so it is
+                // LOCAL. Stating it explicitly rather than relying on today's routes
+                // happening to be safe tools: the risk gate fails closed on UNKNOWN, so
+                // a future deterministic route to a privileged tool would otherwise be
+                // silently refused here.
+                com.blackclaw.android.tool.guard.ToolExecutionContext.setOrigin(
+                    com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.LOCAL
+                )
                 val result = ToolRegistry.getInstance().executeTool(toolCall.toolName, toolCall.params)
                 activity.runOnUiThread {
                     val answer = result.data ?: result.error ?: "Done."
@@ -214,6 +224,9 @@ class TaskFlowController(
                     onTaskTerminal?.invoke(TaskEvent.Failed(e.message ?: "Direct tool failed"))
                     cleanupAfterTask()
                 }
+            } finally {
+                // Back to fail-closed once this one-shot call is done.
+                com.blackclaw.android.tool.guard.ToolExecutionContext.reset()
             }
         }
     }
@@ -315,6 +328,14 @@ class TaskFlowController(
                     uiState.isTaskRunning.value = true
                     if (!event.success) addSystem("${event.toolName} failed")
                 }
+                is TaskEvent.ToolCards -> {
+                    // Inserted before the pending bubble so the cards appear above the
+                    // reply that talks about them, which is the order they are read in.
+                    val pending = uiState.messages.indexOfLast { it.isPending }
+                    val card = ChatMessage(ChatMessage.Role.CARDS, event.payload)
+                    if (pending >= 0) uiState.messages.add(pending, card)
+                    else uiState.messages.add(card)
+                }
                 is TaskEvent.Response -> {
                     uiState.isAwaitingReply.value = false
                     replaceTypingIndicator(event.text)
@@ -339,7 +360,7 @@ class TaskFlowController(
         val modelTag = actualModelName
             ?: uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim()
             ?: ""
-        val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+        val idx = uiState.messages.indexOfLast { it.isPending }
         if (idx >= 0) {
             uiState.messages[idx] = ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag)
         } else {
@@ -349,7 +370,7 @@ class TaskFlowController(
     }
 
     private fun removeTypingIndicator() {
-        val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+        val idx = uiState.messages.indexOfLast { it.isPending }
         if (idx >= 0) uiState.messages.removeAt(idx)
     }
 

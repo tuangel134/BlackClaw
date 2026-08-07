@@ -3,6 +3,7 @@ package com.blackclaw.android.channel.discord
 import com.blackclaw.android.channel.Channel
 import com.blackclaw.android.channel.ChannelHandler
 import com.blackclaw.android.channel.ChannelManager
+import com.blackclaw.android.channel.auth.ChannelAuthorization
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
 import kotlinx.coroutines.CoroutineScope
@@ -35,8 +36,21 @@ class DiscordChannelHandler(
         DiscordGatewayClient.getInstance().setOnDiscordMessageListener(
             object : DiscordGatewayClient.OnDiscordMessageListener {
                 override fun onDiscordMessage(channelId: String, messageId: String, content: String) {
+                    // Authorize BEFORE adopting this channel as the reply target, so a
+                    // rejected sender cannot hijack where the agent's next answer goes.
+                    // The bound identity is the Discord channel id, so ownership means
+                    // "this DM / private channel", which is the intended boundary.
+                    val auth = ChannelAuthorization.evaluate(channel, channelId, content)
+                    if (!auth.allowed) {
+                        auth.reply?.let { sendMessageToUser(channelId, it) }
+                        return
+                    }
+
                     lastChannelId = channelId
-                    XLog.i(TAG, "[${channel.displayName}] Message received: $content, channelId=$channelId")
+                    auth.reply?.let { sendMessageToUser(channelId, it) }
+                    if (auth.justPaired) return
+
+                    XLog.i(TAG, "[${channel.displayName}] Message received, channelId=$channelId")
                     ChannelManager.dispatchMessage(channel, content, messageId)
                 }
             }

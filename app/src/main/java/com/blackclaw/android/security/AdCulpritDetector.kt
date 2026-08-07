@@ -20,6 +20,8 @@ object AdCulpritDetector {
         val label: String,
         val score: Int,
         val reasons: List<String>,
+        val confidence: Int,
+        val liveEvents: Int,
     )
 
     private const val RECENT_MS = 3L * 24 * 60 * 60 * 1000  // 3 days
@@ -49,7 +51,14 @@ object AdCulpritDetector {
             }
             if (r.pkg == foreground) { score += 4; reasons.add(0, "Está en primer plano ahora mismo") }
             if (now - r.firstInstall < RECENT_MS) { score += 2; reasons.add("Instalada hace poco") }
-            Suspect(r.pkg, r.label, score, reasons)
+            val confidence = confidencePercent(
+                liveEvents = liveEvents,
+                foregroundNow = r.pkg == foreground,
+                overlay = r.requestsOverlay,
+                hidden = r.reasons.any { it.contains("oculto") },
+                recent = now - r.firstInstall < RECENT_MS,
+            )
+            Suspect(r.pkg, r.label, score, reasons, confidence, liveEvents)
         }.sortedByDescending { it.score }
 
         return suspects
@@ -60,4 +69,20 @@ object AdCulpritDetector {
         val svc = ClawAccessibilityService.getConnectedInstance(500L) ?: return null
         svc.rootInActiveWindow?.packageName?.toString()
     }.getOrNull()
+
+    internal fun confidencePercent(
+        liveEvents: Int,
+        foregroundNow: Boolean,
+        overlay: Boolean,
+        hidden: Boolean,
+        recent: Boolean,
+    ): Int {
+        var confidence = 15
+        confidence += (liveEvents.coerceAtMost(6) * 9)
+        if (foregroundNow) confidence += 12
+        if (overlay) confidence += 12
+        if (hidden) confidence += 16
+        if (recent) confidence += 8
+        return confidence.coerceIn(5, 98)
+    }
 }

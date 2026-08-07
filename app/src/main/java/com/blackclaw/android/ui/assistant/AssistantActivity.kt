@@ -10,6 +10,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +33,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -66,6 +69,9 @@ class AssistantActivity : BaseActivity() {
                 onOpenProactive = {
                     startActivity(android.content.Intent(this, ProactiveAssistantActivity::class.java))
                 },
+                onOpenAutomations = {
+                    startActivity(android.content.Intent(this, com.blackclaw.android.ui.scheduled.ScheduledTasksActivity::class.java))
+                },
             )
         }
     }
@@ -89,6 +95,7 @@ private fun AssistantScreen(
     colors: BlackClawColors,
     onBack: () -> Unit,
     onOpenProactive: () -> Unit,
+    onOpenAutomations: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var refresh by remember { mutableStateOf(0) }
@@ -104,8 +111,19 @@ private fun AssistantScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Asistente", fontSize = 19.sp, fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary)
+                    // Constrained as a safety net. This bar carries four actions and a
+                    // back button; when the Finanzas tab added a fifth the title had
+                    // about 6 dp left and its letters collapsed into each other. If it
+                    // ever runs out of room again it should truncate cleanly rather than
+                    // turn into an unreadable smear.
+                    Text(
+                        "Asistente",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -113,10 +131,15 @@ private fun AssistantScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenAutomations) {
+                        Icon(Icons.Default.AutoAwesome, "Automatizaciones", tint = colors.accent)
+                    }
                     if (tab.type == AssistantItemType.FINANCE) {
-                        TextButton(onClick = { showBudget = true }) {
-                            Text("Presupuesto", color = colors.accent, fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold)
+                        // An icon, not a text button. The word "Presupuesto" is about
+                        // 110 dp wide and it only appears on this tab, which is why the
+                        // title was readable everywhere else and unreadable here.
+                        IconButton(onClick = { showBudget = true }) {
+                            Icon(Icons.Default.Savings, "Presupuesto", tint = colors.accent)
                         }
                     }
                     IconButton(onClick = {
@@ -155,81 +178,80 @@ private fun AssistantScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            // Hero header: gradient card summarizing the selected category.
-            HeroHeader(tab, items, colors, refresh)
+            val accent = remember(tab.type) {
+                com.blackclaw.android.ui.design.ClawPalette.forCategory(
+                    AssistantCardModel.accentName(tab.type)
+                )
+            }
+            val summary = remember(refresh, selectedTab, items) {
+                AssistantSummary.of(tab.type, items)
+            }
 
-            // Pill tabs with counts
+            AssistantHero(
+                label = tab.label.uppercase(),
+                emoji = tab.emoji,
+                headline = summary.headline,
+                subtitle = summary.subtitle,
+                accent = accent,
+                progress = summary.progress,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            )
+
+            // Category pills. Counts recompute on refresh so checking an item off is
+            // reflected here immediately, which is what makes the tap feel connected.
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TABS.forEachIndexed { i, t ->
-                    val sel = i == selectedTab
-                    val count = remember(refresh, i) { AssistantStore.byType(t.type).count { !it.done } }
-                    Surface(
-                        color = if (sel) t.tint else colors.surface,
-                        shape = RoundedCornerShape(22.dp),
-                        border = if (sel) null else BorderStroke(0.5.dp, colors.aiBubbleBorder),
-                        modifier = Modifier.clickable { selectedTab = i },
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(t.emoji, fontSize = 13.sp)
-                            Spacer(Modifier.width(6.dp))
-                            Text(t.label, fontSize = 13.sp,
-                                color = if (sel) Color.White else colors.textSecondary,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
-                            if (count > 0) {
-                                Spacer(Modifier.width(6.dp))
-                                Box(
-                                    Modifier.clip(CircleShape)
-                                        .background(if (sel) Color.White.copy(alpha = 0.3f)
-                                                    else t.tint.copy(alpha = 0.2f))
-                                        .padding(horizontal = 6.dp, vertical = 1.dp),
-                                ) {
-                                    Text("$count", fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                                        color = if (sel) Color.White else t.tint)
-                                }
-                            }
-                        }
+                    val tAccent = remember(t.type) {
+                        com.blackclaw.android.ui.design.ClawPalette.forCategory(
+                            AssistantCardModel.accentName(t.type)
+                        )
                     }
+                    val count = remember(refresh, i) {
+                        AssistantStore.byType(t.type).count { !it.done }
+                    }
+                    com.blackclaw.android.ui.design.ClawChip(
+                        text = t.label,
+                        selected = i == selectedTab,
+                        onClick = { selectedTab = i },
+                        accent = tAccent,
+                        leading = t.emoji,
+                        badgeCount = count,
+                    )
                 }
             }
 
             if (items.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            Modifier.size(80.dp).clip(CircleShape)
-                                .background(tab.tint.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center,
-                        ) { Text(tab.emoji, fontSize = 38.sp) }
-                        Spacer(Modifier.height(14.dp))
-                        Text("Sin ${tab.label.lowercase()} todavía",
-                            fontSize = 15.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(4.dp))
-                        Text("Toca + o pídeselo a la IA en el chat",
-                            fontSize = 12.sp, color = colors.textTertiary)
-                    }
-                }
+                AssistantEmptyState(
+                    emoji = tab.emoji,
+                    title = "Sin ${tab.label.lowercase()} todavía",
+                    hint = "Toca + o pídeselo a la IA en el chat",
+                    accent = accent,
+                )
             } else {
+                val reduceMotion = com.blackclaw.android.ui.design.ClawAnimation.reduceMotion()
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 90.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(items, key = { it.id }) { item ->
-                        ItemCard(
-                            item = item, tint = tab.tint, colors = colors,
-                            onToggle = { AssistantStore.toggleDone(item.id); refresh++ },
-                            onDelete = {
-                                AssistantScheduler.cancel(ctx, item.id)
-                                AssistantStore.delete(item.id); refresh++
-                            },
-                        )
+                    itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
+                        com.blackclaw.android.ui.design.ClawReveal(
+                            index = index,
+                            enabled = !reduceMotion,
+                        ) {
+                            AssistantItemCard(
+                                item = item,
+                                onToggle = { AssistantStore.toggleDone(item.id); refresh++ },
+                                onDelete = {
+                                    AssistantScheduler.cancel(ctx, item.id)
+                                    AssistantStore.delete(item.id); refresh++
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -276,155 +298,6 @@ private fun AssistantScreen(
                 }
             },
         )
-    }
-}
-
-/** Gradient hero summarizing the active category. */
-@Composable
-private fun HeroHeader(
-    tab: TabDef,
-    items: List<AssistantItem>,
-    colors: BlackClawColors,
-    refresh: Int,
-) {
-    val subtitle: String = when (tab.type) {
-        AssistantItemType.FINANCE -> {
-            val bal = remember(refresh) { AssistantStore.financeBalance() }
-            val budget = remember(refresh) { AssistantStore.monthlyBudget }
-            if (budget > 0) {
-                val spent = AssistantStore.monthExpenses()
-                "Mes: ${"%.0f".format(spent)} / ${"%.0f".format(budget)} · Balance ${"%.2f".format(bal)}"
-            } else "Balance ${"%.2f".format(bal)}"
-        }
-        AssistantItemType.SHOPPING -> {
-            val pend = items.count { !it.done }
-            if (pend > 0) "$pend por comprar" else "Lista vacía"
-        }
-        else -> {
-            val pending = items.count { !it.done }
-            val next = items.filter { it.triggerAtMs > System.currentTimeMillis() && !it.done }
-                .minByOrNull { it.triggerAtMs }
-            when {
-                next != null -> "Próximo: ${AssistantTime.format(next.triggerAtMs)}"
-                pending > 0 -> "$pending pendiente${if (pending == 1) "" else "s"}"
-                else -> "Todo al día"
-            }
-        }
-    }
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-    ) {
-        Box(
-            Modifier.fillMaxWidth().background(
-                Brush.linearGradient(
-                    listOf(tab.tint.copy(alpha = 0.85f), tab.tint.copy(alpha = 0.45f))
-                )
-            ),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(52.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f)),
-                    contentAlignment = Alignment.Center,
-                ) { Text(tab.emoji, fontSize = 26.sp) }
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(tab.label, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(subtitle, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ItemCard(
-    item: AssistantItem,
-    tint: Color,
-    colors: BlackClawColors,
-    onToggle: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val isDraft = item.category == "draft"
-    val isSuggestion = item.category == "habit" || item.title.startsWith("💡")
-    val checkable = item.type == AssistantItemType.REMINDER || item.type == AssistantItemType.NOTE ||
-        item.type == AssistantItemType.SHOPPING
-    Surface(
-        color = if (isSuggestion) colors.accent.copy(alpha = 0.07f) else colors.surface,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
-        border = if (isSuggestion) BorderStroke(1.dp, colors.accent.copy(alpha = 0.4f))
-            else BorderStroke(0.5.dp, colors.aiBubbleBorder),
-    ) {
-        Row(
-            Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Leading: checkbox for todos/reminders, colored emoji badge otherwise.
-            if (checkable) {
-                Box(
-                    Modifier.size(28.dp).clip(CircleShape)
-                        .background(if (item.done) tint else Color.Transparent)
-                        .border(2.dp, tint, CircleShape)
-                        .clickable { onToggle() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (item.done) Icon(Icons.Default.Check, null, tint = Color.White,
-                        modifier = Modifier.size(17.dp))
-                }
-            } else {
-                Box(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
-                        .background(tint.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center,
-                ) { Text(TABS.first { it.type == item.type }.emoji, fontSize = 19.sp) }
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    item.title, fontSize = 15.sp, color = colors.textPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                    textDecoration = if (item.done) TextDecoration.LineThrough else null,
-                )
-                if (item.body.isNotBlank()) {
-                    Text(item.body, fontSize = 12.sp, color = colors.textSecondary, lineHeight = 16.sp)
-                }
-                val meta = buildList {
-                    if (item.triggerAtMs > 0) add(AssistantTime.format(item.triggerAtMs))
-                    if (item.repeat != "none") add("· ${item.repeat}")
-                    if (item.source == "ai") add("· 🐾 IA")
-                }.joinToString(" ")
-                if (meta.isNotBlank()) {
-                    Spacer(Modifier.height(3.dp))
-                    Text(meta, fontSize = 11.sp, color = tint)
-                }
-            }
-            if (item.type == AssistantItemType.FINANCE) {
-                val sign = if (item.amount >= 0) "+" else ""
-                Text("$sign${"%.2f".format(item.amount)}",
-                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                    color = if (item.amount >= 0) Color(0xFF22C55E) else Color(0xFFEF4444))
-                Spacer(Modifier.width(6.dp))
-            }
-            if (isDraft) {
-                IconButton(onClick = {
-                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                        as android.content.ClipboardManager
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("draft", item.body))
-                    android.widget.Toast.makeText(ctx, "Borrador copiado", android.widget.Toast.LENGTH_SHORT).show()
-                }, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.ContentCopy, "Copiar", tint = colors.accent,
-                        modifier = Modifier.size(18.dp))
-                }
-            }
-            IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Default.Delete, "Borrar", tint = colors.textTertiary,
-                    modifier = Modifier.size(18.dp))
-            }
-        }
     }
 }
 

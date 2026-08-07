@@ -51,7 +51,7 @@ class TapOcrTool : BaseTool() {
         }
         val bmp = ScreenCaptureService.captureBitmap()
             ?: return ToolResult.error("No pude capturar la pantalla.")
-        val blocks = ScreenOcr.recognize(bmp)
+        val blocks = ScreenOcr.recognizeScreen(bmp)
         val match = ScreenOcr.findBlock(blocks, needle)
             ?: return ToolResult.error("No encontré '$needle' en pantalla. Texto visible:\n" +
                 ScreenOcr.formatBlocks(blocks, limit = 30))

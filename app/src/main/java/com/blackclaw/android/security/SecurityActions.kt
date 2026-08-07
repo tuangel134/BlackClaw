@@ -21,14 +21,17 @@ object SecurityActions {
 
     /** Stop the ads NOW: revoke the overlay permission and force-stop the app. */
     fun neutralize(pkg: String): String {
-        if (pkg.isBlank()) return "Paquete vacío."
-        if (pkg == SELF) return "No voy a bloquearme a mí mismo."
+        guard(pkg)?.let { return it }
         if (PrivilegedShell.isAvailable()) {
             val r1 = PrivilegedShell.exec("appops set $pkg SYSTEM_ALERT_WINDOW ignore")
             val r2 = PrivilegedShell.exec("am force-stop $pkg")
             XLog.i(TAG, "neutralize $pkg: appops=$r1 stop=$r2")
-            return "Bloqueé $pkg: revoqué el permiso de superposición y forcé su detención. " +
-                "Si vuelve a molestar, considera desinstalarla."
+            val overlay = PrivilegedShell.exec("cmd appops get $pkg SYSTEM_ALERT_WINDOW")
+            val running = PrivilegedShell.exec("pidof $pkg")?.trim().orEmpty()
+            val verified = overlay?.contains("ignore", ignoreCase = true) == true && running.isBlank()
+            return "Bloqueé $pkg: revoqué la superposición y forcé su detención. " +
+                if (verified) "Verificación: permiso bloqueado y proceso detenido."
+                else "Android aceptó la orden; vuelve a escanear para confirmar que los anuncios pararon."
         }
         openOverlaySettings(pkg)
         return "Sin acceso privilegiado (Shizuku/ADB). Abrí los ajustes de superposición de $pkg " +
@@ -36,13 +39,16 @@ object SecurityActions {
     }
 
     fun forceStop(pkg: String): String {
-        if (pkg == SELF) return "No voy a detenerme a mí mismo."
+        guard(pkg)?.let { return it }
         if (!PrivilegedShell.isAvailable()) { openAppSettings(pkg); return "Sin privilegios: abrí los ajustes de $pkg para 'Forzar detención'." }
         PrivilegedShell.exec("am force-stop $pkg")
-        return "Forcé la detención de $pkg."
+        val running = PrivilegedShell.exec("pidof $pkg")?.trim().orEmpty()
+        return if (running.isBlank()) "Forcé y verifiqué la detención de $pkg."
+        else "Android recibió la orden, pero $pkg aún tiene un proceso; revisa sus ajustes."
     }
 
     fun revokeOverlay(pkg: String): String {
+        guard(pkg)?.let { return it }
         if (!PrivilegedShell.isAvailable()) { openOverlaySettings(pkg); return "Sin privilegios: abrí los ajustes de superposición de $pkg." }
         PrivilegedShell.exec("appops set $pkg SYSTEM_ALERT_WINDOW ignore")
         return "Revoqué el permiso de superposición de $pkg."
@@ -50,7 +56,7 @@ object SecurityActions {
 
     /** Disable the app (keeps it installed but inert). Needs privileges. */
     fun disableApp(pkg: String): String {
-        if (pkg == SELF) return "No voy a deshabilitarme a mí mismo."
+        guard(pkg)?.let { return it }
         if (!PrivilegedShell.isAvailable()) { openAppSettings(pkg); return "Sin privilegios: no puedo deshabilitarla; abrí sus ajustes." }
         val r = PrivilegedShell.exec("pm disable-user --user 0 $pkg")
         return if (r != null) "Deshabilité $pkg (queda instalada pero inactiva)." else "No se pudo deshabilitar $pkg."
@@ -58,7 +64,7 @@ object SecurityActions {
 
     /** Uninstall — always via the system dialog (user confirms). */
     fun uninstall(pkg: String): String {
-        if (pkg == SELF) return "No voy a desinstalarme a mí mismo."
+        guard(pkg)?.let { return it }
         return try {
             ClawApplication.instance.startActivity(
                 Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))
@@ -70,6 +76,7 @@ object SecurityActions {
     }
 
     fun openAppSettings(pkg: String) {
+        if (!SecurityPolicy.isValidPackageName(pkg)) return
         runCatching {
             ClawApplication.instance.startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
@@ -85,5 +92,11 @@ object SecurityActions {
             true
         }.getOrDefault(false)
         if (!opened) openAppSettings(pkg)
+    }
+
+    fun protectionReason(pkg: String): String? = SecurityPolicy.protectionReason(ClawApplication.instance, pkg)
+
+    private fun guard(pkg: String): String? = protectionReason(pkg)?.let {
+        "Acción bloqueada para $pkg: $it. No modificaré apps críticas sin que el usuario lo haga desde Ajustes."
     }
 }

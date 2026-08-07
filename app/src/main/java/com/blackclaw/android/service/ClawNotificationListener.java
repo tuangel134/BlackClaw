@@ -83,6 +83,14 @@ public class ClawNotificationListener extends NotificationListenerService {
         // intrusive "open the chat" deep-read.
         String richText = extractRichText(notification, text);
 
+        // Deterministic user-created rules run before the optional LLM classifier.
+        try {
+            com.blackclaw.android.automation.AutomationEngine.INSTANCE
+                    .onNotification(this, pkg, title, richText);
+        } catch (Throwable t) {
+            XLog.w(TAG, "Automation rule hook failed: " + t.getMessage());
+        }
+
         // Proactive Assistant: route through NotificationBatcher for intelligent
         // batching (groups rapid-fire messages from same app into one LLM call).
         try {

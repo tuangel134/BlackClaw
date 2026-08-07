@@ -28,6 +28,29 @@ object ConfigServerManager {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var appContext: Context? = null
 
+    private val random = java.security.SecureRandom()
+
+    /**
+     * Access code for the config page, regenerated on every [start].
+     *
+     * It is shown on the phone screen and must be typed into the page. That is the
+     * point: the server listens on loopback, which any app on the device can reach,
+     * so a credential delivered over that same channel would be no protection. Only
+     * something requiring the physical display is a real boundary. Rotating per
+     * start also means a code that leaked cannot be replayed after a restart.
+     */
+    @Volatile
+    private var currentToken: String = ""
+
+    /** Grouped for readability, e.g. `A7KP-2M9X-QRT4`. Empty when not running. */
+    fun accessCodeForDisplay(): String =
+        if (isRunning() && currentToken.isNotEmpty()) {
+            ConfigServerPolicy.formatTokenForDisplay(currentToken)
+        } else ""
+
+    private fun newToken(): String =
+        ConfigServerPolicy.generateToken { bound -> random.nextInt(bound) }
+
     /** Notification emitted after H5 page saves config; Settings page can observe this Flow to refresh UI */
     private val _configChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val configChanged: SharedFlow<Unit> = _configChanged.asSharedFlow()
@@ -50,13 +73,16 @@ object ConfigServerManager {
 
         if (isRunning()) return true
 
+        val token = newToken()
         for (port in ConfigServer.PORT until ConfigServer.PORT + MAX_PORT_RETRY) {
             try {
-                val s = ConfigServer(ctx, port)
+                val s = ConfigServer(ctx, port, token)
                 s.start()
                 server = s
-                XLog.i(TAG, "ConfigServer started on port $port")
+                currentToken = token
+                XLog.i(TAG, "ConfigServer started on port $port (access code required)")
                 registerNetworkCallback(ctx)
+                _configChanged.tryEmit(Unit)
                 return true
             } catch (e: Exception) {
                 XLog.e(TAG, "Port $port unavailable: ${e.message}")
@@ -74,6 +100,7 @@ object ConfigServerManager {
             XLog.e(TAG, "Error stopping ConfigServer: ${e.message}")
         }
         server = null
+        currentToken = ""
         XLog.i(TAG, "ConfigServer stopped")
     }
 
@@ -156,6 +183,7 @@ object ConfigServerManager {
                 XLog.i(TAG, "WiFi lost, stopping ConfigServer")
                 try { server?.stop() } catch (_: Exception) {}
                 server = null
+                currentToken = ""
                 // Do not clear enabled state; auto-restart when WiFi recovers
                 _configChanged.tryEmit(Unit)
             }
@@ -165,11 +193,16 @@ object ConfigServerManager {
                 // IP may change after WiFi reconnect, restart the server
                 if (KVUtils.isConfigServerEnabled() && !isRunning()) {
                     val ctx = appContext ?: return
+                    // Fresh code on every restart, same as start(): the previous one
+                    // may have been read off the screen by someone who no longer
+                    // should have access.
+                    val token = newToken()
                     for (port in ConfigServer.PORT until ConfigServer.PORT + MAX_PORT_RETRY) {
                         try {
-                            val s = ConfigServer(ctx, port)
+                            val s = ConfigServer(ctx, port, token)
                             s.start()
                             server = s
+                            currentToken = token
                             XLog.i(TAG, "ConfigServer restarted on port $port")
                             break
                         } catch (e: Exception) {

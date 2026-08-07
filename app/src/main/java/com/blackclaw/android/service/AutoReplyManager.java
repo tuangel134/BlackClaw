@@ -28,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -114,11 +115,19 @@ public class AutoReplyManager {
 
     // Debounce: don't reply to same contact within 5s (avoid loops).
     // ownSentMessages handles self-reply detection, so debounce can be short.
-    private final Map<String, Long> lastReplyTime = new HashMap<>();
+    //
+    // CONCURRENCY: both of these are READ on the accessibility event thread
+    // (onNotification/handleMessage) and WRITTEN on the single-thread reply
+    // executor. A plain HashMap/HashSet mutated from two threads can lose
+    // entries — which here means replying twice to the same message or
+    // replying to our own message — and in the worst case corrupts the table
+    // during resize and spins forever inside get(). Concurrent collections make
+    // the reads/writes safe without adding a lock around the reply path.
+    private final Map<String, Long> lastReplyTime = new ConcurrentHashMap<>();
     private static final long DEBOUNCE_MS = 5_000;
 
     // Track our own sent messages to avoid replying to ourselves
-    private final Set<String> ownSentMessages = new HashSet<>();
+    private final Set<String> ownSentMessages = ConcurrentHashMap.newKeySet();
 
     // When messages arrive while replying, flag it.
     // After current reply finishes, re-open chat, read everything, reply to latest.
@@ -879,8 +888,11 @@ public class AutoReplyManager {
             com.blackclaw.android.tool.impl.GetScreenInfoTool screenTool = new com.blackclaw.android.tool.impl.GetScreenInfoTool();
             com.blackclaw.android.tool.ToolResult screenResult = screenTool.execute(java.util.Collections.emptyMap());
             if (!screenResult.isSuccess() || screenResult.getData() == null) {
-                // Last resort: press Enter
-                Runtime.getRuntime().exec(new String[]{"input", "keyevent", "66"}).waitFor();
+                // Last resort: press Enter.
+                // ProcessUtils instead of a bare exec()+waitFor(): the bare form
+                // leaked 3 file descriptors per call and could deadlock in
+                // waitFor() because nothing drained the child's stdout pipe.
+                com.blackclaw.android.utils.ProcessUtils.exec("input", "keyevent", "66");
                 return ToolResult.success("Sent via Enter (screen read failed): " + alreadyTypedMessage);
             }
 
@@ -893,7 +905,7 @@ public class AutoReplyManager {
 
             String response = singleLlmCall(prompt);
             if (response == null || response.isEmpty()) {
-                Runtime.getRuntime().exec(new String[]{"input", "keyevent", "66"}).waitFor();
+                com.blackclaw.android.utils.ProcessUtils.exec("input", "keyevent", "66");
                 return ToolResult.success("Sent via Enter (LLM empty): " + alreadyTypedMessage);
             }
 
@@ -916,14 +928,12 @@ public class AutoReplyManager {
             }
 
             // Can't parse — fallback Enter
-            Runtime.getRuntime().exec(new String[]{"input", "keyevent", "66"}).waitFor();
+            com.blackclaw.android.utils.ProcessUtils.exec("input", "keyevent", "66");
             return ToolResult.success("Sent via Enter (LLM parse fail): " + alreadyTypedMessage);
 
         } catch (Exception e) {
             XLog.w(TAG, "tapSendViaLlm failed, pressing Enter", e);
-            try {
-                Runtime.getRuntime().exec(new String[]{"input", "keyevent", "66"}).waitFor();
-            } catch (Exception ignored) {}
+            com.blackclaw.android.utils.ProcessUtils.exec("input", "keyevent", "66");
             return ToolResult.success("Sent via Enter (LLM exception): " + alreadyTypedMessage);
         }
     }

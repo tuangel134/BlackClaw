@@ -42,15 +42,35 @@ object ImageOcr {
         return recognizeBitmap(normalize(oriented))
     }
 
-    /** Two-pass recognition: plain + enhanced; keeps the richer result. */
+    /**
+     * Two-pass recognition: plain + enhanced; keeps the richer result.
+     *
+     * MEMORY: both [normalize] and [enhance] allocate full-size ARGB_8888 copies
+     * (up to 2200x2200x4B ≈ 19 MB each). Neither used to be recycled, and the
+     * `plain.length >= 40` fast path returned without freeing `prepared` at all,
+     * so a few OCR calls in a row were enough to blow the heap. We recycle every
+     * intermediate we created ourselves — but NEVER the caller's [bmp], which the
+     * caller still owns (normalize() returns the input unchanged when no scaling
+     * is needed, hence the identity checks).
+     */
     fun recognizeBitmap(bmp: Bitmap): String {
         val prepared = normalize(bmp)
-        val plain = assemble(ScreenOcr.recognize(prepared, timeoutMs = 8000))
-        // If the plain pass already read a healthy amount of text, trust it.
-        if (plain.length >= 40) return plain
-        // Otherwise retry on a contrast-boosted grayscale copy (faint/low light).
-        val enhanced = assemble(ScreenOcr.recognize(enhance(prepared), timeoutMs = 8000))
-        return if (enhanced.length > plain.length) enhanced else plain
+        try {
+            val plain = assemble(ScreenOcr.recognize(prepared, timeoutMs = 8000))
+            // If the plain pass already read a healthy amount of text, trust it.
+            if (plain.length >= 40) return plain
+            // Otherwise retry on a contrast-boosted grayscale copy (faint/low light).
+            val boosted = enhance(prepared)
+            val enhanced = try {
+                assemble(ScreenOcr.recognize(boosted, timeoutMs = 8000))
+            } finally {
+                // enhance() falls back to returning `src` if the allocation failed.
+                if (boosted !== prepared && !boosted.isRecycled) boosted.recycle()
+            }
+            return if (enhanced.length > plain.length) enhanced else plain
+        } finally {
+            if (prepared !== bmp && !prepared.isRecycled) prepared.recycle()
+        }
     }
 
     // ── Reading-order reconstruction ──────────────────────────────────────────

@@ -8,8 +8,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -46,13 +48,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.blackclaw.android.TaskEvent
 import com.blackclaw.android.appViewModel
 import com.blackclaw.android.assistant.JarvisVoice
 import com.blackclaw.android.assistant.Speaker
 import com.blackclaw.android.assistant.VoiceInputManager
+import com.blackclaw.android.ui.design.ClawAnimation
 import com.blackclaw.android.utils.XLog
 import java.util.UUID
+import kotlin.math.cos
 import kotlin.math.sin
 
 /**
@@ -68,20 +73,43 @@ class QuickAssistActivity : ComponentActivity() {
         private const val TAG = "QuickAssist"
         /** Optional: run this command immediately instead of listening first. */
         const val EXTRA_COMMAND = "assist_command"
+
+        /**
+         * Cards shown with one answer.
+         *
+         * Four is enough to compare a handful of search results and few enough that the
+         * spoken reply is still the thing the panel leads with — this is a voice surface
+         * first, and a screenful of cards turns it into a browser.
+         */
+        const val MAX_TURN_CARDS = 4
     }
 
     enum class Phase { LISTENING, THINKING, SPEAKING, IDLE, NEED_MIC }
 
-    data class Turn(val fromUser: Boolean, val text: String)
+    /**
+     * @param cards structured results produced by the tools this turn ran. They are
+     *   attached to the answer rather than shown as they arrive, so the cards and the
+     *   sentence explaining them appear together instead of the panel rearranging itself
+     *   mid-reply.
+     */
+    data class Turn(
+        val fromUser: Boolean,
+        val text: String,
+        val cards: List<com.blackclaw.android.cards.AssistCard> = emptyList(),
+        val id: String = UUID.randomUUID().toString(),
+    )
 
     private val turns = mutableStateListOf<Turn>()
     private val status = mutableStateOf("Le escucho, jefe…")
     private val partial = mutableStateOf("")
     private val phase = mutableStateOf(Phase.LISTENING)
     private val rms = mutableFloatStateOf(0f)
+    private val progress = mutableStateOf<QuickAssistProgress?>(null)
+    private val recovery = mutableStateOf<QuickAssistRecovery?>(null)
     private var started = false
     private var silentCount = 0
-    private var busy = false   // a task is running
+    private var busy by mutableStateOf(false)
+    private var lastCommand = ""
 
     // Streaming state for the current answer.
     private val streamBuf = StringBuilder()
@@ -90,15 +118,25 @@ class QuickAssistActivity : ComponentActivity() {
     private var toolUsed = false
     private var leftApp = false   // an app-launching tool ran → hand off & close
 
+    /** Cards collected from tools during the current command, attached when it answers. */
+    private val pendingCards = mutableListOf<com.blackclaw.android.cards.AssistCard>()
+
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) startListening()
-        else { phase.value = Phase.NEED_MIC; status.value = "Necesito permiso de micrófono para escucharte." }
+        else {
+            phase.value = Phase.NEED_MIC
+            status.value = "Necesito permiso de micrófono para escucharte."
+            recovery.value = QuickAssistRecovery.MICROPHONE
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true); setTurnScreenOn(true)
         } else {
@@ -116,11 +154,15 @@ class QuickAssistActivity : ComponentActivity() {
                 phase = phase.value,
                 rms = rms.floatValue,
                 busy = busy,
-                onMic = { if (!busy) { switchingToVoice(); ensureMicThenListen() } },
-                onOrbTap = { bargeIn() },
+                progress = progress.value,
+                recovery = recovery.value,
+                onMic = { if (!busy) { hapticTap(); switchingToVoice(); ensureMicThenListen() } },
+                onOrbTap = { hapticTap(); bargeIn() },
                 onSuggestion = { runSuggestion(it) },
                 onTyped = { onTypedCommand(it) },
                 onStartTyping = { stopListeningForTyping() },
+                onCancel = { cancelCurrentTask() },
+                onRecovery = { runRecoveryAction() },
                 onClose = { runCatching { if (busy) appViewModel.stopTask() }; finish() },
             )
         }
@@ -135,8 +177,8 @@ class QuickAssistActivity : ComponentActivity() {
             // recreation doesn't re-run the stale command (singleTask keeps it).
             val cmd = intent?.getStringExtra(EXTRA_COMMAND)?.trim().orEmpty()
             intent?.removeExtra(EXTRA_COMMAND)
-            if (cmd.isNotBlank()) window.decorView.postDelayed({ onCommand(cmd) }, 200L)
-            else window.decorView.postDelayed({ ensureMicThenListen() }, 600L)
+            if (cmd.isNotBlank()) window.decorView.postDelayed({ onCommand(cmd) }, 100L)
+            else window.decorView.postDelayed({ ensureMicThenListen() }, 300L)
         }
     }
 
@@ -182,6 +224,7 @@ class QuickAssistActivity : ComponentActivity() {
         if (!VoiceInputManager.isAvailable()) {
             phase.value = Phase.NEED_MIC
             status.value = "El reconocimiento de voz no está disponible en este dispositivo."
+            recovery.value = QuickAssistRecovery.MICROPHONE
             return
         }
         val granted = ContextCompat.checkSelfPermission(
@@ -194,7 +237,9 @@ class QuickAssistActivity : ComponentActivity() {
     private fun startListening() {
         phase.value = Phase.LISTENING
         partial.value = ""
+        recovery.value = null
         status.value = if (turns.isEmpty()) "Le escucho, jefe…" else "Dígame…"
+        updateLiveNotif("ESCUCHANDO", status.value)
         VoiceInputManager.listenOnce(
             onResult = { onCommand(it) },
             onError = { onListenError(it) },
@@ -229,9 +274,13 @@ class QuickAssistActivity : ComponentActivity() {
 
     private fun onCommand(command: String) {
         if (command.isBlank()) { onListenError(""); return }
+        if (startDiscreetModeSilently(command)) return
         silentCount = 0
         // Reset streaming state for this answer.
         streamBuf.setLength(0); spokenLen = 0; didStreamSpeak = false; toolUsed = false; leftApp = false
+        pendingCards.clear()
+        progress.value = null
+        recovery.value = null
         // End-of-conversation phrases close the panel politely.
         if (isFarewell(command)) {
             turns.add(Turn(true, command))
@@ -241,33 +290,69 @@ class QuickAssistActivity : ComponentActivity() {
             window.decorView.postDelayed({ if (!isFinishing) finish() }, 1400)
             return
         }
+        if (isScreenQuery(command)) {
+            handleScreenQuery(command)
+            return
+        }
         busy = true
+        lastCommand = command
         turns.add(Turn(true, command))
         phase.value = Phase.THINKING
         partial.value = ""
         status.value = "Pensando…"
+        progress.value = QuickAssistProgress("Preparando la respuesta", "Entendiendo tu solicitud")
+        updateLiveNotif("PENSANDO", command)
         Speaker.speak(JarvisVoice.commandAck())
 
-        // Conversational context: when this is a follow-up, give the agent the
-        // recent exchange so "¿y mañana?" / "y eso?" make sense.
         val override = buildContextPrompt(command)
         val taskId = "assist-" + UUID.randomUUID().toString().take(8)
         runCatching {
-            appViewModel.startTask(command, taskId, agentPromptOverride = override, autoReturnToChat = false) { event ->
+            appViewModel.startTask(command, taskId, agentPromptOverride = override, autoReturnToChat = false,
+                surface = com.blackclaw.android.conversation.ConversationRepository.Surface.QUICK_ASSIST) { event ->
                 runOnUiThread {
                     when (event) {
                         is TaskEvent.ToolAction -> {
                             toolUsed = true
                             if (isAppLaunchTool(event.toolName)) leftApp = true
-                            if (busy) status.value = friendlyTool(event.toolName)
+                            if (busy) {
+                                phase.value = Phase.THINKING
+                                status.value = QuickAssistTaskReducer.toolLabel(event.toolName) + "…"
+                                progress.value = QuickAssistProgress(
+                                    QuickAssistTaskReducer.toolLabel(event.toolName),
+                                    "Ejecutando una acción segura",
+                                )
+                            }
                         }
-                        is TaskEvent.LoopStart -> { if (busy && status.value.isBlank()) status.value = "Trabajando…" }
-                        is TaskEvent.Progress -> { if (busy) status.value = event.description.take(60) }
+                        is TaskEvent.LoopStart -> if (busy) {
+                            if (status.value == "Pensando…") status.value = "Trabajando…"
+                            progress.value = QuickAssistProgress("Trabajando", "Ronda ${event.round}", event.round)
+                        }
+                        is TaskEvent.Progress -> if (busy) {
+                            status.value = event.description.take(60)
+                            progress.value = QuickAssistProgress("En progreso", event.description.take(100), event.step)
+                        }
                         is TaskEvent.Thinking -> onStreamToken(event.content)
                         is TaskEvent.Response -> { if (busy && event.text.isNotBlank() && streamBuf.isEmpty()) status.value = event.text.take(300) }
+                        is TaskEvent.ToolCards -> {
+                            val decoded = com.blackclaw.android.cards.AssistCardCodec
+                                .decode(event.payload)
+                            // Later results replace earlier ones of the same shape only
+                            // by accumulation order; the cap keeps a chatty search from
+                            // burying the answer under a wall of cards.
+                            decoded.forEach {
+                                if (pendingCards.size < MAX_TURN_CARDS) pendingCards.add(it)
+                            }
+                        }
                         is TaskEvent.Completed -> answerStreamed(event.answer)
-                        is TaskEvent.Failed -> answerStreamed(friendlyError(event.error))
-                        is TaskEvent.Cancelled, is TaskEvent.Blocked -> { busy = false; phase.value = Phase.IDLE }
+                        is TaskEvent.Failed -> {
+                            recovery.value = recoveryFor(event.error)
+                            answerStreamed(friendlyError(event.error))
+                        }
+                        is TaskEvent.Cancelled, is TaskEvent.Blocked -> {
+                            busy = false
+                            progress.value = null
+                            phase.value = Phase.IDLE
+                        }
                         else -> Unit
                     }
                 }
@@ -278,15 +363,46 @@ class QuickAssistActivity : ComponentActivity() {
         }
     }
 
-    /** Build a context-aware prompt for follow-ups (null = run command as-is). */
+    /**
+     * Safety fast-path: start camera/mic while this Activity is still visible,
+     * satisfying Android's while-in-use foreground-service rule. No TTS, sound,
+     * vibration, answer bubble or acknowledgement is emitted.
+     */
+    private fun startDiscreetModeSilently(command: String): Boolean {
+        val options = com.blackclaw.android.emergency.EmergencyCommandParser.parse(command) ?: return false
+        if (!options.silent) return false
+        runCatching { VoiceInputManager.cancelListenOnce() }
+        runCatching { Speaker.stop() }
+        val started = com.blackclaw.android.emergency.EmergencyService.start(this, options)
+        if (started) {
+            window.decorView.postDelayed({ if (!isFinishing) finish() }, 180L)
+        } else {
+            turns.add(Turn(true, command))
+            phase.value = Phase.IDLE
+            status.value = "Configura el contacto y los permisos del modo discreto en Ajustes."
+        }
+        return true
+    }
+
     private fun buildContextPrompt(command: String): String? {
-        // Only inject context if there's a prior assistant answer in this session.
-        val priorAnswer = turns.lastOrNull { !it.fromUser }?.text ?: return null
-        val priorUser = turns.lastOrNull { it.fromUser }?.text.orEmpty()
+        val sharedLines = com.blackclaw.android.conversation.ConversationRepository
+            .recentLocalLines(maxTurns = 8, maxChars = 1_200)
+        val sessionTurns = turns.takeLast(4)
+        if (sharedLines.isEmpty() && sessionTurns.none { !it.fromUser }) return null
         return buildString {
-            append("Conversación reciente (para contexto):\n")
-            if (priorUser.isNotBlank()) append("Usuario: ").append(priorUser.take(200)).append('\n')
-            append("Tú: ").append(priorAnswer.take(300)).append("\n\n")
+            if (sharedLines.isNotEmpty()) {
+                append("Contexto reciente del asistente (chat, voz, tareas):\n")
+                sharedLines.forEach { append(it).append('\n') }
+                append('\n')
+            }
+            if (sessionTurns.any { !it.fromUser }) {
+                append("En ESTA sesión de voz:\n")
+                sessionTurns.forEach { t ->
+                    val role = if (t.fromUser) "Usuario" else "Tú"
+                    append(role).append(": ").append(t.text.take(200)).append('\n')
+                }
+                append('\n')
+            }
             append("El usuario ahora dice: \"").append(command).append("\". ")
             append("Si es continuación de lo anterior, tenlo en cuenta. Actúa o responde.")
         }
@@ -300,26 +416,123 @@ class QuickAssistActivity : ComponentActivity() {
             "eso es todo", "nada más", "nada mas", "ya está", "ya esta", "listo gracias",
             "chao", "bye", "thanks", "thank you", "that's all", "cállate", "callate", "ya no",
         )
-        // Match short utterances only, so "gracias por X, ahora haz Y" still runs.
         return c.split(' ').size <= 3 && phrases.any { c == it || c.startsWith(it) }
     }
 
-    /** Friendly Spanish status for a tool the agent is running. */    /** Friendly Spanish status for a tool the agent is running. */
-    private fun friendlyTool(tool: String): String = when {
-        tool.contains("open_app_action") || tool == "open_app" -> "Abriendo la app…"
-        tool.contains("play_music") -> "Poniendo música…"
-        tool.contains("send_message") || tool.contains("send_sms") -> "Enviando el mensaje…"
-        tool.contains("make_call") -> "Llamando…"
-        tool.contains("appointment") || tool.contains("alarm") || tool.contains("reminder") ||
-            tool.contains("event") -> "Agendando…"
-        tool.contains("web") || tool.contains("http") -> "Buscando en internet…"
-        tool.contains("screen") || tool.contains("ocr") -> "Mirando la pantalla…"
-        tool.contains("tap") || tool.contains("input") || tool.contains("swipe") ||
-            tool.contains("scroll") -> "Tocando la pantalla…"
-        tool.contains("notification") -> "Revisando notificaciones…"
-        tool.contains("device_info") || tool.contains("battery") -> "Consultando el dispositivo…"
-        else -> "Trabajando…"
+    private fun isGreeting(cmd: String): Boolean {
+        val c = cmd.lowercase().trim().replace(Regex("[¿?!,.]"), "").trim()
+        val greetings = listOf(
+            "hola", "hey", "buenas", "buenos dias", "buenos días", "buenas tardes",
+            "buenas noches", "que tal", "qué tal", "hello", "hi", "hey blackclaw",
+            "hola blackclaw", "oye", "oye blackclaw", "garra",
+        )
+        return c.split(' ').size <= 3 && greetings.any { c == it || c.startsWith(it) }
     }
+
+    private fun isScreenQuery(cmd: String): Boolean {
+        val c = cmd.lowercase().trim()
+        return c.contains("que hay en mi pantalla") || c.contains("qué hay en mi pantalla") ||
+            c.contains("que ves en pantalla") || c.contains("qué ves en pantalla") ||
+            c.contains("que estoy viendo") || c.contains("qué estoy viendo") ||
+            c.contains("lee mi pantalla") || c.contains("leeme la pantalla") ||
+            c.contains("que dice la pantalla") || c.contains("qué dice la pantalla") ||
+            c.contains("what's on my screen") || c.contains("read my screen") ||
+            c.contains("que app estoy usando") || c.contains("dónde estoy") ||
+            c.contains("donde estoy")
+    }
+
+    private fun handleScreenQuery(command: String) {
+        turns.add(Turn(true, command))
+        phase.value = Phase.THINKING
+        status.value = "Analizando la pantalla…"
+        updateLiveNotif("PENSANDO", "Analizando pantalla")
+        Thread({
+            val service = com.blackclaw.android.service.ClawAccessibilityService.getConnectedInstance(1_000L)
+            // A real VoiceInteractionSession receives this data before this Activity
+            // overlays the foreground app. It is the most accurate source because it
+            // does not depend on an accessibility event winning a timing race.
+            val nativeAssistContext = AssistInvocationContext.recent(30_000L)
+            // Accessibility/OCR caches remain a useful fallback for direct launches
+            // and devices that decline AssistStructure or screenshot delivery.
+            val cachedTree = if (service != null) {
+                com.blackclaw.android.service.ClawAccessibilityService.getRecentExternalScreenTree(20_000L)
+            } else null
+            val cachedPackage = com.blackclaw.android.service.ClawAccessibilityService.getLastExternalPackage()
+            val cachedOcr = com.blackclaw.android.perception.ExternalScreenOcrCache.recentLines(20_000L)
+            val preAssistTree = nativeAssistContext?.accessibilityTree ?: cachedTree
+            val preAssistPackage = nativeAssistContext?.packageName ?: cachedPackage
+            val preAssistOcr = nativeAssistContext?.ocrLines?.ifEmpty { cachedOcr } ?: cachedOcr
+            val hasPreAssistContext = nativeAssistContext != null ||
+                preAssistTree != null || preAssistOcr.isNotEmpty()
+            val registry = com.blackclaw.android.tool.ToolRegistry.getInstance()
+            val liveTree = if (!hasPreAssistContext) {
+                runCatching { registry.getTool("get_screen_info")?.execute(emptyMap())?.data }.getOrNull()
+            } else null
+            val app = if (hasPreAssistContext && !preAssistPackage.isNullOrBlank()) {
+                preAssistPackage
+            } else {
+                runCatching { registry.getTool("get_foreground_app")?.execute(emptyMap())?.data }.getOrNull()
+            }
+            val ownPanelIsFocused = !hasPreAssistContext &&
+                (app.isNullOrBlank() || app.contains(packageName))
+
+            // OCR is supplemental, never a fallback: accessibility can see controls
+            // but not text rendered by Canvas, maps, video, games or many WebViews.
+            // It is skipped for a pre-assist snapshot because the live pixels now hold
+            // this assistant panel, not the application the user asked about.
+            val ocrLines = if (hasPreAssistContext) {
+                preAssistOcr
+            } else if (!ownPanelIsFocused &&
+                com.blackclaw.android.perception.ScreenCaptureService.isRunning()) {
+                com.blackclaw.android.perception.ScreenCaptureService.captureBitmap()?.let {
+                    com.blackclaw.android.perception.ScreenOcr.readingOrder(
+                        com.blackclaw.android.perception.ScreenOcr.recognizeScreen(it), limit = 60)
+                }.orEmpty()
+            } else emptyList()
+            // Don't ask for MediaProjection after our full-screen panel has taken
+            // focus: it would capture this UI instead of the app behind it. Pixel
+            // context for an assistant invocation comes from the pre-assist cache;
+            // regular agent OCR keeps requesting capture when it is actually
+            // operating over the target app.
+            val requestedCapture = !ownPanelIsFocused && !hasPreAssistContext &&
+                !com.blackclaw.android.perception.ScreenCaptureService.isRunning()
+            if (requestedCapture) {
+                runOnUiThread {
+                    com.blackclaw.android.perception.ScreenCapturePermissionActivity.start(applicationContext)
+                }
+            }
+            val scene = com.blackclaw.android.perception.ScreenScene.compose(
+                foregroundApp = app,
+                accessibilityTree = preAssistTree ?: liveTree,
+                ocrLines = ocrLines,
+            )
+            val answer = when {
+                scene.visibleText.isNotEmpty() -> buildString {
+                    if (nativeAssistContext != null) {
+                        append("Lectura recibida al invocarme:\n")
+                    } else if (hasPreAssistContext) {
+                        append("Lectura tomada justo antes de abrirme:\n")
+                    }
+                    append(scene.describeForQuickAssist())
+                    if (requestedCapture) append("\n\nPara leer también texto dibujado o vídeo, acepta el permiso de captura.")
+                }
+                ownPanelIsFocused -> "No alcancé a guardar el contexto de la app anterior antes de abrirme. Vuelve a invocarme sobre esa app; con accesibilidad activa guardaré su texto justo antes de mostrar este panel."
+                requestedCapture -> "Puedo leer los controles accesibles, pero para ver todo lo dibujado en pantalla necesito que aceptes el permiso de captura que acabo de abrir."
+                else -> "No encontré texto legible en pantalla. Puede ser una imagen, vídeo o una app que oculta su contenido."
+            }
+            runOnUiThread {
+                turns.add(Turn(false, answer.take(500)))
+                phase.value = Phase.SPEAKING
+                status.value = ""
+                speakBySentences(answer.take(400))
+                updateLiveNotif("BLACKCLAW", answer.take(60))
+                relistenWhenDoneSpeaking()
+            }
+        }, "screen-query").start()
+    }
+
+    /** Friendly Spanish status for a tool the agent is running. */
+    private fun friendlyTool(tool: String): String = QuickAssistTaskReducer.toolLabel(tool) + "…"
 
     /** Turn a raw failure into a helpful spoken reason instead of a generic error. */
     private fun friendlyError(raw: String): String {
@@ -339,6 +552,32 @@ class QuickAssistActivity : ComponentActivity() {
                 "Ese modelo dejó de estar disponible; cambié a otro gratis, reintenta."
             e.isBlank() -> "No pude completarlo, jefe."
             else -> "No pude completarlo: ${raw.take(120)}"
+        }
+    }
+
+    private fun recoveryFor(raw: String): QuickAssistRecovery? {
+        val error = raw.lowercase()
+        return when {
+            error.contains("permiso") || error.contains("permission") ||
+                error.contains("accesibilidad") || error.contains("accessibility") -> QuickAssistRecovery.ACCESSIBILITY
+            error.contains("network") || error.contains("timeout") || error.contains("conexión") ||
+                error.contains("conexion") -> QuickAssistRecovery.CONNECTION
+            error.isNotBlank() -> QuickAssistRecovery.RETRY
+            else -> null
+        }
+    }
+
+    private fun runRecoveryAction() {
+        when (recovery.value) {
+            QuickAssistRecovery.MICROPHONE -> ensureMicThenListen()
+            QuickAssistRecovery.ACCESSIBILITY -> runCatching {
+                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            QuickAssistRecovery.CONNECTION -> runCatching {
+                startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
+            }
+            QuickAssistRecovery.RETRY -> lastCommand.takeIf { it.isNotBlank() }?.let(::onCommand)
+            null -> Unit
         }
     }
 
@@ -375,13 +614,15 @@ class QuickAssistActivity : ComponentActivity() {
     /** Finalize the answer: add the rich bubble, speak any remainder, then re-listen. */
     private fun answerStreamed(raw: String) {
         busy = false
-        val display = raw
+        progress.value = null
+        val display = stripReasoning(raw)
             .replace(Regex("[*_#`>]+"), " ")
             .replace(Regex("[ \\t]+"), " ")
             .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
             .ifBlank { "Listo, jefe." }
-        turns.add(Turn(false, display))
+        turns.add(Turn(false, display, pendingCards.toList()))
+        pendingCards.clear()
         status.value = ""
         phase.value = Phase.SPEAKING
         if (leftApp) {
@@ -462,18 +703,52 @@ class QuickAssistActivity : ComponentActivity() {
     private fun bargeIn() {
         when {
             busy -> {
-                runCatching { appViewModel.stopTask() }
-                busy = false
-                runCatching { Speaker.stop() }
-                status.value = "Cancelado, jefe."
-                phase.value = Phase.IDLE
-                scheduleIdleAutoClose()
+                cancelCurrentTask()
             }
             phase.value == QuickAssistActivity.Phase.SPEAKING -> {
                 Speaker.stop()
                 if (!busy) ensureMicThenListen()
             }
         }
+    }
+
+    private fun cancelCurrentTask() {
+        if (!busy) return
+        runCatching { appViewModel.stopTask() }
+        busy = false
+        runCatching { Speaker.stop() }
+        status.value = "Cancelado, jefe."
+        phase.value = Phase.IDLE
+        progress.value = null
+        scheduleIdleAutoClose()
+    }
+
+    private fun hapticTap() {
+        runCatching {
+            window.decorView.performHapticFeedback(
+                android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+        }
+    }
+
+    private fun stripReasoning(text: String): String {
+        val reasoningPatterns = listOf(
+            Regex("""(?i)^(respond[ií]|contest[eé]|ofrec[ií]|ayud[oé]|salud[oé]|pregunt[oé])\s+(al|a la|el|la)\s+usuario.*"""),
+            Regex("""(?i)^(debo|voy a|necesito|tengo que|puedo|quiero)\s+(responder|contestar|ayudar|saludar|preguntar|decir).*"""),
+            Regex("""(?i)^el usuario (quiere|pide|dice|necesita|solicita).*"""),
+            Regex("""(?i)^(i should|i will|i need to|i can|the user wants|the user is).*"""),
+            Regex("""(?i)^(let me|first,? i|now i|then i|ok,? so).*"""),
+        )
+        val lines = text.lines()
+        val cleaned = lines.filter { line ->
+            val trimmed = line.trim()
+            trimmed.isEmpty() || !reasoningPatterns.any { it.containsMatchIn(trimmed) }
+        }
+        val result = cleaned.joinToString("\n").trim()
+        return result.ifBlank { text }
+    }
+
+    private fun updateLiveNotif(phaseLabel: String, detail: String) {
+        runCatching { AssistLiveNotification.show(this, phaseLabel, detail) }
     }
 
     override fun onPause() {
@@ -488,7 +763,8 @@ class QuickAssistActivity : ComponentActivity() {
         super.onDestroy()
         runCatching { Speaker.stop() }
         runCatching { VoiceInputManager.stopWakeLoop() }
-        // Hand the mic back to the background wake service so "garra" keeps working.
+        runCatching { AssistLiveNotification.dismiss(this) }
+        saveSessionMemory()
         if (VoiceInputManager.wakeEnabled) {
             runCatching {
                 val i = android.content.Intent(this,
@@ -499,6 +775,53 @@ class QuickAssistActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun saveSessionMemory() {
+        runCatching {
+            val userTurns = turns.filter { it.fromUser }
+            if (userTurns.isEmpty()) return
+            val summary = com.blackclaw.android.memory.ConversationMemory.extractSummary(
+                turns.map { (if (it.fromUser) "USER" else "ASSISTANT") to it.text }
+            )
+            if (summary.isNotBlank()) {
+                com.blackclaw.android.memory.ConversationMemory.record(
+                    conversationId = "voice-${System.currentTimeMillis()}",
+                    summary = summary,
+                    topics = com.blackclaw.android.memory.ConversationMemory.extractTopics(
+                        turns.map { (if (it.fromUser) "USER" else "ASSISTANT") to it.text }
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/** The system-assistant surface has its own restrained obsidian-and-gold identity. */
+private object ObsidianGold {
+    val Void = Color(0xFF050504)
+    val Obsidian = Color(0xFF0C0B09)
+    val Surface = Color(0xFF15130F)
+    val Raised = Color(0xFF201C14)
+    val Outline = Color(0xFF403623)
+    val Ink = Color(0xFFFFF8E7)
+    val Muted = Color(0xFFC0B59D)
+    val Quiet = Color(0xFF827864)
+    val Gold = Color(0xFFD7AC4A)
+    val GoldLight = Color(0xFFFFE09A)
+    val GoldDeep = Color(0xFF76521B)
+    val Ember = Color(0xFFB97832)
+    val Alert = Color(0xFFE49B5A)
+
+    fun active(phase: QuickAssistActivity.Phase): Color = when (phase) {
+        QuickAssistActivity.Phase.LISTENING -> Gold
+        QuickAssistActivity.Phase.THINKING -> GoldLight
+        QuickAssistActivity.Phase.SPEAKING -> Ember
+        QuickAssistActivity.Phase.NEED_MIC -> Alert
+        QuickAssistActivity.Phase.IDLE -> GoldDeep
+    }
+
+    val actionBrush: Brush
+        get() = Brush.linearGradient(listOf(GoldLight, Gold, GoldDeep))
 }
 
 @Composable
@@ -509,11 +832,15 @@ private fun AssistScreen(
     phase: QuickAssistActivity.Phase,
     rms: Float,
     busy: Boolean,
+    progress: QuickAssistProgress?,
+    recovery: QuickAssistRecovery?,
     onMic: () -> Unit,
     onOrbTap: () -> Unit,
     onSuggestion: (String) -> Unit,
     onTyped: (String) -> Unit,
     onStartTyping: () -> Unit,
+    onCancel: () -> Unit,
+    onRecovery: () -> Unit,
     onClose: () -> Unit,
 ) {
     var textMode by remember { mutableStateOf(false) }
@@ -521,10 +848,10 @@ private fun AssistScreen(
     val level by animateFloatAsState(rms, tween(120, easing = LinearEasing), label = "level")
     val bgTop by animateColorAsState(
         when (phase) {
-            QuickAssistActivity.Phase.LISTENING -> Color(0xFF1A0E3A)
-            QuickAssistActivity.Phase.THINKING -> Color(0xFF0E1A3A)
-            QuickAssistActivity.Phase.SPEAKING -> Color(0xFF2A0E2E)
-            else -> Color(0xFF120A1E)
+            QuickAssistActivity.Phase.LISTENING -> Color(0xFF17130C)
+            QuickAssistActivity.Phase.THINKING -> Color(0xFF1A160D)
+            QuickAssistActivity.Phase.SPEAKING -> Color(0xFF1B110A)
+            else -> ObsidianGold.Obsidian
         }, tween(600), label = "bgTop")
     // Subtle, continuous vertical drift of the gradient for a "living" feel.
     val bgAnim = rememberInfiniteTransition(label = "bg")
@@ -532,45 +859,71 @@ private fun AssistScreen(
         0f, 1f,
         infiniteRepeatable(tween(5000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "drift")
+    val compactOrb = turns.isNotEmpty()
+    val orbSize by animateDpAsState(
+        targetValue = if (compactOrb) 82.dp else 150.dp,
+        animationSpec = tween(360, easing = FastOutSlowInEasing),
+        label = "orbSize",
+    )
 
     Box(
         Modifier.fillMaxSize().background(
             Brush.verticalGradient(
                 0f to bgTop,
-                (0.45f + drift * 0.15f) to Color(0xFF08060F),
-                1f to Color(0xFF050309),
+                (0.45f + drift * 0.15f) to ObsidianGold.Obsidian,
+                1f to ObsidianGold.Void,
             )
         ),
     ) {
-        // Close button
-        IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
-            Icon(Icons.Default.Close, "Cerrar", tint = Color(0xFF9A8BC0))
-        }
-
+        PremiumAuroraBackdrop(phase = phase, level = level)
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 24.dp),
+            Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.height(40.dp))
-            ReactiveOrb(level = level, phase = phase, onTap = onOrbTap)
-            Spacer(Modifier.height(20.dp))
-            Text(
-                when (phase) {
-                    QuickAssistActivity.Phase.LISTENING -> "ESCUCHANDO"
-                    QuickAssistActivity.Phase.THINKING -> "PENSANDO"
-                    QuickAssistActivity.Phase.SPEAKING -> "BLACKCLAW"
-                    QuickAssistActivity.Phase.NEED_MIC -> "PERMISO"
-                    QuickAssistActivity.Phase.IDLE -> "EN PAUSA"
+            Spacer(Modifier.height(10.dp))
+            PremiumAssistHeader(phase, onClose)
+            Spacer(Modifier.height(if (compactOrb) 8.dp else 14.dp))
+            Surface(
+                color = ObsidianGold.Raised.copy(alpha = 0.68f),
+                shape = RoundedCornerShape(38.dp),
+                modifier = Modifier.padding(4.dp)
+                    .border(1.dp, ObsidianGold.GoldDeep.copy(alpha = 0.55f), RoundedCornerShape(38.dp)),
+            ) {
+                ReactiveOrb(orbSize = orbSize, level = level, phase = phase, onTap = onOrbTap)
+            }
+            Spacer(Modifier.height(if (compactOrb) 8.dp else 14.dp))
+            androidx.compose.animation.AnimatedContent(
+                targetState = phase,
+                transitionSpec = {
+                    androidx.compose.animation.fadeIn(tween(400)) togetherWith
+                        androidx.compose.animation.fadeOut(tween(300))
                 },
-                color = Color(0xFFB9A7E0), fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 3.sp,
-            )
+                label = "phaseLabel",
+            ) { p ->
+                Text(
+                    when (p) {
+                        QuickAssistActivity.Phase.LISTENING -> "ESCUCHANDO"
+                        QuickAssistActivity.Phase.THINKING -> "PENSANDO"
+                        QuickAssistActivity.Phase.SPEAKING -> "BLACKCLAW"
+                        QuickAssistActivity.Phase.NEED_MIC -> "PERMISO"
+                        QuickAssistActivity.Phase.IDLE -> "EN PAUSA"
+                    },
+                    color = ObsidianGold.GoldLight, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 3.5.sp,
+                )
+            }
 
             // Live partial transcript while listening.
             if (phase == QuickAssistActivity.Phase.LISTENING && partial.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
-                Text(partial, color = Color.White, fontSize = 18.sp, textAlign = TextAlign.Center,
+                Text(partial, color = ObsidianGold.Ink, fontSize = 18.sp, textAlign = TextAlign.Center,
                     fontWeight = FontWeight.Medium)
+            }
+
+            // The live task state is compact and always offers a way back out.
+            if (phase == QuickAssistActivity.Phase.THINKING && progress != null) {
+                Spacer(Modifier.height(10.dp))
+                TaskProgressCard(progress, onCancel)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -585,21 +938,22 @@ private fun AssistScreen(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(turns) { t -> TurnBubble(t) }
+                items(turns, key = { it.id }) { t -> TurnBubble(t) }
                 if (turns.isEmpty()) {
                     item {
-                        Text(
-                            status, color = Color.White.copy(alpha = 0.92f), fontSize = 20.sp,
-                            textAlign = TextAlign.Center, lineHeight = 27.sp,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        )
+                        WelcomePanel(status, phase)
                     }
                 }
             }
 
-            // Status line for non-listening phases (thinking/idle/need mic).
-            if (phase != QuickAssistActivity.Phase.LISTENING && turns.isNotEmpty()) {
-                Text(status, color = Color(0xFF9A8BC0), fontSize = 13.sp,
+            if (recovery != null) {
+                Spacer(Modifier.height(8.dp))
+                RecoveryCard(recovery, onRecovery)
+            }
+
+            // Status line for speaking/idle phases.
+            if ((phase == QuickAssistActivity.Phase.SPEAKING || phase == QuickAssistActivity.Phase.IDLE) && turns.isNotEmpty()) {
+                Text(status, color = ObsidianGold.Muted, fontSize = 13.sp,
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(8.dp))
             }
 
@@ -622,32 +976,32 @@ private fun AssistScreen(
                         value = typedText,
                         onValueChange = { typedText = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Escribe un mensaje…", color = Color(0xFF7A6FA0)) },
+                        placeholder = { Text("Escribe un mensaje…", color = ObsidianGold.Quiet) },
                         singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                        textStyle = androidx.compose.ui.text.TextStyle(color = ObsidianGold.Ink, fontSize = 15.sp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = {
                             if (typedText.isNotBlank() && !busy) { onTyped(typedText); typedText = ""; textMode = false }
                         }),
                         shape = RoundedCornerShape(20.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF9D5CFF),
-                            unfocusedBorderColor = Color(0xFF3A2E5C),
-                            cursorColor = Color(0xFF9D5CFF),
+                            focusedBorderColor = ObsidianGold.Gold,
+                            unfocusedBorderColor = ObsidianGold.Outline,
+                            cursorColor = ObsidianGold.Gold,
                         ),
                     )
                     Spacer(Modifier.width(8.dp))
                     Box(
                         Modifier.size(48.dp).clip(CircleShape)
-                            .background(Brush.radialGradient(listOf(Color(0xFF7C3AED), Color(0xFF3A1E6E))))
+                            .background(ObsidianGold.actionBrush)
                             .clickable(enabled = !busy) {
                                 if (typedText.isNotBlank()) { onTyped(typedText); typedText = ""; textMode = false }
                             },
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.AutoMirrored.Filled.Send, "Enviar", tint = Color.White, modifier = Modifier.size(20.dp)) }
+                    ) { Icon(Icons.AutoMirrored.Filled.Send, "Enviar", tint = ObsidianGold.Void, modifier = Modifier.size(20.dp)) }
                     Spacer(Modifier.width(6.dp))
                     IconButton(onClick = { textMode = false; onMic() }) {
-                        Icon(Icons.Default.Mic, "Hablar", tint = Color(0xFFB9A7E0))
+                        Icon(Icons.Default.Mic, "Hablar", tint = ObsidianGold.GoldLight)
                     }
                 }
             } else {
@@ -663,17 +1017,18 @@ private fun AssistScreen(
                     if (phase == QuickAssistActivity.Phase.IDLE || phase == QuickAssistActivity.Phase.NEED_MIC) {
                         Box(
                             Modifier.size(64.dp).clip(CircleShape)
-                                .background(Brush.radialGradient(listOf(Color(0xFF7C3AED), Color(0xFF3A1E6E))))
+                                .background(ObsidianGold.actionBrush)
                                 .clickable { onMic() },
                             contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Default.Mic, "Hablar", tint = Color.White, modifier = Modifier.size(30.dp)) }
+                        ) { Icon(Icons.Default.Mic, "Hablar", tint = ObsidianGold.Void, modifier = Modifier.size(30.dp)) }
                         Spacer(Modifier.width(16.dp))
                     }
                     IconButton(
                         onClick = { onStartTyping(); textMode = true },
                         modifier = Modifier.size(44.dp).clip(CircleShape)
-                            .background(Color(0xFF221A38)),
-                    ) { Icon(Icons.Default.Keyboard, "Escribir", tint = Color(0xFFB9A7E0), modifier = Modifier.size(20.dp)) }
+                            .background(ObsidianGold.Raised)
+                            .border(1.dp, ObsidianGold.Outline, CircleShape),
+                    ) { Icon(Icons.Default.Keyboard, "Escribir", tint = ObsidianGold.GoldLight, modifier = Modifier.size(20.dp)) }
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -682,18 +1037,192 @@ private fun AssistScreen(
 }
 
 @Composable
+private fun WelcomePanel(status: String, phase: QuickAssistActivity.Phase) {
+    val title = when (phase) {
+        QuickAssistActivity.Phase.NEED_MIC -> "Elige cómo continuar"
+        QuickAssistActivity.Phase.IDLE -> "¿Qué necesitas?"
+        else -> "Estoy aquí"
+    }
+    Surface(
+        color = ObsidianGold.Surface.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+            .border(1.dp, ObsidianGold.Outline, RoundedCornerShape(22.dp)),
+    ) {
+        Column(
+            Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(title, color = ObsidianGold.Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(7.dp))
+            Text(status, color = ObsidianGold.Muted, fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 21.sp)
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistCapabilityChip("Voz o texto")
+                AssistCapabilityChip("Resultados claros")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistCapabilityChip(label: String) {
+    Surface(color = ObsidianGold.Raised, shape = RoundedCornerShape(10.dp)) {
+        Text(label, color = ObsidianGold.GoldLight, fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+    }
+}
+
+@Composable
+private fun PremiumAssistHeader(phase: QuickAssistActivity.Phase, onClose: () -> Unit) {
+    val active = phase == QuickAssistActivity.Phase.LISTENING || phase == QuickAssistActivity.Phase.THINKING
+    Surface(
+        color = ObsidianGold.Surface.copy(alpha = 0.88f),
+        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, ObsidianGold.Outline, RoundedCornerShape(22.dp)),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(32.dp).clip(RoundedCornerShape(10.dp))
+                    .background(ObsidianGold.actionBrush),
+                contentAlignment = Alignment.Center,
+            ) { Text("B", color = ObsidianGold.Void, fontWeight = FontWeight.Black, fontSize = 16.sp) }
+            Spacer(Modifier.width(11.dp))
+            Column {
+                Text("BLACKCLAW", color = ObsidianGold.Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+                Text("ASISTENTE DEL SISTEMA", color = ObsidianGold.Quiet, fontSize = 9.sp, letterSpacing = 1.1.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.size(8.dp).clip(CircleShape)
+                .background(if (active) ObsidianGold.Gold else ObsidianGold.Quiet))
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Default.Close, "Cerrar", tint = ObsidianGold.Muted, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PremiumAuroraBackdrop(phase: QuickAssistActivity.Phase, level: Float) {
+    val reduceMotion = ClawAnimation.reduceMotion()
+    val infinite = rememberInfiniteTransition(label = "aurora")
+    val drift by infinite.animateFloat(
+        0f, if (reduceMotion) 0f else 1f,
+        infiniteRepeatable(tween(if (reduceMotion) 1 else 6500, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "auroraDrift",
+    )
+    val phaseColor by animateColorAsState(
+        ObsidianGold.active(phase), tween(800), label = "auroraColor"
+    )
+    Canvas(Modifier.fillMaxSize()) {
+        drawCircle(
+            brush = Brush.radialGradient(listOf(phaseColor.copy(alpha = 0.16f + level * 0.09f), Color.Transparent)),
+            radius = size.width * 0.75f,
+            center = Offset(size.width * (0.18f + drift * 0.18f), size.height * 0.20f),
+        )
+        drawCircle(
+            brush = Brush.radialGradient(listOf(ObsidianGold.GoldDeep.copy(alpha = 0.14f), Color.Transparent)),
+            radius = size.width * 0.62f,
+            center = Offset(size.width * (0.88f - drift * 0.16f), size.height * 0.62f),
+        )
+    }
+}
+
+@Composable
+private fun TaskProgressCard(progress: QuickAssistProgress, onCancel: () -> Unit) {
+    val infinite = rememberInfiniteTransition(label = "dots")
+    val dot1 by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "d1")
+    val dot2 by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(600, delayMillis = 200), RepeatMode.Reverse), label = "d2")
+    val dot3 by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(600, delayMillis = 400), RepeatMode.Reverse), label = "d3")
+
+    Surface(
+        color = ObsidianGold.Surface.copy(alpha = 0.94f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, ObsidianGold.Outline, RoundedCornerShape(18.dp)),
+    ) {
+        Row(
+            Modifier.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                listOf(dot1, dot2, dot3).forEach { alpha ->
+                    Box(Modifier.size(7.dp).clip(CircleShape)
+                        .background(ObsidianGold.Gold.copy(alpha = 0.3f + alpha * 0.7f)))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(progress.label, color = ObsidianGold.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                if (progress.detail.isNotBlank()) {
+                    Text(progress.detail, color = ObsidianGold.Muted, fontSize = 11.sp, maxLines = 1)
+                }
+            }
+            Surface(
+                color = ObsidianGold.Raised,
+                shape = RoundedCornerShape(13.dp),
+                modifier = Modifier.heightIn(min = 48.dp).clickable(onClick = onCancel),
+            ) {
+                Box(Modifier.padding(horizontal = 13.dp), contentAlignment = Alignment.Center) {
+                    Text("Cancelar", color = ObsidianGold.GoldLight, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecoveryCard(recovery: QuickAssistRecovery, onAction: () -> Unit) {
+    val (title, detail, action) = when (recovery) {
+        QuickAssistRecovery.MICROPHONE -> Triple(
+            "Activa el micrófono", "Puedes seguir escribiendo mientras das el permiso.", "Dar permiso")
+        QuickAssistRecovery.ACCESSIBILITY -> Triple(
+            "Falta un permiso", "Activa Accesibilidad para que BlackClaw pueda completar esa acción.", "Abrir ajustes")
+        QuickAssistRecovery.CONNECTION -> Triple(
+            "Revisa tu conexión", "Conéctate a una red y vuelve a intentarlo.", "Abrir red")
+        QuickAssistRecovery.RETRY -> Triple(
+            "No se completó la acción", "Puedes volver a intentarlo sin repetir tu solicitud.", "Reintentar")
+    }
+    Surface(
+        color = Color(0xFF26170C).copy(alpha = 0.96f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, ObsidianGold.Alert.copy(alpha = 0.55f), RoundedCornerShape(18.dp)),
+    ) {
+        Row(
+            Modifier.padding(start = 14.dp, end = 8.dp, top = 11.dp, bottom = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = ObsidianGold.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(detail, color = ObsidianGold.Muted, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Surface(
+                color = ObsidianGold.Alert,
+                shape = RoundedCornerShape(13.dp),
+                modifier = Modifier.heightIn(min = 48.dp).clickable(onClick = onAction),
+            ) {
+                Box(Modifier.padding(horizontal = 13.dp), contentAlignment = Alignment.Center) {
+                    Text(action, color = ObsidianGold.Void, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SuggestionChips(onSuggestion: (String) -> Unit) {
-    // A varied mix so the panel signals it can do more than "open app X":
-    // agenda/reminders, device control, security, and general Q&A.
-    val chips = remember {
-        listOf(
-            "¿Qué tengo hoy?", "Pon música", "¿Cuánta batería?",
-            "Pídeme un Uber", "Lee mis notificaciones", "¿Qué hora es?",
-            "Recuérdame llamar al dentista mañana a las 5",
-            "¿Alguna app me está mostrando anuncios?",
-            "Resume mis mensajes sin leer",
-            "Pon una alarma a las 7",
-        ).shuffled().take(6)
+    val hour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+    val chips = remember(hour) {
+        val base = when {
+            hour in 5..11 -> listOf("¿Qué tengo hoy?", "Pon una alarma a las 7", "¿Cómo está el clima?",
+                "Resume mis notificaciones", "¿Cuánta batería?", "Pon música para trabajar")
+            hour in 12..17 -> listOf("¿Qué tengo hoy?", "Pídeme un Uber", "Pon música",
+                "Lee mis notificaciones", "¿Cuánta batería?", "Recuérdame llamar al dentista a las 5")
+            else -> listOf("¿Qué tengo mañana?", "Pon una alarma a las 7", "Pon música relajante",
+                "¿Alguna app me muestra anuncios?", "Resume mis mensajes", "¿Cuánta batería?")
+        }
+        base.shuffled().take(6)
     }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -701,11 +1230,12 @@ private fun SuggestionChips(onSuggestion: (String) -> Unit) {
     ) {
         chips.forEach { c ->
             Surface(
-                color = Color(0xFF221A38),
+                color = ObsidianGold.Raised,
                 shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.clickable { onSuggestion(c) },
+                modifier = Modifier.border(1.dp, ObsidianGold.Outline, RoundedCornerShape(18.dp))
+                    .clickable { onSuggestion(c) },
             ) {
-                Text(c, color = Color(0xFFCFC2EE), fontSize = 13.sp,
+                Text(c, color = ObsidianGold.Muted, fontSize = 13.sp,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
             }
         }
@@ -719,15 +1249,9 @@ private val IMG_EXT = Regex("""\.(png|jpe?g|webp|gif)(\?.*)?$""", RegexOption.IG
 private fun TurnBubble(t: QuickAssistActivity.Turn) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val align = if (t.fromUser) Alignment.End else Alignment.Start
-    val bg = if (t.fromUser) Color(0xFF2A2140) else Color(0xFF17223A)
-    val fg = if (t.fromUser) Color(0xFFE8E0FF) else Color.White
 
     val visible = remember { androidx.compose.animation.core.MutableTransitionState(false) }
     LaunchedEffect(Unit) { visible.targetState = true }
-
-    val urls = remember(t.text) { URL_REGEX.findAll(t.text).map { it.value }.distinct().toList() }
-    val images = urls.filter { IMG_EXT.containsMatchIn(it) }
-    val links = urls.filter { it !in images }
 
     androidx.compose.animation.AnimatedVisibility(
         visibleState = visible,
@@ -735,46 +1259,51 @@ private fun TurnBubble(t: QuickAssistActivity.Turn) {
             androidx.compose.animation.slideInVertically(tween(300)) { it / 3 },
     ) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = align) {
-            Surface(color = bg, shape = RoundedCornerShape(16.dp)) {
+            // Real cards are built from values returned by tools; never guess a card from prose.
+            if (t.cards.isNotEmpty()) {
+                com.blackclaw.android.ui.cards.AssistCardList(
+                    cards = t.cards,
+                    modifier = Modifier.widthIn(max = 360.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            val bg = if (t.fromUser) ObsidianGold.Raised else ObsidianGold.Surface
+            val fg = ObsidianGold.Ink
+            Surface(
+                color = bg,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.border(
+                    1.dp,
+                    if (t.fromUser) ObsidianGold.GoldDeep.copy(alpha = 0.58f) else ObsidianGold.Outline,
+                    RoundedCornerShape(16.dp),
+                ),
+            ) {
                 Column(Modifier.widthIn(max = 340.dp).padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(t.text, color = fg, fontSize = 15.sp, lineHeight = 21.sp)
-                    images.take(2).forEach { url ->
-                        Spacer(Modifier.height(8.dp))
-                        androidx.compose.ui.viewinterop.AndroidView(
-                            factory = { c ->
-                                android.widget.ImageView(c).apply {
-                                    adjustViewBounds = true
-                                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                                    runCatching {
-                                        com.bumptech.glide.Glide.with(c).load(url).into(this)
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)
-                                .clip(RoundedCornerShape(10.dp)),
-                        )
-                    }
                 }
             }
-            if (links.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                links.take(3).forEach { url ->
-                    Spacer(Modifier.height(4.dp))
-                    Surface(
-                        color = Color(0xFF20304F), shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.widthIn(max = 340.dp).clickable {
-                            runCatching {
-                                ctx.startActivity(android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (!t.fromUser) {
+                val urls = remember(t.text) { URL_REGEX.findAll(t.text).map { it.value }.distinct().toList() }
+                val links = urls.filter { !IMG_EXT.containsMatchIn(it) }
+                if (links.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    links.take(2).forEach { url ->
+                        Surface(
+                            color = ObsidianGold.Raised, shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.widthIn(max = 340.dp).clickable {
+                                runCatching {
+                                    ctx.startActivity(android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
+                            },
+                        ) {
+                            Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("🔗", fontSize = 14.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(prettyUrl(url), color = ObsidianGold.GoldLight, fontSize = 13.sp, maxLines = 1)
                             }
-                        },
-                    ) {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔗", fontSize = 14.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(prettyUrl(url), color = Color(0xFF8FB4FF), fontSize = 13.sp, maxLines = 1)
                         }
                     }
                 }
@@ -789,39 +1318,63 @@ private fun prettyUrl(url: String): String = runCatching {
     (u.host?.removePrefix("www.") ?: url) + (u.path?.take(20) ?: "")
 }.getOrDefault(url.take(40))
 @Composable
-private fun ReactiveOrb(level: Float, phase: QuickAssistActivity.Phase, onTap: () -> Unit = {}) {
+private fun ReactiveOrb(orbSize: androidx.compose.ui.unit.Dp, level: Float, phase: QuickAssistActivity.Phase, onTap: () -> Unit = {}) {
+    val reduceMotion = ClawAnimation.reduceMotion()
     val infinite = rememberInfiniteTransition(label = "orb")
     val rot by infinite.animateFloat(
-        0f, 360f, infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "rot")
+        0f, if (reduceMotion) 0f else 360f,
+        infiniteRepeatable(tween(if (reduceMotion) 1 else 6000, easing = LinearEasing)), label = "rot")
     val breathe by infinite.animateFloat(
-        0.9f, 1.06f,
-        infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        0.9f, if (reduceMotion) 0.9f else 1.06f,
+        infiniteRepeatable(tween(if (reduceMotion) 1 else 1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "breathe")
     val sweep by infinite.animateFloat(
-        0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "sweep")
+        0f, if (reduceMotion) 0f else 360f,
+        infiniteRepeatable(tween(if (reduceMotion) 1 else 1100, easing = LinearEasing)), label = "sweep")
 
     val thinking = phase == QuickAssistActivity.Phase.THINKING
     val speaking = phase == QuickAssistActivity.Phase.SPEAKING
+    val energy = when {
+        phase == QuickAssistActivity.Phase.LISTENING -> level
+        speaking -> (breathe - 0.9f) * 1.9f
+        thinking -> 0.18f
+        else -> 0.06f
+    }
     val coreScale = if (phase == QuickAssistActivity.Phase.LISTENING) 0.92f + level * 0.5f else breathe
 
-    Box(Modifier.size(150.dp).clickable { onTap() },
+    Box(Modifier.size(orbSize).clickable { onTap() },
         contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val c = Offset(size.width / 2f, size.height / 2f)
             val baseR = size.minDimension / 2f
-            val ringColors = listOf(Color(0xFF7C3AED), Color(0xFF9D5CFF), Color(0xFF00D4FF))
+            val ringColors = listOf(ObsidianGold.GoldLight, ObsidianGold.Gold, ObsidianGold.GoldDeep)
             for (i in 0 until 3) {
                 val wobble = (sin((rot / 57.3f) + i * 0.6f) * 0.04f).toFloat()
-                val r = baseR * (0.55f + i * 0.16f) * (1f + level * 0.35f + wobble)
+                val r = baseR * (0.55f + i * 0.16f) * (1f + energy * 0.35f + wobble)
                 drawCircle(
-                    color = ringColors[i].copy(alpha = 0.18f - i * 0.04f),
+                    color = ringColors[i].copy(alpha = 0.24f - i * 0.05f),
                     radius = r, center = c,
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f + level * 6f),
                 )
             }
+            // Slow orbiting flecks make the core feel alive without turning it into
+            // a noisy rainbow spinner. Their speed and glow follow the current state.
+            for (i in 0..2) {
+                val angle = ((rot + i * 120f) / 57.2958f).toDouble()
+                val orbit = baseR * (0.70f + i * 0.08f)
+                val point = Offset(
+                    c.x + cos(angle).toFloat() * orbit,
+                    c.y + sin(angle).toFloat() * orbit,
+                )
+                drawCircle(
+                    color = ObsidianGold.GoldLight.copy(alpha = 0.45f + energy * 0.45f),
+                    radius = baseR * (0.018f + energy * 0.016f),
+                    center = point,
+                )
+            }
             drawCircle(
                 brush = Brush.radialGradient(
-                    listOf(Color(0x559D5CFF), Color(0x00000000)),
+                    listOf(ObsidianGold.Gold.copy(alpha = 0.30f), Color.Transparent),
                     center = c, radius = baseR * (0.7f + level * 0.4f)),
                 radius = baseR * (0.7f + level * 0.4f), center = c,
             )
@@ -829,7 +1382,7 @@ private fun ReactiveOrb(level: Float, phase: QuickAssistActivity.Phase, onTap: (
             rotate(rot, c) {
                 drawCircle(
                     brush = Brush.linearGradient(
-                        listOf(Color(0xFF7C3AED), Color(0xFF00D4FF), Color(0xFFEC4899)),
+                        listOf(ObsidianGold.GoldDeep, ObsidianGold.Gold, ObsidianGold.GoldLight),
                         start = Offset(c.x - coreR, c.y - coreR),
                         end = Offset(c.x + coreR, c.y + coreR)),
                     radius = coreR, center = c,
@@ -837,12 +1390,25 @@ private fun ReactiveOrb(level: Float, phase: QuickAssistActivity.Phase, onTap: (
             }
             if (thinking) {
                 drawArc(
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = ObsidianGold.GoldLight.copy(alpha = 0.92f),
                     startAngle = sweep, sweepAngle = 80f, useCenter = false,
                     topLeft = Offset(c.x - baseR * 0.62f, c.y - baseR * 0.62f),
                     size = androidx.compose.ui.geometry.Size(baseR * 1.24f, baseR * 1.24f),
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f),
                 )
+            }
+            if (speaking) {
+                for (i in 0..1) {
+                    drawArc(
+                        color = ObsidianGold.Gold.copy(alpha = 0.30f + i * 0.16f),
+                        startAngle = -60f + sweep + i * 180f,
+                        sweepAngle = 58f,
+                        useCenter = false,
+                        topLeft = Offset(c.x - baseR * (0.72f + i * 0.10f), c.y - baseR * (0.72f + i * 0.10f)),
+                        size = androidx.compose.ui.geometry.Size(baseR * (1.44f + i * 0.20f), baseR * (1.44f + i * 0.20f)),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f + energy * 3f),
+                    )
+                }
             }
 
             // ── BlackClaw mark: three tapered claw slashes, centered in the core.
@@ -864,7 +1430,7 @@ private fun ReactiveOrb(level: Float, phase: QuickAssistActivity.Phase, onTap: (
                     }
                     drawPath(
                         path,
-                        color = Color.White.copy(alpha = 0.92f),
+                        color = ObsidianGold.Void.copy(alpha = 0.96f),
                         style = androidx.compose.ui.graphics.drawscope.Stroke(
                             width = stroke,
                             cap = androidx.compose.ui.graphics.StrokeCap.Round),

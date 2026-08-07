@@ -53,8 +53,39 @@ object VoiceInputManager {
         set(v) { KVUtils.putBoolean(KEY_WAKE_ENABLED, v); KVUtils.sync() }
 
     var language: String
-        get() = KVUtils.getString(KEY_LANG, "es-ES")
+        get() {
+            val stored = KVUtils.getString(KEY_LANG, "")
+            if (stored.isNotEmpty()) return stored
+            return detectSpanishVariant()
+        }
         set(v) { KVUtils.putString(KEY_LANG, v); KVUtils.sync() }
+
+    private fun detectSpanishVariant(): String {
+        val loc = Locale.getDefault()
+        if (!loc.language.equals("es", ignoreCase = true)) return loc.toLanguageTag()
+        return when (loc.country.uppercase()) {
+            "MX" -> "es-MX"
+            "US" -> "es-US"
+            "AR" -> "es-AR"
+            "CO" -> "es-CO"
+            "CL" -> "es-CL"
+            "PE" -> "es-PE"
+            "VE" -> "es-VE"
+            "EC" -> "es-EC"
+            "GT" -> "es-GT"
+            "BO" -> "es-BO"
+            "DO" -> "es-DO"
+            "HN" -> "es-HN"
+            "NI" -> "es-NI"
+            "CR" -> "es-CR"
+            "PA" -> "es-PA"
+            "SV" -> "es-SV"
+            "PR" -> "es-PR"
+            "UY" -> "es-UY"
+            "PY" -> "es-PY"
+            else -> "es-ES"
+        }
+    }
 
     /** Show the full-screen assist panel when the wake word fires (vs background-only). */
     var panelOnWake: Boolean
@@ -107,10 +138,26 @@ object VoiceInputManager {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            // Prefer on-device recognition when the OEM supports it (privacy + offline).
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ClawApplication.instance.packageName)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
         }
+
+    private fun bestTranscript(candidates: List<String>): String {
+        if (candidates.isEmpty()) return ""
+        if (candidates.size == 1) return candidates[0].trim()
+        return candidates
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .maxByOrNull { c ->
+                var score = c.length.toDouble()
+                if (c.any { it.isUpperCase() }) score += 5
+                if (c.contains(' ')) score += 3
+                if (c.first().isUpperCase()) score += 2
+                score
+            } ?: candidates[0].trim()
+    }
 
     /**
      * Listen once and return the transcript via [onResult]. [onError] gets a
@@ -168,8 +215,8 @@ object VoiceInputManager {
             override fun onResults(results: Bundle) {
                 if (done) return
                 done = true
-                val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.trim().orEmpty()
+                val candidates = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                val text = bestTranscript(candidates)
                 cleanup()
                 if (text.isNotEmpty()) onResult(text) else onError("No entendí nada.")
             }

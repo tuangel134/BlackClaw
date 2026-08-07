@@ -8,6 +8,30 @@ import org.junit.Test
 class TaskParserTest {
 
     @Test
+    fun `opens floating autoclicker without treating it as an app name`() {
+        val parsed = TaskParser.parse("abre el autoclicker")
+        assertEquals("game_autoclicker", parsed?.toolName)
+        assertEquals("open", parsed?.toolParams?.get("operation"))
+    }
+
+    @Test
+    fun `compound game phrase directly starts named looping macro`() {
+        val parsed = TaskParser.parse("abre Clash of Clans y inicia el autoclicker farmeo en bucle")
+        assertEquals("game_macro", parsed?.toolName)
+        assertEquals("play", parsed?.toolParams?.get("operation"))
+        assertEquals("farmeo", parsed?.toolParams?.get("name"))
+        assertEquals(true, parsed?.toolParams?.get("loop"))
+    }
+
+    @Test
+    fun `controls active autoclicker locally`() {
+        assertEquals("pause", TaskParser.parse("pausa el autoclicker")?.toolParams?.get("operation"))
+        assertEquals("resume", TaskParser.parse("reanuda el autoclicker")?.toolParams?.get("operation"))
+        assertEquals("restart", TaskParser.parse("reinicia el autoclicker")?.toolParams?.get("operation"))
+        assertEquals("stop", TaskParser.parse("deten el autoclicker")?.toolParams?.get("operation"))
+    }
+
+    @Test
     fun `send message command routes to direct send message tool`() {
         val parsed = TaskParser.parse("send hi to Girlfriend on WhatsApp")
 

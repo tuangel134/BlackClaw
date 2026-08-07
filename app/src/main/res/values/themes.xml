@@ -58,9 +58,6 @@
     <!-- 启动页专用主题：冷启动 Window 直接显示纯色背景，无白屏无系统 Logo -->
     <style name="Theme.BlackClaw.Splash" parent="Theme.BlackClaw">
         <item name="android:windowBackground">@color/colorBgPrimary</item>
-        <!-- Android 12+ 禁用系统 SplashScreen 的图标 -->
-        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
-        <item name="android:windowSplashScreenBackground">@color/colorBgPrimary</item>
     </style>
 
     <!-- 透明 Activity（用于剪贴板读取等需要前台焦点的操作） -->

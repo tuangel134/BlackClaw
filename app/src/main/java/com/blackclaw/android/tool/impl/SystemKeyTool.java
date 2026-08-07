@@ -86,18 +86,18 @@ public class SystemKeyTool extends BaseTool {
                 success = service.unlockScreen();
                 successMsg = "Screen unlock requested";
                 break;
+            // ProcessUtils drains stdout/stderr, closes all three pipes and
+            // destroys the process. The old inline exec()+waitFor() leaked 3 fds
+            // per press (1024-fd ceiling → "Too many open files" mid-session) and
+            // could hang the agent thread if the command wrote past the pipe buffer.
             case "enter":
-                try {
-                    Runtime.getRuntime().exec(new String[]{"input", "keyevent", String.valueOf(android.view.KeyEvent.KEYCODE_ENTER)}).waitFor();
-                    success = true;
-                } catch (Exception e) { success = false; }
+                success = com.blackclaw.android.utils.ProcessUtils.execOk(
+                        "input", "keyevent", String.valueOf(android.view.KeyEvent.KEYCODE_ENTER));
                 successMsg = "Pressed Enter key";
                 break;
             case "tab":
-                try {
-                    Runtime.getRuntime().exec(new String[]{"input", "keyevent", String.valueOf(android.view.KeyEvent.KEYCODE_TAB)}).waitFor();
-                    success = true;
-                } catch (Exception e) { success = false; }
+                success = com.blackclaw.android.utils.ProcessUtils.execOk(
+                        "input", "keyevent", String.valueOf(android.view.KeyEvent.KEYCODE_TAB));
                 successMsg = "Pressed Tab key";
                 break;
             default:

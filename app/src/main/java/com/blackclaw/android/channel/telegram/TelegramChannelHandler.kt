@@ -3,6 +3,7 @@ package com.blackclaw.android.channel.telegram
 import com.blackclaw.android.channel.Channel
 import com.blackclaw.android.channel.ChannelHandler
 import com.blackclaw.android.channel.ChannelManager
+import com.blackclaw.android.channel.auth.ChannelAuthorization
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
 import kotlinx.coroutines.CoroutineScope
@@ -95,9 +96,21 @@ class TelegramChannelHandler(
 
                         val chatId = message.getJSONObject("chat").getLong("id")
                         val messageId = message.getInt("message_id")
-                        lastChatId = chatId
 
-                        XLog.i(TAG, "[${channel.displayName}] Message received: $text, chatId=$chatId")
+                        // Authorize BEFORE adopting this chat as the reply target.
+                        // Setting lastChatId first would let any stranger hijack the
+                        // destination of the agent's next answer just by messaging us.
+                        val auth = ChannelAuthorization.evaluate(channel, chatId.toString(), text)
+                        if (!auth.allowed) {
+                            auth.reply?.let { sendMessageToUser(chatId.toString(), it) }
+                            continue
+                        }
+
+                        lastChatId = chatId
+                        auth.reply?.let { sendMessageToUser(chatId.toString(), it) }
+                        if (auth.justPaired) continue
+
+                        XLog.i(TAG, "[${channel.displayName}] Message received, chatId=$chatId")
                         ChannelManager.dispatchMessage(channel, text, messageId.toString())
                     }
                 } catch (_: java.net.SocketTimeoutException) {

@@ -1,7 +1,10 @@
 package com.blackclaw.android.service
 
+import android.annotation.SuppressLint
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.core.content.ContextCompat
@@ -18,6 +21,7 @@ class VoiceTileService : TileService() {
         refresh()
     }
 
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
         val enabling = !VoiceInputManager.wakeEnabled
@@ -30,7 +34,20 @@ class VoiceTileService : TileService() {
                 val i = packageManager.getLaunchIntentForPackage(packageName)?.apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                runCatching { startActivityAndCollapse(i) }
+                runCatching {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        val pending = PendingIntent.getActivity(
+                            this,
+                            0,
+                            i,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        )
+                        startActivityAndCollapse(pending)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        startActivityAndCollapse(i)
+                    }
+                }
                 return
             }
             VoiceInputManager.wakeEnabled = true

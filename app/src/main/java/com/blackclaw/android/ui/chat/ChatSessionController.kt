@@ -44,7 +44,7 @@ class ChatSessionController(
 
     companion object {
         private const val TAG = "ChatSessionController"
-        private const val BASE_SYSTEM_PROMPT = "You are a helpful AI assistant on an Android phone."
+        private const val BASE_SYSTEM_PROMPT = "You are BlackClaw, a helpful AI assistant on an Android phone. ${com.blackclaw.android.agent.PromptUtils.CREATOR_INSTRUCTION}"
     }
 
     private var engine: Engine? = null
@@ -306,9 +306,13 @@ class ChatSessionController(
     }
 
     fun sendChat(text: String) {
+        com.blackclaw.android.conversation.ConversationRepository.appendLocal(
+            com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT,
+            com.blackclaw.android.conversation.ConversationRepository.Role.USER, text,
+            com.blackclaw.android.conversation.ConversationRouter.Mode.CONVERSE.name)
         addUser(text)
         uiState.isAwaitingReply.value = true
-        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, "..."))
+        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, ChatMessage.PENDING))
 
         executor.submit {
             try {
@@ -318,12 +322,20 @@ class ChatSessionController(
                     val fallbackModelName = cloudModelName ?: ModelConfigRepository.snapshot().activeCloud.modelName
                     // Index of the "..." placeholder we stream into.
                     val streamIdx = uiState.messages.indexOfLast {
-                        it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+                        it.isPending }
                     val sb = StringBuilder()
+                    var hasVisibleContent = false
                     val llmResponse = try {
                         cloudClient!!.chatStreaming(cloudHistory, emptyList(),
                             object : com.blackclaw.android.agent.llm.StreamingListener {
                                 override fun onPartialText(token: String) {
+                                    if (token.isEmpty()) {
+                                        if (!hasVisibleContent) {
+                                            postToMain { setStreamingText(streamIdx, "Pensando…", fallbackModelName) }
+                                        }
+                                        return
+                                    }
+                                    hasVisibleContent = true
                                     sb.append(token)
                                     val soFar = sb.toString()
                                     postToMain { setStreamingText(streamIdx, soFar, fallbackModelName) }
@@ -338,6 +350,7 @@ class ChatSessionController(
                     val responseText = llmResponse.text?.takeIf { it.isNotBlank() }
                         ?: sb.toString().ifBlank { "(no response)" }
                     cloudHistory.add(AiMessage.from(responseText))
+                    recordSharedAssistant(responseText)
                     val usage = llmResponse.tokenUsage
                     val inputTokens = usage?.inputTokenCount() ?: (text.length / 4 + 1)
                     val outputTokens = usage?.outputTokenCount() ?: (responseText.length / 4 + 1)
@@ -358,7 +371,7 @@ class ChatSessionController(
                     val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
                     val localModelTag = localModelTag(modelPath)
                     val streamIdx = uiState.messages.indexOfLast {
-                        it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+                        it.isPending }
                     val sb = StringBuilder()
                     val responseText = try {
                         streamLocal(currentConversation, text, sb) { soFar ->
@@ -369,6 +382,7 @@ class ChatSessionController(
                         XLog.w(TAG, "local streaming failed, sync fallback: ${se.message}")
                         currentConversation.sendMessage(text)?.toString() ?: sb.toString()
                     }.ifBlank { "(no response)" }
+                    recordSharedAssistant(responseText)
                     val inputTokensEst = text.length / 4 + 1
                     val outputTokensEst = responseText.length / 4 + 1
                     postToMain {
@@ -385,6 +399,7 @@ class ChatSessionController(
                     try {
                         val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
                         val responseText = retryLocalChatOnCpu(modelPath, text)
+                        recordSharedAssistant(responseText)
                         val inputTokensEst = text.length / 4 + 1
                         val outputTokensEst = responseText.length / 4 + 1
                         val cpuModelTag = localModelTag(modelPath)
@@ -489,7 +504,7 @@ class ChatSessionController(
                         context = activity,
                         modelPath = modelPath,
                         conversationConfig = ConversationConfig(
-                            systemInstruction = Contents.of(systemPrompt),
+                            systemInstruction = Contents.of(com.blackclaw.android.agent.PromptUtils.applyGlobalPrompt(systemPrompt)),
                             samplerConfig = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.7)
                         )
                     )
@@ -589,9 +604,58 @@ class ChatSessionController(
         return conversation!!.sendMessage(text)?.toString() ?: "(no response)"
     }
 
+    /**
+     * Context appended to the chat system prompt: long-term memory first, then the
+     * recent cross-surface timeline.
+     *
+     * ## Why memory belongs here and not only in the agent loop
+     *
+     * [com.blackclaw.android.memory.MemoryHub] used to be assembled in exactly one
+     * place, `DefaultAgentService`, so it only reached prompts when a message was
+     * routed as a *task*. A plain conversational reply therefore ran without the
+     * user's profile or any of the facts they had explicitly asked to remember —
+     * the assistant could store "mi mamá se llama Ana" through a tool and then fail
+     * to use it two turns later, purely because the second message did not happen to
+     * need a tool. From the user's side that reads as the assistant forgetting at
+     * random, which is worse than never remembering at all.
+     *
+     * The budget concern that might have justified leaving it out is already handled:
+     * `assembleForProvider` drops the lowest-priority sections to fit
+     * `LOCAL_BUDGET_CHARS` on-device.
+     *
+     * @param isLocal true for the on-device runtime, which gets the tighter budget.
+     */
+    private fun sharedContextSuffix(isLocal: Boolean): String {
+        // Degrade to no memory rather than failing the chat: MemoryHub fans out to
+        // five MMKV/JSON-backed stores, and a single malformed record in any of them
+        // must not be able to stop the user from talking to the assistant.
+        val memory = runCatching {
+            com.blackclaw.android.memory.MemoryHub.assembleForProvider(isLocal)
+        }.onFailure {
+            XLog.w(TAG, "MemoryHub assembly failed, chatting without long-term memory: ${it.message}")
+        }.getOrDefault("")
+
+        val recent = runCatching {
+            com.blackclaw.android.conversation.ConversationRepository.recentLocalLines(8, 1_200)
+        }.getOrDefault(emptyList())
+
+        return buildString {
+            if (memory.isNotBlank()) {
+                append("\n\n").append(memory.trim())
+            }
+            if (recent.isNotEmpty()) {
+                append("\n\nRecent conversation across BlackClaw surfaces:\n")
+                append(recent.joinToString("\n"))
+            }
+        }
+    }
+
     private fun buildConversationConfig(systemPrompt: String? = null): ConversationConfig {
-        val finalPrompt = com.blackclaw.android.agent.PromptUtils
-            .applyGlobalPrompt(systemPrompt ?: BASE_SYSTEM_PROMPT)
+        val withShared = buildString {
+            append(systemPrompt ?: BASE_SYSTEM_PROMPT)
+            append(sharedContextSuffix(isLocal = true))
+        }
+        val finalPrompt = com.blackclaw.android.agent.PromptUtils.applyGlobalPrompt(withShared)
         return ConversationConfig(
             systemInstruction = Contents.of(finalPrompt),
             samplerConfig = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.7)
@@ -615,7 +679,9 @@ class ChatSessionController(
 
     private fun rebuildCloudHistoryFromVisibleMessages() {
         cloudHistory.clear()
-        cloudHistory.add(SystemMessage.from(BASE_SYSTEM_PROMPT))
+        cloudHistory.add(
+            SystemMessage.from(BASE_SYSTEM_PROMPT + sharedContextSuffix(isLocal = false))
+        )
         uiState.messages.forEach { msg ->
             when (msg.role) {
                 ChatMessage.Role.USER -> cloudHistory.add(UserMessage.from(msg.content))
@@ -623,6 +689,13 @@ class ChatSessionController(
                 else -> Unit
             }
         }
+    }
+
+    private fun recordSharedAssistant(text: String) {
+        com.blackclaw.android.conversation.ConversationRepository.appendLocal(
+            com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT,
+            com.blackclaw.android.conversation.ConversationRepository.Role.ASSISTANT, text,
+            com.blackclaw.android.conversation.ConversationRouter.Mode.CONVERSE.name)
     }
 
     private fun ensureCloudHistoryInitialized() {
@@ -680,7 +753,7 @@ class ChatSessionController(
     private fun replaceTypingIndicator(text: String, actualModelName: String? = null) {        val modelTag = actualModelName
             ?: uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim()
             ?: ""
-        val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
+        val idx = uiState.messages.indexOfLast { it.isPending }
         if (idx >= 0) {
             uiState.messages[idx] = ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag)
         } else {

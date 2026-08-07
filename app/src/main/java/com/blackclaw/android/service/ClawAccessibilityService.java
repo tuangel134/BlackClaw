@@ -38,6 +38,30 @@ public class ClawAccessibilityService extends AccessibilityService {
 
     private static final String TAG = "ClawA11yService";
     private static volatile ClawAccessibilityService instance;
+    private static volatile String lastExternalPackage;
+    /** Last readable UI tree before BlackClaw's full-screen assist panel takes focus. */
+    private static volatile String lastExternalScreenTree;
+    private static volatile long lastExternalScreenTreeAtMs;
+    private static final long EXTERNAL_SNAPSHOT_DEBOUNCE_MS = 350L;
+
+    /**
+     * Shared executor for {@link #takeScreenshot(long)} callbacks.
+     *
+     * WHY THIS IS STATIC AND DAEMON: this used to be created per call inside
+     * takeScreenshot(). newSingleThreadExecutor() keeps corePoolSize=1 with no
+     * core-thread timeout, so every single screenshot spawned a worker thread
+     * that parked forever (the executor was never shut down) AND, being
+     * non-daemon, kept the VM's thread count growing for the life of the
+     * process. An agent session takes dozens of screenshots, so that leaked
+     * dozens of permanently parked threads (~1 MB stack each). One shared
+     * daemon thread serialises the callbacks just as well.
+     */
+    private static final java.util.concurrent.Executor SCREENSHOT_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "a11y-screenshot");
+                t.setDaemon(true);
+                return t;
+            });
 
     public static ClawAccessibilityService getInstance() {
         return instance;
@@ -45,6 +69,25 @@ public class ClawAccessibilityService extends AccessibilityService {
 
     public static boolean isRunning() {
         return instance != null;
+    }
+
+    /** Last foreground package outside BlackClaw, useful when an assistant overlay covers it. */
+    public static String getLastExternalPackage() {
+        return lastExternalPackage;
+    }
+
+    /**
+     * Returns a recent external-app snapshot, or null when it would be stale.
+     *
+     * An ACTION_ASSIST activity becomes the active accessibility window as soon
+     * as it opens. Keeping this small pre-assist snapshot is what lets Quick
+     * Assist answer “what is on my screen?” about the app the user invoked it
+     * over, rather than accidentally describing its own interface.
+     */
+    public static String getRecentExternalScreenTree(long maxAgeMs) {
+        String tree = lastExternalScreenTree;
+        if (tree == null || tree.isEmpty()) return null;
+        return System.currentTimeMillis() - lastExternalScreenTreeAtMs <= maxAgeMs ? tree : null;
     }
 
     /**
@@ -148,9 +191,30 @@ public class ClawAccessibilityService extends AccessibilityService {
             if (et == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 try {
                     CharSequence p = event.getPackageName();
+                    if (p != null) {
+                        String packageName = p.toString();
+                        if (!packageName.equals(getPackageName())
+                                && !packageName.equals("com.android.systemui")) {
+                            if (!packageName.equals(lastExternalPackage)) {
+                                lastExternalScreenTree = null;
+                                lastExternalScreenTreeAtMs = 0L;
+                                com.blackclaw.android.perception.ExternalScreenOcrCache.clear();
+                            }
+                            lastExternalPackage = packageName;
+                            rememberExternalScreen(packageName);
+                        }
+                    }
                     com.blackclaw.android.security.AdEventMonitor.INSTANCE
                             .onWindow(p != null ? p.toString() : null);
                 } catch (Throwable ignored) { }
+            }
+            // Keep the snapshot current after a tap, scroll, or text edit without
+            // walking the entire hierarchy for every noisy content-change event.
+            if (et == AccessibilityEvent.TYPE_VIEW_CLICKED
+                    || et == AccessibilityEvent.TYPE_VIEW_SCROLLED
+                    || et == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+                CharSequence p = event.getPackageName();
+                if (p != null) rememberExternalScreen(p.toString());
             }
         }
         // Auto-reply: check incoming messaging notifications
@@ -158,6 +222,30 @@ public class ClawAccessibilityService extends AccessibilityService {
             AutoReplyManager.getInstance().onAccessibilityEvent(event);
         } catch (Exception e) {
             XLog.e(TAG, "AutoReplyManager error in onAccessibilityEvent", e);
+        }
+    }
+
+    private void rememberExternalScreen(String packageName) {
+        if (packageName.equals(getPackageName()) || packageName.equals("com.android.systemui")) {
+            return;
+        }
+        lastExternalPackage = packageName;
+        long now = System.currentTimeMillis();
+        if (now - lastExternalScreenTreeAtMs < EXTERNAL_SNAPSHOT_DEBOUNCE_MS) return;
+        // Capture while the external app still owns the active window. We store only
+        // its compact accessibility text, never pixels, and expire it on read.
+        String snapshot = getScreenTree();
+        // A game or canvas often has no accessibility nodes at all, yet its pixels
+        // may still be readable through an already-authorised MediaProjection.
+        com.blackclaw.android.perception.ExternalScreenOcrCache.captureIfAvailable();
+        if (snapshot != null && !snapshot.trim().isEmpty()) {
+            lastExternalScreenTree = snapshot;
+            lastExternalScreenTreeAtMs = now;
+        } else {
+            // Do not combine OCR from a game/canvas with a stale accessibility
+            // tree from the previous app.
+            lastExternalScreenTree = null;
+            lastExternalScreenTreeAtMs = 0L;
         }
     }
 
@@ -172,6 +260,15 @@ public class ClawAccessibilityService extends AccessibilityService {
     public void onDestroy() {
         super.onDestroy();
         instance = null;
+        // Tear down the autoclicker overlay: its WindowManager and views are bound
+        // to THIS service's context, so an overlay left open would outlive the
+        // service, keep it (and its whole context) reachable, and later fail with
+        // an invalid window token when the user tries to interact with it.
+        try {
+            com.blackclaw.android.game.GameAutoclickerOverlay.INSTANCE.close();
+        } catch (Throwable t) {
+            XLog.w(TAG, "Failed to close autoclicker overlay on service destroy", t);
+        }
         KVUtils.INSTANCE.noteAccessibilityDisconnected();
         XLog.i(TAG, "Accessibility service destroyed");
         ForegroundService.Companion.syncToBackgroundState(this);
@@ -225,12 +322,10 @@ public class ClawAccessibilityService extends AccessibilityService {
      * Performs a tap at the given screen coordinates.
      */
     public boolean performTap(int x, int y) {
-        // Use 16ms (one display frame) instead of 100ms — invisible to users
-        // but cuts the per-tap latency from ~200ms to ~80ms. Most apps still
-        // register the tap correctly because Android's input dispatcher only
-        // needs ACTION_DOWN+ACTION_UP within ViewConfiguration.getTapTimeout()
-        // (typically 100ms).
-        return performTap(x, y, 16);
+        // 30ms: still well under ViewConfiguration.getTapTimeout() (~100ms) so
+        // it registers as a tap, but more reliable across OEM skins than 16ms.
+        // The extra 14ms is imperceptible to users.
+        return performTap(x, y, 30);
     }
 
     public boolean performTap(int x, int y, long durationMs) {
@@ -872,8 +967,8 @@ public class ClawAccessibilityService extends AccessibilityService {
 
         // Use a background executor for the callback to avoid deadlock
         // when takeScreenshot is called from the main thread (Tier 1 tools).
-        java.util.concurrent.Executor bgExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
-        takeScreenshot(Display.DEFAULT_DISPLAY, bgExecutor,
+        // Must NOT be created per call — see SCREENSHOT_EXECUTOR.
+        takeScreenshot(Display.DEFAULT_DISPLAY, SCREENSHOT_EXECUTOR,
                 new TakeScreenshotCallback() {
                     @Override
                     public void onSuccess(ScreenshotResult result) {
@@ -908,15 +1003,11 @@ public class ClawAccessibilityService extends AccessibilityService {
      * @return true if the command executed without error
      */
     public boolean sendKeyEvent(int keyCode) {
-        try {
-            Process process = Runtime.getRuntime().exec(
-                    new String[]{"input", "keyevent", String.valueOf(keyCode)});
-            int exitCode = process.waitFor();
-            return exitCode == 0;
-        } catch (Exception e) {
-            XLog.e(TAG, "Failed to send key event: " + keyCode, e);
-            return false;
-        }
+        // ProcessUtils drains + closes the three pipes and destroys the process.
+        // The previous inline exec()+waitFor() leaked 3 file descriptors per key
+        // press and could deadlock if the command printed anything substantial.
+        return com.blackclaw.android.utils.ProcessUtils.execOk(
+                "input", "keyevent", String.valueOf(keyCode));
     }
 
     // ======================== App Launch ========================

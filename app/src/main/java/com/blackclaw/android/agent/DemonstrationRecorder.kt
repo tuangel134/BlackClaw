@@ -44,6 +44,7 @@ object DemonstrationRecorder {
         "get_screen_info", "find_node_info", "read_screen_ocr", "take_screenshot",
         "get_foreground_app", "get_installed_apps", "verify_screen", "wait",
         "finish", "request_tool", "get_notifications", "get_device_info",
+        "game_observe", "game_record_macro", "game_macro", "game_autoclicker",
         // Node-id based taps aren't stable across runs; prefer text/coord tools.
         "tap_node",
     )

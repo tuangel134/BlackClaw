@@ -93,11 +93,25 @@ class RemoteConnectTool : BaseTool() {
 
         // Test connection
         return try {
-            val testOutput = SshExecutor.execute(conn, "echo BlackClaw_connected && uname -a", 10)
+            val result = SshExecutor.executeDetailed(conn, "echo BlackClaw_connected && uname -a", 10)
+            val testOutput = result.output
             if (testOutput.contains("BlackClaw_connected")) {
-                RemoteConnectionStore.saveConnection(conn)
+                // Store the fingerprint alongside the credentials, so every later
+                // connect is checked against it and a substituted host is refused
+                // before the password is sent.
+                RemoteConnectionStore.saveConnection(
+                    conn.copy(hostKeyFingerprint = result.hostKeyFingerprint)
+                )
                 val systemInfo = testOutput.substringAfter("BlackClaw_connected").trim()
-                ToolResult.success("✓ Conectado a $host como $user. Sistema: $systemInfo")
+                // Surfaced, not hidden: first contact is inherently unverified, and
+                // the user is the only one who can close that gap by comparing the
+                // fingerprint against the machine itself.
+                val pinNote = if (result.hostKeyFingerprint.isNotBlank()) {
+                    "\n" + SshHostKeyPolicy.firstUseMessage(host, result.hostKeyFingerprint)
+                } else {
+                    ""
+                }
+                ToolResult.success("✓ Conectado a $host como $user. Sistema: $systemInfo$pinNote")
             } else {
                 ToolResult.error("Conexión establecida pero el test falló. Output: ${testOutput.take(200)}")
             }
@@ -236,32 +250,154 @@ class RemoteDiagnoseTool : BaseTool() {
     }
 }
 
-// ── Local Android terminal (no root, no Shizuku needed) ──
+// ── Fixed local Linux terminal (no root, Shizuku, or ADB) ──
 
 class LocalTerminalTool : BaseTool() {
     override fun getName() = "terminal"
     override fun getDisplayName() = "Terminal local"
     override fun getDescriptionEN() =
-        "Run a command in BlackClaw's internal terminal — a PERSISTENT shell session " +
-        "(remembers the working directory, chosen backend and adb connection). " +
-        "Backends: local (app-level, no root), or privileged (Shizuku / self-paired ADB) " +
-        "for pm/am/settings/input. Built-ins: cd, pwd, backend [auto|local|privileged], whoami. " +
-        "adb over Wireless Debugging (no PC): 'adb pair <host:port> <code>', 'adb connect <host:port>', " +
-        "'adb shell <cmd>', 'adb devices', 'adb disconnect'."
+        "Run a command in BlackClaw's fixed, offline Linux terminal. It has a persistent " +
+        "working directory and Bash, Python 3, Git, curl, jq and core Unix utilities. " +
+        "It is always unprivileged: it cannot use Android shell commands, Shizuku, ADB, " +
+        "or remote devices. Built-ins: cd, pwd, whoami, clear and help."
     override fun getDescriptionCN() = getDescriptionEN()
-    override fun getBrief() = "terminal interno persistente (shell local/privilegiado + adb wifi)"
+    override fun getBrief() = "terminal Linux fijo y aislado (sin Shizuku ni ADB)"
     override fun getParameters() = listOf(
         ToolParameter("command", "string", "Comando a ejecutar en la sesión del terminal.", true),
         ToolParameter("timeout_seconds", "integer", "Reservado (el engine gestiona el timeout).", false),
     )
     override fun execute(params: Map<String, Any>): ToolResult {
+        if (!com.blackclaw.android.terminal.TerminalConfig.enabled) {
+            return ToolResult.error("La terminal del agente está desactivada. Actívala en Ajustes → Terminal.")
+        }
         val command = requireString(params, "command").trim()
         if (command.isEmpty()) return ToolResult.error("Comando vacío.")
-        val out = com.blackclaw.android.terminal.TerminalEngine.run(
+        val out = com.blackclaw.android.terminal.TerminalEngine.runForAgent(
             com.blackclaw.android.ClawApplication.instance, command)
         val clean = out.replace("\u000C", "").trim()
         val capped = if (clean.length > 8000) clean.take(8000) + "\n…[truncado]" else clean
         return ToolResult.success(capped.ifBlank { "(exit 0, sin output)" })
+    }
+}
+
+// ── Host key pinning glue ──
+
+/**
+ * JSch [com.jcraft.jsch.HostKeyRepository] backed by the single fingerprint pinned on
+ * a stored connection.
+ *
+ * Wiring this in (rather than inspecting `session.hostKey` after the fact) is what
+ * makes the check meaningful: JSch consults the repository during key exchange, so a
+ * mismatch aborts the connection BEFORE [com.jcraft.jsch.Session.connect] proceeds to
+ * authentication. Checking afterwards would mean the plaintext password had already
+ * been handed to whoever answered — the exact thing being defended against.
+ *
+ * The repository holds at most one host, because a
+ * [RemoteConnectionStore.Connection] is one host. Anything else JSch asks about is
+ * not something we have an opinion on, so it is reported as unknown.
+ */
+private class PinnedHostKeyRepository(
+    private val pinnedFingerprint: String,
+) : com.jcraft.jsch.HostKeyRepository {
+
+    /** Fingerprint the server actually offered, for reporting either way. */
+    var presentedFingerprint: String = ""
+        private set
+
+    /** True once JSch accepted a first-contact key, i.e. there is something new to persist. */
+    var learnedNewKey: Boolean = false
+        private set
+
+    private var lastVerdict: SshHostKeyPolicy.Verdict? = null
+
+    /** Whether the most recent [check] was first contact, consulted by the UserInfo. */
+    val lastCheckWasFirstContact: Boolean
+        get() = lastVerdict == SshHostKeyPolicy.Verdict.TRUST_ON_FIRST_USE
+
+    override fun check(host: String?, key: ByteArray?): Int {
+        // No key at all is not a reason to trust anything.
+        if (key == null || key.isEmpty()) {
+            lastVerdict = SshHostKeyPolicy.Verdict.MISMATCH
+            return com.jcraft.jsch.HostKeyRepository.CHANGED
+        }
+        val presented = SshHostKeyPolicy.fingerprint(key)
+        presentedFingerprint = presented
+        val verdict = SshHostKeyPolicy.verdict(pinnedFingerprint, presented)
+        lastVerdict = verdict
+        return when (verdict) {
+            SshHostKeyPolicy.Verdict.MATCH -> com.jcraft.jsch.HostKeyRepository.OK
+            SshHostKeyPolicy.Verdict.TRUST_ON_FIRST_USE ->
+                com.jcraft.jsch.HostKeyRepository.NOT_INCLUDED
+            SshHostKeyPolicy.Verdict.MISMATCH -> com.jcraft.jsch.HostKeyRepository.CHANGED
+        }
+    }
+
+    override fun add(hostkey: com.jcraft.jsch.HostKey?, ui: com.jcraft.jsch.UserInfo?) {
+        // Reached only on first contact, after the UserInfo consented. Recorded here
+        // and persisted by the caller once the connection has actually succeeded —
+        // pinning a key for a connection that then failed to authenticate would pin
+        // whatever an attacker offered.
+        learnedNewKey = true
+    }
+
+    // Removal is driven by the user deleting the stored connection (remote_disconnect),
+    // never by the handshake. A repository that can forget a pin mid-handshake is a
+    // repository that can be talked out of enforcing it.
+    override fun remove(host: String?, type: String?) = Unit
+    override fun remove(host: String?, type: String?, key: ByteArray?) = Unit
+
+    override fun getKnownHostsRepositoryID(): String = "blackclaw-pinned-host-key"
+    override fun getHostKey(): Array<com.jcraft.jsch.HostKey> = emptyArray()
+    override fun getHostKey(host: String?, type: String?): Array<com.jcraft.jsch.HostKey> =
+        emptyArray()
+}
+
+/**
+ * Answers the two questions JSch asks during host key checking, and nothing else.
+ *
+ * It says yes to first contact and no to a changed key. The decision is taken from
+ * the repository's own last verdict rather than by matching the prompt text, so a
+ * reworded JSch message cannot turn a refusal into an acceptance.
+ *
+ * It must also implement [com.jcraft.jsch.UIKeyboardInteractive]: JSch skips
+ * keyboard-interactive authentication entirely when a UserInfo is present that does
+ * not implement it, and some servers (Windows OpenSSH in particular) offer only that
+ * method. Without this, adding host key checking would have quietly broken login on
+ * those hosts.
+ */
+private class HostKeyPinningUserInfo(
+    private val repository: PinnedHostKeyRepository,
+    private val password: String,
+) : com.jcraft.jsch.UserInfo, com.jcraft.jsch.UIKeyboardInteractive {
+
+    override fun getPassphrase(): String? = null
+    override fun getPassword(): String = password
+    override fun promptPassword(message: String?): Boolean = false
+    override fun promptPassphrase(message: String?): Boolean = false
+
+    /**
+     * Yes only for the unknown-key prompt. On a changed key this returns false and
+     * JSch aborts the connection, which is the whole point.
+     */
+    override fun promptYesNo(message: String?): Boolean = repository.lastCheckWasFirstContact
+
+    override fun showMessage(message: String?) = Unit
+
+    /**
+     * Mirrors JSch's own no-UserInfo behaviour: answer a single hidden prompt with
+     * the stored password, and decline anything more elaborate rather than replaying
+     * the password into prompts we cannot interpret.
+     */
+    override fun promptKeyboardInteractive(
+        destination: String?,
+        name: String?,
+        instruction: String?,
+        prompt: Array<out String>?,
+        echo: BooleanArray?,
+    ): Array<String>? {
+        if (prompt == null || prompt.size != 1) return null
+        if (echo != null && echo.isNotEmpty() && echo[0]) return null
+        return arrayOf(password)
     }
 }
 
@@ -271,18 +407,47 @@ object SshExecutor {
     private const val TAG = "SshExecutor"
 
     /**
+     * Outcome of a command run, including what the host key check concluded so the
+     * calling tool can persist a first-contact pin and tell the user about it.
+     */
+    data class Result(
+        val output: String,
+        val hostKeyFingerprint: String,
+        val pinnedOnThisConnect: Boolean,
+    )
+
+    /**
      * Execute a command over SSH using JSch (pure Java).
      * Works on all Android versions without external binaries.
      */
-    fun execute(conn: RemoteConnectionStore.Connection, command: String, timeoutSec: Int): String {
+    fun execute(conn: RemoteConnectionStore.Connection, command: String, timeoutSec: Int): String =
+        executeDetailed(conn, command, timeoutSec).output
+
+    /**
+     * As [execute], but reports the host key outcome too.
+     *
+     * Host key verification happens inside [com.jcraft.jsch.Session.connect], before
+     * the password is sent. On a mismatch this throws and the command never runs.
+     */
+    fun executeDetailed(
+        conn: RemoteConnectionStore.Connection,
+        command: String,
+        timeoutSec: Int,
+    ): Result {
         val jsch = com.jcraft.jsch.JSch()
         var session: com.jcraft.jsch.Session? = null
         var channel: com.jcraft.jsch.ChannelExec? = null
+        val hostKeys = PinnedHostKeyRepository(conn.hostKeyFingerprint)
         try {
             session = jsch.getSession(conn.user, conn.host, conn.port)
             session.setPassword(conn.password)
+            session.hostKeyRepository = hostKeys
+            session.setUserInfo(HostKeyPinningUserInfo(hostKeys, conn.password))
             val config = java.util.Properties()
-            config["StrictHostKeyChecking"] = "no"
+            // "ask" rather than "no": it routes the decision through our repository
+            // and UserInfo above instead of accepting any key. "yes" would reject
+            // first contact outright, which would make a new connection impossible.
+            config["StrictHostKeyChecking"] = "ask"
             config["PreferredAuthentications"] = "password,keyboard-interactive"
             session.setConfig(config)
             session.connect(timeoutSec * 1000)
@@ -330,10 +495,38 @@ object SshExecutor {
                     append("\n[exit code: $exitCode]")
                 }
             }
-            return if (combined.length > 8000) combined.take(8000) + "\n…[truncado]" else combined
+            val capped =
+                if (combined.length > 8000) combined.take(8000) + "\n…[truncado]" else combined
+
+            // Persist the pin only now, once authentication and the command both
+            // succeeded. Pinning earlier would record whatever key an attacker
+            // offered on a connection that never worked.
+            if (hostKeys.learnedNewKey && hostKeys.presentedFingerprint.isNotEmpty()) {
+                RemoteConnectionStore.recordHostKeyFingerprint(
+                    conn.alias,
+                    hostKeys.presentedFingerprint,
+                )
+            }
+            return Result(
+                output = capped,
+                hostKeyFingerprint = hostKeys.presentedFingerprint,
+                pinnedOnThisConnect = hostKeys.learnedNewKey,
+            )
         } catch (e: com.jcraft.jsch.JSchException) {
             val msg = e.message ?: ""
             throw RuntimeException(when {
+                // Host key changed under a pin. Report it as an abort, not as a
+                // generic SSH error: the user needs to know the password was NOT
+                // sent and that the cause may be an active attacker.
+                msg.contains("HostKey has been changed") || msg.contains("reject HostKey") ->
+                    SshHostKeyPolicy.mismatchMessage(
+                        host = conn.alias.ifBlank { conn.host },
+                        pinned = conn.hostKeyFingerprint,
+                        presented = hostKeys.presentedFingerprint,
+                    )
+                msg.contains("UnknownHostKey") ->
+                    "ABORTADO: no pude verificar la clave del host ${conn.host} y no se envió " +
+                        "la contraseña. Huella recibida: ${hostKeys.presentedFingerprint}."
                 msg.contains("Auth fail") || msg.contains("auth") -> "Autenticación falló. Verifica usuario/contraseña."
                 msg.contains("timeout") || msg.contains("Connection refused") ->
                     "No puedo conectar a ${conn.host}:${conn.port}. ¿El PC está encendido, en la misma red, y con SSH activo?"
@@ -358,6 +551,14 @@ object RemoteConnectionStore {
         val port: Int = 22,
         val user: String,
         val password: String,
+        /**
+         * Host key fingerprint pinned on first successful connect, empty until then.
+         * See [SshHostKeyPolicy] for why this is the difference between an
+         * authenticated SSH session and handing the password to whoever answered.
+         * Connections saved before pinning existed have this empty and get pinned on
+         * their next successful use.
+         */
+        val hostKeyFingerprint: String = "",
     )
 
     @Synchronized
@@ -374,9 +575,29 @@ object RemoteConnectionStore {
                     port = o.optInt("port", 22),
                     user = o.optString("user"),
                     password = o.optString("pass"),
+                    hostKeyFingerprint = o.optString("hostkey_fp", ""),
                 )
             }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Record a first-contact fingerprint against an already-stored connection.
+     *
+     * No-op when the alias is unknown (the connect tool saves only after its test
+     * command succeeds) and, deliberately, when a fingerprint is already pinned:
+     * overwriting an existing pin from inside the connect path would turn the pin
+     * into something an attacker can reset just by presenting a new key.
+     */
+    @Synchronized
+    fun recordHostKeyFingerprint(alias: String, fingerprint: String) {
+        if (alias.isBlank() || fingerprint.isBlank()) return
+        val list = allConnections().toMutableList()
+        val index = list.indexOfFirst { it.alias.equals(alias, ignoreCase = true) }
+        if (index < 0) return
+        if (list[index].hostKeyFingerprint.isNotBlank()) return
+        list[index] = list[index].copy(hostKeyFingerprint = fingerprint)
+        saveAll(list)
     }
 
     @Synchronized
@@ -415,6 +636,7 @@ object RemoteConnectionStore {
             arr.put(org.json.JSONObject().apply {
                 put("alias", c.alias); put("host", c.host); put("port", c.port)
                 put("user", c.user); put("pass", c.password)
+                put("hostkey_fp", c.hostKeyFingerprint)
             })
         }
         KVUtils.putString(KEY, arr.toString()); KVUtils.sync()

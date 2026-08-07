@@ -15,6 +15,9 @@ import com.blackclaw.android.server.ConfigServerManager
 import com.blackclaw.android.service.KeepAliveJobService
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
+import com.blackclaw.android.conversation.ConversationRepository
+import com.blackclaw.android.conversation.ConversationRouter
+import com.blackclaw.android.agent.TaskPromptEnvelope
 
 class AppViewModel : ViewModel() {
 
@@ -22,6 +25,14 @@ class AppViewModel : ViewModel() {
         private const val TAG = "AppViewModel"
     }
 
+    /**
+     * Volatile + the @Synchronized accessors below because acquire/release are now
+     * driven by the task lifecycle: acquisition happens on whichever thread starts
+     * the task (agent executor, channel poller, scheduler) and release happens on
+     * the agent callback thread. Two unsynchronized threads racing here would
+     * either leak a lock or release one twice.
+     */
+    @Volatile
     private var wakeLock: PowerManager.WakeLock? = null
 
     private var _commonInitialized = false
@@ -51,16 +62,41 @@ class AppViewModel : ViewModel() {
         taskId: String,
         agentPromptOverride: String? = null,
         autoReturnToChat: Boolean = true,
+        surface: ConversationRepository.Surface = ConversationRepository.Surface.TASK,
         onEvent: (TaskEvent) -> Unit,
     ) {
+        val decision = ConversationRouter.decide(task)
+        val sharedLines = ConversationRepository.recentLocalLines()
+        val parsedOverride = agentPromptOverride?.let { TaskPromptEnvelope.parse(it) }
+        val existingLines = parsedOverride?.chatHistory?.lines()?.filter { it.isNotBlank() }.orEmpty()
+        val extraBackground = buildString {
+            append("Conversation route: ${decision.mode}; confidence=${decision.confidence}; confirmation=${decision.confirmation}.")
+            parsedOverride?.backgroundState?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
+            if (agentPromptOverride != null && parsedOverride?.chatHistory == null &&
+                parsedOverride?.backgroundState == null && agentPromptOverride.trim() != task.trim()) {
+                append("\nSurface context:\n").append(agentPromptOverride.take(2_000))
+            }
+        }
+        val effectivePrompt = TaskPromptEnvelope.build(
+            chatHistoryLines = (sharedLines + existingLines).takeLast(16),
+            currentRequest = task,
+            backgroundState = extraBackground,
+        )
+        ConversationRepository.appendLocal(surface, ConversationRepository.Role.USER, task, decision.mode.name)
         onBeforeTask?.invoke()
-        taskOrchestrator.taskEventCallback = onEvent
         if (!updateAgentConfig()) {
             onEvent(TaskEvent.Failed("AI service not ready"))
             return
         }
+        taskOrchestrator.taskEventCallback = { event ->
+            if (event is TaskEvent.Completed) {
+                ConversationRepository.appendLocal(surface, ConversationRepository.Role.ASSISTANT,
+                    event.answer, decision.mode.name)
+            }
+            onEvent(event)
+        }
         taskOrchestrator.startNewTask(Channel.LOCAL, task, taskId,
-            agentPromptOverride = agentPromptOverride, autoReturnToChat = autoReturnToChat)
+            agentPromptOverride = effectivePrompt, autoReturnToChat = autoReturnToChat)
     }
 
     fun stopTask() {
@@ -97,7 +133,13 @@ class AppViewModel : ViewModel() {
     fun updateAgentConfig(): Boolean = taskOrchestrator.updateAgentConfig()
 
     fun afterInit() {
-        acquireScreenWakeLock()
+        // NOTE: the screen wake lock is deliberately NOT acquired here any more.
+        // afterInit() runs on every cold start, so a SCREEN_DIM_WAKE_LOCK with
+        // ACQUIRE_CAUSES_WAKEUP was forcing the display on for 10 minutes just
+        // because the app was launched — and releaseScreenWakeLock() had no
+        // callers at all, so nothing ever gave it back. It is now paired with the
+        // task lock in TaskOrchestrator (acquire on task start, release on task
+        // end), which is the only time we actually need the screen awake.
         KeepAliveJobService.cancel(ClawApplication.instance)
         ForegroundService.syncToBackgroundState(ClawApplication.instance)
         ConfigServerManager.autoStartIfNeeded(ClawApplication.instance)
@@ -106,9 +148,14 @@ class AppViewModel : ViewModel() {
 
 
     /**
-     * Acquire a wake lock to prevent the screen from turning off during accessibility operations
+     * Acquire a wake lock so the screen stays on while the agent drives the UI.
+     *
+     * Call ONLY when a task actually starts — see TaskOrchestrator.tryAcquireTask.
+     * Every acquire must be matched by [releaseScreenWakeLock]; the 10 min timeout
+     * is a safety net, not the intended release mechanism.
      */
-    private fun acquireScreenWakeLock() {
+    @Synchronized
+    internal fun acquireScreenWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = ClawApplication.instance.getSystemService(android.content.Context.POWER_SERVICE) as? PowerManager
             ?: return
@@ -122,12 +169,15 @@ class AppViewModel : ViewModel() {
     }
 
     /**
-     * Release the wake lock
+     * Release the wake lock. Paired with [acquireScreenWakeLock] on the task
+     * lifecycle so the display is not pinned on after the agent is done.
      */
-    private fun releaseScreenWakeLock() {
+    @Synchronized
+    internal fun releaseScreenWakeLock() {
         wakeLock?.let {
             if (it.isHeld) {
-                it.release()
+                runCatching { it.release() }
+                    .onFailure { e -> XLog.w(TAG, "Wake lock release failed", e) }
                 XLog.i(TAG, "Wake lock released")
             }
         }

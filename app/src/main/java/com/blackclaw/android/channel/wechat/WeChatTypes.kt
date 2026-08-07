@@ -155,14 +155,3 @@ data class UploadedFileInfo(
 /** QR code scan result */
 data class QrCodeResult(val qrcode: String, val qrcodeImgContent: String)
 data class AuthResult(val botToken: String, val baseUrl: String, val botId: String?, val userId: String?)
-
-/** sendMessage request body */
-data class SendMessageReq(
-    val fromUserId: String = "",
-    val toUserId: String,
-    val clientId: String,
-    val messageType: Int = MessageType.BOT,
-    val messageState: Int = MessageState.FINISH,
-    val contextToken: String?,
-    val itemList: List<Map<String, Any?>>
-)

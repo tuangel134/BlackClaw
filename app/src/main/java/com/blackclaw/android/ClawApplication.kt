@@ -19,6 +19,8 @@ class ClawApplication : BaseApp() {
 
     companion object {
         private const val TAG = "ClawApplication"
+        /** Kept as a separate logcat tag so `adb logcat -s BLACKCLAW_INIT` still works. */
+        private const val INIT_TAG = "BLACKCLAW_INIT"
         lateinit var instance: ClawApplication
             private set
         lateinit var appViewModelInstance: AppViewModel
@@ -44,7 +46,15 @@ class ClawApplication : BaseApp() {
         KVUtils.init(this)
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
+            .onFailure {
+                XLog.w(TAG, "Briefing scheduler sync failed, proactive daily briefings " +
+                    "will not fire until next app start: ${it.message}")
+            }
         runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
+            .onFailure {
+                XLog.w(TAG, "OpenCode Zen model refresh failed, model picker keeps the " +
+                    "last cached list: ${it.message}")
+            }
         // Background self-check: which deep-link catalog schemes actually resolve
         // on THIS device (helps prune/verify). Log only, non-blocking.
         runCatching {
@@ -53,26 +63,40 @@ class ClawApplication : BaseApp() {
                     val cat = com.blackclaw.android.perception.AppActionScanner.verifiedCatalog()
                     XLog.i(TAG, "Deep-link catalog: ${cat.count { it.second }} scheme-verified / " +
                         "${cat.size} installed of ${com.blackclaw.android.tool.impl.AppDeepLinks.CATALOG.size}")
+                }.onFailure {
+                    XLog.w(TAG, "Deep-link catalog scan failed, app-open shortcuts fall back " +
+                        "to unverified schemes: ${it.message}")
                 }
             }, "deeplink-scan").start()
-        }
+        }.onFailure { XLog.w(TAG, "Could not start deeplink-scan thread: ${it.message}") }
         // Unpack the bundled offline voice model in the background so the
         // hands-free wake word works out of the box (no download needed).
         runCatching { com.blackclaw.android.assistant.VoskModelManager.prepareIfNeeded() }
+            .onFailure {
+                XLog.w(TAG, "Vosk model unpack failed, hands-free wake word will not " +
+                    "work (offline speech recognition unavailable): ${it.message}")
+            }
         runCatching {
             if (com.blackclaw.android.proactive.ProactiveConfig.enabled ||
                 com.blackclaw.android.assistant.GeofenceChecker.hasActiveGeofences()) {
                 com.blackclaw.android.service.KeepAliveJobService.schedule(this)
             }
+        }.onFailure {
+            XLog.w(TAG, "KeepAlive job scheduling failed, proactive checks and geofence " +
+                "reminders may stop when the app is killed: ${it.message}")
         }
         LocalBackendHealth.recoverPendingGpuCrashIfNeeded()
         ToolRegistry.getInstance().registerAllTools(ToolRegistry.DeviceType.MOBILE)
         // Trim stale assistant-hub items (old alerts / long-done reminders) so the
         // store doesn't grow unbounded on long-lived installs.
         runCatching { com.blackclaw.android.assistant.AssistantStore.pruneOldItems() }
+            .onFailure {
+                XLog.w(TAG, "Assistant store prune failed, stale reminders/alerts will " +
+                    "keep accumulating: ${it.message}")
+            }
         com.blackclaw.android.agent.skill.SkillRegistry.loadBuiltInSkills()
         com.blackclaw.android.agent.PlaybookManager.loadAll(this)
-        XLog.e(TAG, "ClawApplication initialized, tools registered: ${ToolRegistry.getInstance().getAllTools().size}")
+        XLog.i(TAG, "ClawApplication initialized, tools registered: ${ToolRegistry.getInstance().getAllTools().size}")
 
         // Write network logs to file (set to true when debugging)
         DefaultAgentService.FILE_LOGGING_ENABLED = BuildConfig.DEBUG
@@ -82,9 +106,9 @@ class ClawApplication : BaseApp() {
         appViewModelInstance.initCommon()
         val initThread = Thread({
             try {
-                android.util.Log.e("BLACKCLAW_INIT", "app-async-init thread STARTED")
+                XLog.i(INIT_TAG, "app-async-init thread STARTED")
                 val hasConfig = KVUtils.hasLlmConfig()
-                android.util.Log.e("BLACKCLAW_INIT", "app-async-init: hasLlmConfig=$hasConfig, canDrawOverlays=${android.provider.Settings.canDrawOverlays(instance)}")
+                XLog.i(INIT_TAG, "app-async-init: hasLlmConfig=$hasConfig, canDrawOverlays=${android.provider.Settings.canDrawOverlays(instance)}")
                 if (hasConfig) {
                     appViewModelInstance.initAgent()
                     appViewModelInstance.afterInit()
@@ -99,10 +123,14 @@ class ClawApplication : BaseApp() {
                             com.blackclaw.android.adb.AdbController.connect(instance)
                         }
                     }
+                }.onFailure {
+                    XLog.w(INIT_TAG, "Silent self-ADB reconnect failed, privileged shell " +
+                        "actions fall back to accessibility gestures: ${it.message}")
                 }
-                android.util.Log.e("BLACKCLAW_INIT", "app-async-init thread DONE")
+                XLog.i(INIT_TAG, "app-async-init thread DONE")
             } catch (e: Exception) {
-                android.util.Log.e("BLACKCLAW_INIT", "app-async-init CRASHED: ${e.message}", e)
+                // Genuine failure — stays at error level.
+                XLog.e(INIT_TAG, "app-async-init CRASHED: ${e.message}", e)
             }
         }, "app-async-init")
         initThread.isDaemon = true
@@ -113,7 +141,9 @@ class ClawApplication : BaseApp() {
         Thread({
             initThread.join(30_000L)
             if (initThread.isAlive) {
-                android.util.Log.e("BLACKCLAW_INIT", "app-async-init TIMEOUT after 30s — init may be hung")
+                // Genuine failure signal — stays at error level so it is visible
+                // in release logcat, not just in the in-app log store.
+                XLog.e(INIT_TAG, "app-async-init TIMEOUT after 30s — init may be hung")
             }
         }, "app-async-init-watchdog").also { it.isDaemon = true }.start()
     }
@@ -132,6 +162,11 @@ class ClawApplication : BaseApp() {
                         XLog.i(TAG, "Network recovered (${networkType?.name}), checking and reconnecting dropped channels")
                         ChannelManager.reconnectIfNeeded()
                     }
+                    runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshOnNetwork() }
+                        .onFailure {
+                            XLog.w(TAG, "OpenCode Zen model refresh on network recovery " +
+                                "failed, model list stays stale: ${it.message}")
+                        }
                 }, 2000)
             }
 

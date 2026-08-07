@@ -28,17 +28,18 @@ class ScheduledTaskReceiver : BroadcastReceiver() {
         }
         XLog.i(TAG, "Firing scheduled task: ${task.describe()}")
 
-        val launch = Intent(context, ComposeChatActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            when (task.mode) {
-                ScheduledTaskManager.Mode.TASK -> putExtra("task", task.text)
-                ScheduledTaskManager.Mode.CHAT -> putExtra("chat", task.text)
+        if (task.mode == ScheduledTaskManager.Mode.TASK) {
+            // Execute in the background with a wake lock; Android may block an Activity
+            // launch while the phone is asleep.
+            com.blackclaw.android.automation.AutomationEngine.executeTask(
+                context, task.text, "scheduled:${task.id}")
+        } else {
+            val launch = Intent(context, ComposeChatActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                putExtra("chat", task.text)
             }
-        }
-        try {
-            context.startActivity(launch)
-        } catch (e: Exception) {
-            XLog.e(TAG, "Failed to launch scheduled task", e)
+            runCatching { context.startActivity(launch) }
+                .onFailure { XLog.e(TAG, "Failed to launch scheduled chat", it) }
         }
 
         ScheduledTaskManager.markFiredAndReschedule(context, id)

@@ -60,7 +60,7 @@ class FindAdCulpritTool : BaseTool() {
         return ToolResult.success(buildString {
             appendLine("Posibles culpables de los anuncios (más probable primero):")
             suspects.forEach { s ->
-                appendLine("• ${s.label} [${s.pkg}]")
+                appendLine("• ${s.label} [${s.pkg}] — confianza ${s.confidence}%")
                 s.reasons.take(3).forEach { appendLine("    - $it") }
             }
             appendLine("Sugerencia: block_app(package=\"${suspects.first().pkg}\", action=\"neutralize\") " +
@@ -88,6 +88,7 @@ class BlockAppTool : BaseTool() {
     override fun execute(params: Map<String, Any>): ToolResult {
         val pkg = requireString(params, "package").trim()
         if (pkg.isEmpty()) return ToolResult.error("package vacío")
+        SecurityActions.protectionReason(pkg)?.let { return ToolResult.error("Acción bloqueada: $it") }
         val action = optionalString(params, "action", "neutralize").lowercase().trim()
         val msg = when (action) {
             "neutralize", "block" -> SecurityActions.neutralize(pkg)

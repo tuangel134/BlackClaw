@@ -28,7 +28,35 @@ object MemoryHub {
     const val DEFAULT_BUDGET_CHARS = 2400
     const val LOCAL_BUDGET_CHARS = 1400
 
-    private data class Section(val priority: Int, val text: String)
+    internal data class Section(val priority: Int, val text: String)
+
+    /**
+     * Greedily pack [sections] by priority into [budgetChars].
+     *
+     * Split out from [assemble] because this is the part with actual consequences —
+     * it decides what the model does *not* get to see — while [assemble] is only
+     * plumbing to five stores that each need MMKV and therefore a device. Keeping the
+     * decision pure means it can be verified.
+     *
+     * Stops at the first section that does not fit rather than skipping it and trying
+     * the next: sections are ordered by value, so continuing past a rejection would
+     * trade something important for something less important purely because the less
+     * important one was shorter. Sections are never truncated mid-sentence, because a
+     * half-sentence of user profile is worse than none — it invites the model to
+     * infer the missing half.
+     */
+    internal fun packByPriority(sections: List<Section>, budgetChars: Int): String {
+        if (budgetChars <= 0) return ""
+        val sb = StringBuilder()
+        var used = 0
+        for (section in sections.sortedBy { it.priority }) {
+            if (section.text.isBlank()) continue
+            if (used + section.text.length > budgetChars) break
+            sb.append(section.text)
+            used += section.text.length
+        }
+        return sb.toString()
+    }
 
     /**
      * Assemble the combined memory prompt section under [budgetChars].
@@ -58,18 +86,7 @@ object MemoryHub {
         ConversationMemory.asPromptSnippet(maxEntries = 4).takeIf { it.isNotBlank() }
             ?.let { sections.add(Section(5, it)) }
 
-        // Greedily include by priority until the budget runs out.
-        val sb = StringBuilder()
-        var used = 0
-        for (section in sections.sortedBy { it.priority }) {
-            if (used + section.text.length > budgetChars) {
-                // Skip this and lower-priority sections — keep the prompt lean.
-                break
-            }
-            sb.append(section.text)
-            used += section.text.length
-        }
-        return sb.toString()
+        return packByPriority(sections, budgetChars)
     }
 
     /**

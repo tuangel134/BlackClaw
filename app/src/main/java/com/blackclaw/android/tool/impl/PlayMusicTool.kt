@@ -4,6 +4,9 @@ import android.app.SearchManager
 import android.content.Intent
 import android.provider.MediaStore
 import com.blackclaw.android.ClawApplication
+import com.blackclaw.android.cards.AssistCard
+import com.blackclaw.android.cards.AssistCardCodec
+import com.blackclaw.android.cards.SummaryKind
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
@@ -90,6 +93,14 @@ class PlayMusicTool : BaseTool() {
         }
     }
 
+    private fun musicResult(message: String, query: String = "", app: String = ""): ToolResult =
+        ToolResult.successWithCards(message, AssistCardCodec.encode(listOf(AssistCard.Summary(
+            kind = SummaryKind.MUSIC,
+            label = if (app.isBlank()) "Música" else "Música · $app",
+            value = query.ifBlank { "Reproducción iniciada" },
+            detail = message,
+        ))))
+
     /**
      * Handle a plain "play music" with no song/artist. Per the Android media
      * spec an EMPTY play-from-search query means "play some music", so we fire
@@ -115,7 +126,7 @@ class PlayMusicTool : BaseTool() {
             }
             if (intent.resolveActivity(pm) != null) {
                 ctx.startActivity(intent)
-                return ToolResult.success("Reproduciendo música$where.")
+                return musicResult("Reproduciendo música$where.", app = app)
             }
         }
 
@@ -128,12 +139,12 @@ class PlayMusicTool : BaseTool() {
                 }
             }
             dispatchPlayKey(ctx)
-            return ToolResult.success("Abrí tu reproductor y reanudé la música$where.")
+            return musicResult("Abrí tu reproductor y reanudé la música$where.", app = app)
         }
 
         // 3) No known player installed → just try to resume whatever media session exists.
         dispatchPlayKey(ctx)
-        return ToolResult.success("Reanudé la reproducción de música.")
+        return musicResult("Reanudé la reproducción de música.")
     }
 
     /** Send a global MEDIA_PLAY key so the active/last media session resumes. */
@@ -169,7 +180,7 @@ class PlayMusicTool : BaseTool() {
             if (intent.resolveActivity(pm) != null) {
                 ctx.startActivity(intent)
                 val where = if (app.isNotBlank()) " en $app" else ""
-                return ToolResult.success("Reproduciendo '$query'$where.")
+                return musicResult("Reproduciendo '$query'$where.", query, app)
             }
         }
 
@@ -196,7 +207,7 @@ class PlayMusicTool : BaseTool() {
             }
             if (intent.resolveActivity(pm) != null) {
                 ctx.startActivity(intent)
-                return ToolResult.success("Reproduciendo '$query' en tu reproductor de música.")
+                return musicResult("Reproduciendo '$query' en tu reproductor de música.", query)
             }
         }
         val spotify = OpenAppActionTool().execute(mapOf("app" to "spotify", "query" to query))

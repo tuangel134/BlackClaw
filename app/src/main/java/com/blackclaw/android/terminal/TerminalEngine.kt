@@ -3,23 +3,21 @@ package com.blackclaw.android.terminal
 import android.content.Context
 import com.blackclaw.android.adb.PrivilegedShell
 import com.blackclaw.android.adb.RemoteAdb
-import com.blackclaw.android.utils.XLog
-import java.util.concurrent.TimeUnit
 
 /**
- * The brain of BlackClaw's internal terminal — one persistent shell session
- * shared by the UI ([com.blackclaw.android.ui.terminal.TerminalActivity]) and
- * the AI (the `terminal` tool). Termux-like feel without a second app:
+ * The brain of BlackClaw's internal terminal.  Its LOCAL backend is a fixed,
+ * offline Linux userland, so it behaves like a small Termux-style environment
+ * without needing Shizuku, ADB, root, or a second app.
  *
- *  - Keeps a working directory across commands (unprivileged `sh` doesn't, so
- *    we cd-prefix each command and track `cd`).
- *  - Picks a backend: LOCAL (app-uid shell, always available), PRIVILEGED
- *    (Shizuku / self-paired ADB — full `pm`, `settings`, `am`…), or AUTO.
+ *  - Keeps a working directory across commands.
+ *  - Starts in LOCAL (fixed Linux) and lets the manual console opt into
+ *    PRIVILEGED (Shizuku / self-paired ADB — full `pm`, `settings`, `am`…).
  *  - An `adb` router lets the session pair/connect/shell to OTHER devices over
  *    Wireless Debugging (adb-over-wifi) via [RemoteAdb].
  *
- * Thread-safety: [run] is synchronized so the UI and the agent can't interleave
- * and corrupt the working directory.
+ * The UI and agent deliberately have different working directories and the agent
+ * is permanently local-only.  Privileged and remote-ADB functionality remains a
+ * manual-console feature.
  */
 object TerminalEngine {
 
@@ -28,9 +26,12 @@ object TerminalEngine {
 
     enum class Backend { AUTO, LOCAL, PRIVILEGED }
 
-    @Volatile var backend: Backend = Backend.AUTO
-    @Volatile var cwd: String = "/sdcard"
+    @Volatile var backend: Backend = Backend.LOCAL
+    @Volatile var cwd: String = "/home/blackclaw"
         private set
+
+    /** The agent never shares cwd/backend/remote-ADB state with the manual console. */
+    private var agentCwd: String = "/home/blackclaw"
 
     private val blocked = listOf("rm -rf /", "rm -rf /*", "mkfs", "dd if=/dev/zero", ":(){", "reboot", "shutdown")
 
@@ -44,6 +45,34 @@ object TerminalEngine {
         val b = when (effectiveBackend()) { Backend.PRIVILEGED -> "#"; else -> "$" }
         RemoteAdb.connectedTarget()?.let { return "[$it]$b " }
         return "$cwd$b "
+    }
+
+    /**
+     * Run the agent's isolated, unprivileged session.
+     *
+     * Its working directory persists across agent calls, but it can neither select the
+     * privileged backend nor pair/connect to another Android device. The temporary
+     * swap is guarded by the same monitor as [run], so the manual console cannot see
+     * or inherit this state while a command is executing.
+     */
+    @Synchronized
+    fun runForAgent(context: Context, rawCommand: String): String {
+        val command = rawCommand.trim()
+        val verb = command.takeWhile { !it.isWhitespace() }.lowercase()
+        if (verb == "adb") return "adb no está disponible en la terminal del agente."
+        if (verb == "backend") return "El agente usa siempre el Linux local aislado."
+
+        val manualBackend = backend
+        val manualCwd = cwd
+        backend = Backend.LOCAL
+        cwd = agentCwd
+        return try {
+            run(context, command)
+        } finally {
+            agentCwd = cwd
+            cwd = manualCwd
+            backend = manualBackend
+        }
     }
 
     @Synchronized
@@ -86,7 +115,8 @@ object TerminalEngine {
     }
 
     private fun handleCd(context: Context, arg: String): String {
-        val targetDir = if (arg.isBlank() || arg == "~") "/sdcard" else arg
+        val home = if (effectiveBackend() == Backend.LOCAL) "/home/blackclaw" else "/sdcard"
+        val targetDir = if (arg.isBlank() || arg == "~") home else arg
         // Resolve + verify through the active backend so symlinks/perales resuelven bien.
         val probe = execShell(context, "cd \"$targetDir\" 2>/dev/null && pwd")
         val resolved = probe.lineSequence().firstOrNull { it.startsWith("/") }?.trim()
@@ -141,54 +171,23 @@ object TerminalEngine {
         return when (effectiveBackend()) {
             Backend.PRIVILEGED -> PrivilegedShell.exec(scoped, 20_000L)
                 ?: "error: shell privilegiado no disponible o falló"
-            else -> execLocal(scoped, 20)
+            else -> execLocal(context, scoped)
         }
     }
 
-    /** Unprivileged local shell (app uid) with concurrent output draining. */
-    private fun execLocal(command: String, timeoutSec: Long): String {
-        return try {
-            val process = ProcessBuilder("sh", "-c", command)
-                .redirectErrorStream(true)
-                .start()
-            val outBuffer = StringBuilder()
-            val reader = Thread {
-                runCatching {
-                    process.inputStream.bufferedReader().use { br ->
-                        val buf = CharArray(4096)
-                        var n = br.read(buf)
-                        while (n >= 0) {
-                            if (outBuffer.length < MAX_OUTPUT) outBuffer.append(buf, 0, n)
-                            n = br.read(buf)
-                        }
-                    }
-                }
-            }.apply { isDaemon = true; start() }
-
-            val completed = process.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!completed) {
-                process.destroyForcibly(); reader.join(500)
-                return "timeout después de ${timeoutSec}s"
-            }
-            reader.join(1000)
-            val exit = process.exitValue()
-            val out = outBuffer.toString()
-            if (exit == 0) out else "[exit $exit] $out"
-        } catch (e: Exception) {
-            XLog.w(TAG, "execLocal failed: ${e.message}")
-            "error: ${e.message}"
-        }
-    }
+    /** Fixed, unprivileged Linux userland.  This path never calls Android's sh. */
+    private fun execLocal(context: Context, command: String): String =
+        FixedTerminalEnvironment.execute(context, cwd, command)
 
     private fun helpText(): String = """
-        Terminal interno de BlackClaw. Comandos:
-          <cmd>             ejecuta en el shell (backend activo)
+        Terminal Linux local de BlackClaw. Comandos:
+          <cmd>             ejecuta en Linux aislado (bash, python3, git, curl, jq…)
           cd <dir> / pwd    navegación (la sesión recuerda el directorio)
-          backend [auto|local|privileged]   elige/consulta el backend
+          backend [auto|local|privileged]   cambia el backend manual opcional
           whoami            usuario efectivo
           clear             limpia la pantalla
           adb ...           control por Wireless Debugging (ver 'adb')
-        Backend privileged requiere Shizuku o ADB emparejado (Modo Pro).
+        Local no requiere Shizuku ni ADB. Backend privileged requiere Modo Pro.
     """.trimIndent()
 
     private fun adbHelp(): String = """

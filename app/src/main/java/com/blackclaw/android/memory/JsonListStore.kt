@@ -1,0 +1,164 @@
+package com.blackclaw.android.memory
+
+import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.XLog
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Shared base for the append-and-cap JSON lists backed by MMKV.
+ *
+ * ## Why this exists
+ *
+ * Five stores — [UserProfile], [UserMemoryStore], [ConversationMemory],
+ * [com.blackclaw.android.agent.TaskHistoryStore] and
+ * [com.blackclaw.android.proactive.ProactiveMemory] — each hand-rolled the same
+ * shape: read a JSON array out of MMKV, parse it element-wise inside a
+ * `runCatching`, append, cap, serialise, write.
+ *
+ * That is not merely duplication. The five copies drifted, and the drift **was** the
+ * bug set fixed in this pass:
+ *
+ *  - one capped with `takeLast` on insertion order while its own records carried a
+ *    timestamp that was never consulted, so it evicted the entries the user
+ *    maintained most (see [UserMemoryStore.capByRecency]);
+ *  - one called `KVUtils.sync()` — an fsync — on every append from a UI path;
+ *  - one marked its reader `@Synchronized` but not the read-modify-write around it,
+ *    so concurrent appends lost entries;
+ *  - one dereferenced an optional field with `!!` inside the per-element
+ *    `runCatching`, which turned a missing key into a record that vanished forever
+ *    with no log line.
+ *
+ * Four different oversights in four copies of one idea. Concentrating the mechanics
+ * here means a fix lands once, and — more usefully — that the defaults are the safe
+ * ones: capping is timestamp-aware, writes do not fsync, the whole mutation is
+ * serialised, and a record that fails to parse is **logged** rather than silently
+ * dropped.
+ *
+ * ## What subclasses supply
+ *
+ * Only the parts that genuinely differ: the storage key, the cap, how an item
+ * converts to and from JSON, and how to read an item's timestamp so capping can be
+ * recency-aware.
+ */
+abstract class JsonListStore<T>(
+    private val storageKey: String,
+    private val maxItems: Int,
+) {
+
+    /** Tag for parse-failure logs. Defaults to the concrete class name. */
+    protected open val logTag: String get() = this::class.java.simpleName
+
+    protected abstract fun toJson(item: T): JSONObject
+
+    /** Return null to reject a malformed record; it will be logged, not swallowed. */
+    protected abstract fun fromJson(json: JSONObject): T?
+
+    /**
+     * Timestamp used when capping. Default 0 means "no recency information", which
+     * degrades to insertion order — the old behaviour, kept only so a subclass that
+     * genuinely has no timestamp is not forced to invent one.
+     */
+    protected open fun timestampOf(item: T): Long = 0L
+
+    private val lock = Any()
+
+    /** Every stored item, oldest first. Never throws. */
+    fun all(): List<T> = synchronized(lock) { read() }
+
+    /**
+     * Append [item], then cap. Returns the list as persisted.
+     *
+     * The whole read-modify-write happens under the lock, which is the part the
+     * hand-rolled copies got wrong.
+     */
+    fun append(item: T): List<T> = synchronized(lock) {
+        write(read() + item)
+    }
+
+    /**
+     * Replace the item matching [isSame], or append when there is none.
+     *
+     * Used for keyed upserts (a fact keyed by name, a conversation keyed by id). The
+     * replacement keeps the original position so the stored file stays stable, while
+     * [timestampOf] is what decides survival under the cap — those two being conflated
+     * is exactly what made updated facts get evicted before untouched ones.
+     */
+    fun upsert(item: T, isSame: (T) -> Boolean): List<T> = synchronized(lock) {
+        val current = read().toMutableList()
+        val idx = current.indexOfFirst(isSame)
+        if (idx >= 0) current[idx] = item else current.add(item)
+        write(current)
+    }
+
+    fun removeAll(predicate: (T) -> Boolean): Int = synchronized(lock) {
+        val current = read()
+        val kept = current.filterNot(predicate)
+        if (kept.size == current.size) return 0
+        write(kept)
+        current.size - kept.size
+    }
+
+    fun clear(): Int = synchronized(lock) {
+        val n = read().size
+        write(emptyList())
+        n
+    }
+
+    /** Overwrite wholesale. Applies the same cap as [append]. */
+    fun replaceAll(items: List<T>): List<T> = synchronized(lock) { write(items) }
+
+    // ── Internals. Callers must hold the lock. ────────────────────────────────
+
+    private fun read(): List<T> {
+        val raw = KVUtils.getString(storageKey, "")
+        if (raw.isBlank()) return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrElse {
+            // The whole blob is unreadable, not just one record. Worth an error: it
+            // means everything in this store is gone, and silence would make that
+            // look like "the user never saved anything".
+            XLog.e(logTag, "Store '$storageKey' is corrupt and was ignored: ${it.message}")
+            return emptyList()
+        }
+        val out = ArrayList<T>(array.length())
+        var rejected = 0
+        for (i in 0 until array.length()) {
+            val parsed = runCatching { array.optJSONObject(i)?.let { fromJson(it) } }.getOrNull()
+            if (parsed != null) out.add(parsed) else rejected++
+        }
+        if (rejected > 0) {
+            XLog.w(logTag, "Dropped $rejected unreadable record(s) from '$storageKey'")
+        }
+        return out
+    }
+
+    private fun write(items: List<T>): List<T> {
+        val capped = cap(items)
+        val array = JSONArray()
+        capped.forEach { array.put(toJson(it)) }
+        KVUtils.putString(storageKey, array.toString())
+        // Deliberately no sync(). MMKV writes through an mmap'd region, so entries
+        // already survive process death; sync() only buys durability against a hard
+        // power cut, and it is an fsync — the expensive part of a store that appends
+        // from UI callbacks.
+        return capped
+    }
+
+    /**
+     * Keep the [maxItems] most recent, preserving insertion order among survivors.
+     *
+     * When no subclass supplies timestamps this is equivalent to `takeLast`, so the
+     * default is never worse than the code it replaces.
+     */
+    internal fun cap(items: List<T>): List<T> {
+        if (maxItems <= 0) return emptyList()
+        if (items.size <= maxItems) return items
+        val anyTimestamps = items.any { timestampOf(it) > 0L }
+        if (!anyTimestamps) return items.takeLast(maxItems)
+        val threshold = items.map { timestampOf(it) }.sortedDescending()[maxItems - 1]
+        // Filter rather than sort-and-take so insertion order survives. Ties at the
+        // threshold are trimmed from the front, matching takeLast's bias toward newer.
+        val kept = items.filter { timestampOf(it) >= threshold }
+        return if (kept.size <= maxItems) kept else kept.takeLast(maxItems)
+    }
+}

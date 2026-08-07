@@ -97,6 +97,14 @@ class AddSmartDeviceTool : BaseTool() {
         val headers = optionalString(params, "headers", "")
         val bodyTemplate = optionalString(params, "body_template", "")
 
+        // Every field here came from the model, which means it can have come from
+        // anything the model read — a web page, a message, a document. An unvalidated
+        // webhook is a persistent outbound channel that looks like a lamp, and a
+        // request originating inside the device can reach loopback and the LAN.
+        // See SmartHomeWebhookPolicy for the specifics.
+        SmartHomeWebhookPolicy.validateUrl(url)?.let { return ToolResult.error(it) }
+        SmartHomeWebhookPolicy.validateMethod(method)?.let { return ToolResult.error(it) }
+
         val device = SmartHomeRegistry.SmartDevice(
             name = name, type = type, webhookUrl = url,
             method = method, headers = headers, bodyTemplate = bodyTemplate,
@@ -182,6 +190,15 @@ object SmartHomeRegistry {
     }
 
     fun executeDevice(device: SmartDevice, action: String, value: String): String {
+        // Re-check at fire time, not only at registration. Devices persisted before
+        // this validation existed are still in MMKV, and storage is not a trust
+        // boundary — the check has to sit where the request is actually made, or an
+        // already-planted entry keeps working forever.
+        SmartHomeWebhookPolicy.validateUrl(device.webhookUrl)?.let { error ->
+            XLog.w(TAG, "Blocked webhook for '${device.name}': $error")
+            throw RuntimeException(error)
+        }
+
         // JSON-escape interpolated values so quotes/specials can't break the body.
         fun esc(s: String) = JSONObject.quote(s).let { it.substring(1, it.length - 1) }
         var body = device.bodyTemplate.ifBlank {

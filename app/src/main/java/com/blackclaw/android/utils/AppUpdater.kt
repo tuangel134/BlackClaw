@@ -40,6 +40,20 @@ object AppUpdater {
     private const val APK_NAME = "BlackClaw-update.apk"
 
     /**
+     * One shared daemon worker for update checks.
+     *
+     * WHY: checkForUpdate() used to call Executors.newSingleThreadExecutor() on
+     * every invocation. Each of those executors is never shut down, so its
+     * non-daemon core thread stays alive for the whole process — and since the
+     * check is triggered from Activity onCreate (plus a manual "check now"
+     * button), the count grows with every screen visit. A single daemon thread
+     * serialises the checks and never blocks process exit.
+     */
+    private val CHECK_EXECUTOR = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "app-updater").apply { isDaemon = true }
+    }
+
+    /**
      * Check for a newer release. Throttled to [CHECK_INTERVAL_MS] unless [force].
      * Runs the network call off the main thread; shows a dialog on the UI thread.
      */
@@ -48,16 +62,25 @@ object AppUpdater {
         if (!force && now - KVUtils.getLong(KEY_LAST_CHECK, 0L) < CHECK_INTERVAL_MS) {
             return
         }
-        Executors.newSingleThreadExecutor().execute {
+        // WeakReference + liveness re-check: this block spans a network round trip
+        // (up to 16 s of connect+read timeouts). A strong capture pins the whole
+        // Activity — and its view hierarchy — until the request finishes, and
+        // showing a dialog on an Activity the user already left throws
+        // BadTokenException. Package info is read through the application context
+        // so it does not need the Activity at all.
+        val activityRef = java.lang.ref.WeakReference(activity)
+        val appContext = activity.applicationContext
+        val pkgName = activity.packageName
+        CHECK_EXECUTOR.execute {
             try {
                 val current = runCatching {
-                    activity.packageManager.getPackageInfo(activity.packageName, 0).versionName
+                    appContext.packageManager.getPackageInfo(pkgName, 0).versionName
                 }.getOrNull() ?: "0"
 
                 val json = httpGet(RELEASES_API)
                 if (json == null) {
-                    if (force) activity.runOnUiThread {
-                        toast(activity, "No pude comprobar actualizaciones.")
+                    if (force) onLiveActivity(activityRef) { act ->
+                        toast(act, "No pude comprobar actualizaciones.")
                     }
                     return@execute
                 }
@@ -74,16 +97,34 @@ object AppUpdater {
                 KVUtils.putLong(KEY_LAST_CHECK, now); KVUtils.sync()
 
                 if (tag.isNotBlank() && isNewer(tag, current)) {
-                    activity.runOnUiThread { showDialog(activity, tag, body, apkUrl, htmlUrl) }
+                    onLiveActivity(activityRef) { act -> showDialog(act, tag, body, apkUrl, htmlUrl) }
                 } else if (force) {
-                    activity.runOnUiThread { toast(activity, "Ya tienes la última versión (v$current).") }
+                    onLiveActivity(activityRef) { act ->
+                        toast(act, "Ya tienes la última versión (v$current).")
+                    }
                 }
             } catch (e: Exception) {
                 XLog.w(TAG, "update check failed: ${e.message}")
-                if (force) activity.runOnUiThread {
-                    toast(activity, "No pude comprobar actualizaciones.")
+                if (force) onLiveActivity(activityRef) { act ->
+                    toast(act, "No pude comprobar actualizaciones.")
                 }
             }
+        }
+    }
+
+    /**
+     * Runs [block] on the UI thread only while the Activity is still usable.
+     * Both checks matter: the WeakReference can be cleared, and a reachable but
+     * finishing/destroyed Activity still rejects window operations.
+     */
+    private inline fun onLiveActivity(
+        ref: java.lang.ref.WeakReference<Activity>,
+        crossinline block: (Activity) -> Unit,
+    ) {
+        val act = ref.get() ?: return
+        if (act.isFinishing || act.isDestroyed) return
+        act.runOnUiThread {
+            if (!act.isFinishing && !act.isDestroyed) block(act)
         }
     }
 

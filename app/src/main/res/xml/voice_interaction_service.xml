@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.blackclaw.android.ui.assist.BlackClawVoiceInteractionSessionService"
+    android:recognitionService="com.blackclaw.android.ui.assist.BlackClawRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />

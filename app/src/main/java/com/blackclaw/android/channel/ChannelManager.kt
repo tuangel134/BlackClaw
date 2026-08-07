@@ -121,6 +121,12 @@ object ChannelManager {
             return
         }
         XLog.d(TAG, "sendMessage [${channel.displayName}]: ${trimmedContent.take(120)}")
+        if (channel != Channel.LOCAL) {
+            val identity = "${channel.name}:${getLastSenderId(channel) ?: messageID}"
+            com.blackclaw.android.conversation.ConversationRepository.appendRemote(
+                identity, com.blackclaw.android.conversation.ConversationRepository.Role.ASSISTANT,
+                trimmedContent)
+        }
         handlers[channel]?.sendMessage(trimmedContent, messageID)
     }
 

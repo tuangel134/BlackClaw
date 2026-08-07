@@ -232,8 +232,30 @@ class WeChatChannelHandler(
             return
         }
 
-        XLog.i(TAG, "[${channel.displayName}] Message received: ${body.take(80)}, from=${fromUserId.takeLast(16)}")
+        // Authorize BEFORE adopting this user as the reply target, so a rejected
+        // sender cannot hijack where the agent's next answer goes.
+        val auth = com.blackclaw.android.channel.auth.ChannelAuthorization
+            .evaluate(channel, fromUserId, body)
+        if (!auth.allowed) {
+            auth.reply?.let { text ->
+                val contextToken = msg.contextToken ?: ""
+                scope.launch {
+                    WeChatSender.sendText(apiClient, fromUserId, text, contextToken.ifEmpty { null })
+                }
+            }
+            return
+        }
+
         lastFromUserId = fromUserId
+        auth.reply?.let { text ->
+            val contextToken = msg.contextToken ?: ""
+            scope.launch {
+                WeChatSender.sendText(apiClient, fromUserId, text, contextToken.ifEmpty { null })
+            }
+        }
+        if (auth.justPaired) return
+
+        XLog.i(TAG, "[${channel.displayName}] Message received, from=${fromUserId.takeLast(16)}")
         ChannelManager.dispatchMessage(channel, body, msg.contextToken ?: "")
     }
 

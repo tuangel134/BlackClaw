@@ -167,6 +167,48 @@ object KVUtils {
     fun isExternalAutomationEnabled(): Boolean = getBoolean(KEY_EXTERNAL_AUTOMATION_ENABLED, false)
     fun setExternalAutomationEnabled(enabled: Boolean) = putBoolean(KEY_EXTERNAL_AUTOMATION_ENABLED, enabled)
 
+    // Per-caller allowlist for the automation entrypoints.
+    //
+    // WHY: isExternalAutomationEnabled() is a single global boolean. Flipping it on
+    // to wire up one automation app also authorises every other app on the device,
+    // now and in the future — the toggle cannot express "only this one". Requests
+    // arrive as intents, and an intent's target says nothing about its sender, so
+    // without a per-caller list there is no origin check anywhere on this path.
+    //
+    // Stored as a comma-separated list of package names. Empty (the default) means
+    // no per-caller narrowing is configured, in which case the manifest's
+    // signature-level permission remains the only gate — see
+    // com.blackclaw.android.automation.AutomationCallerPolicy.
+    private const val KEY_EXTERNAL_AUTOMATION_ALLOWED_CALLERS =
+        "KEY_EXTERNAL_AUTOMATION_ALLOWED_CALLERS"
+
+    fun getExternalAutomationAllowedCallersRaw(): String =
+        getString(KEY_EXTERNAL_AUTOMATION_ALLOWED_CALLERS, "")
+
+    fun getExternalAutomationAllowedCallers(): Set<String> =
+        com.blackclaw.android.automation.AutomationCallerPolicy
+            .parseAllowlist(getExternalAutomationAllowedCallersRaw())
+
+    fun setExternalAutomationAllowedCallers(packages: Collection<String>) {
+        putString(
+            KEY_EXTERNAL_AUTOMATION_ALLOWED_CALLERS,
+            com.blackclaw.android.automation.AutomationCallerPolicy.serializeAllowlist(packages),
+        )
+        sync()
+    }
+
+    fun allowExternalAutomationCaller(packageName: String) {
+        setExternalAutomationAllowedCallers(
+            getExternalAutomationAllowedCallers() + packageName.trim()
+        )
+    }
+
+    fun revokeExternalAutomationCaller(packageName: String) {
+        setExternalAutomationAllowedCallers(
+            getExternalAutomationAllowedCallers() - packageName.trim()
+        )
+    }
+
     private const val KEY_PENDING_ACCESSIBILITY_RETURN = "KEY_PENDING_ACCESSIBILITY_RETURN"
     private const val KEY_PENDING_ACCESSIBILITY_RETURN_AT = "KEY_PENDING_ACCESSIBILITY_RETURN_AT"
     private const val KEY_PENDING_NOTIFICATION_ACCESS_RETURN = "KEY_PENDING_NOTIFICATION_ACCESS_RETURN"

@@ -8,24 +8,26 @@ import android.text.format.DateUtils
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -35,21 +37,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.stringResource
-import com.blackclaw.android.R
-import com.blackclaw.android.agent.skill.Skill
-import com.blackclaw.android.agent.skill.SkillCategory
-import com.blackclaw.android.agent.skill.SkillRegistry
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import com.blackclaw.android.utils.XLog
-import androidx.compose.ui.focus.FocusManager
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +56,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blackclaw.android.R
+import com.blackclaw.android.cards.AssistCardCodec
+import com.blackclaw.android.ui.cards.AssistCardList
+import com.blackclaw.android.ui.cards.AssistCardSkin
+import com.blackclaw.android.ui.design.ClawAnimation
+import com.blackclaw.android.ui.design.ClawMotion
+import com.blackclaw.android.ui.design.ClawPalette
+import com.blackclaw.android.utils.XLog
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -293,6 +299,8 @@ fun ChatScreen(
                             onSendTask = onSendTask,
                             onStopAll = onStopAllTasks,
                             onAttach = onAttach,
+                            onOpenMonitor = { showMonitorSheet = true },
+                            onOpenSendMessage = { showSendSheet = true },
                             colors = colors,
                             prefillText = prefillText,
                             prefillIsTask = prefillIsTask,
@@ -432,12 +440,17 @@ private fun ChatTopBar(
     onChats: () -> Unit = {},
     colors: BlackClawColors,
 ) {
-    // Token count color: grey → blue → amber → red
+    // Cost escalation: quiet → noted → warned → alarming.
+    //
+    // Taken from the app's semantic accents rather than four loose hex literals, so the
+    // warning steps match every other warning in the product. Deliberately NOT themed:
+    // this is telling the user their bill is growing, and that meaning must not change
+    // because they picked the green theme.
     val tokenColor = when {
-        sessionTokens < 5000 -> colors.textTertiary
-        sessionTokens < 15000 -> Color(0xFF60A5FA) // blue
-        sessionTokens < 25000 -> Color(0xFFFBBF24) // amber
-        else -> Color(0xFFF87171) // soft red
+        sessionTokens < 5_000 -> colors.textTertiary
+        sessionTokens < 15_000 -> ClawPalette.Note.base
+        sessionTokens < 25_000 -> ClawPalette.Alarm.light
+        else -> ClawPalette.Danger.light
     }
 
     Column {
@@ -480,41 +493,19 @@ private fun ChatTopBar(
                     shape = RoundedCornerShape(10.dp),
                     color = Color.Transparent,
                 ) {
-                    Text(
-                        "Chats",
-                        fontSize = 12.sp,
-                        color = colors.textTertiary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                // Local/Cloud toggle — two plain buttons, no container
-                Surface(
-                    onClick = { onTabChange("local") },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selectedTab == "local") colors.aiBubble else Color.Transparent,
-                    border = if (selectedTab == "local") androidx.compose.foundation.BorderStroke(1.dp, colors.aiBubbleBorder) else null,
-                ) {
-                    Text(
-                        "Local",
-                        fontSize = 12.sp,
-                        color = if (selectedTab == "local") colors.accent else colors.textTertiary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                Surface(
-                    onClick = { onTabChange("cloud") },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selectedTab == "cloud") colors.aiBubble else Color.Transparent,
-                    border = if (selectedTab == "cloud") androidx.compose.foundation.BorderStroke(1.dp, colors.aiBubbleBorder) else null,
-                ) {
-                    Text(
-                        "Cloud",
-                        fontSize = 12.sp,
-                        color = if (selectedTab == "cloud") colors.accent else colors.textTertiary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = colors.textTertiary,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text("Chats", fontSize = 12.sp, color = colors.textTertiary)
+                    }
                 }
                 IconButton(onClick = onSettings) {
                     Icon(Icons.Default.Settings, contentDescription = "Ajustes")
@@ -528,46 +519,73 @@ private fun ChatTopBar(
             ),
         )
 
-        // Model status + dropdown — filtered by selected tab
+        // Model status + scope switch + dropdown.
+        //
+        // The Local/Cloud switch lives on this row, not in the app bar above. In the bar
+        // it had to share a single line with the wordmark, the drawer button, "Chats" and
+        // the settings gear, and on a phone-width screen it simply did not fit — it
+        // overlapped the drawer button and pushed the title and the settings gear off the
+        // edge entirely. Here it also sits next to the thing it actually governs: it
+        // decides which set of models the picker on the left offers.
         Box {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(colors.surface)
-                .clickable { showModelMenu = true }
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(start = 16.dp, end = 10.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = modelStatus,
-                fontSize = 11.sp,
-                color = colors.textTertiary,
-            )
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                Icons.Default.UnfoldMore,
-                contentDescription = "Cambiar modelo",
-                tint = colors.textTertiary,
-                modifier = Modifier.size(12.dp),
-            )
-            if (sessionTokens > 0 && !isLocalModel) {
-                val formattedTokens = if (sessionTokens >= 1000) {
-                    String.format("%.1fK", sessionTokens / 1000.0)
-                } else {
-                    "$sessionTokens"
-                }
-                val costText = if (sessionCost < 0.01) "< $0.01" else "$${String.format("%.2f", sessionCost)}"
-                val tokenSuffix = if (!isLocalModel && sessionCost > 0) {
-                    " · $formattedTokens tokens · $costText"
-                } else {
-                    " · $formattedTokens tokens"
-                }
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showModelMenu = true }
+                    .padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = tokenSuffix,
+                    text = modelStatus,
                     fontSize = 11.sp,
-                    color = tokenColor,
+                    color = colors.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // Shrinks before the token cost does: a truncated model name is
+                    // recoverable from the picker, a truncated bill is not.
+                    modifier = Modifier.weight(1f, fill = false),
                 )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.UnfoldMore,
+                    contentDescription = "Cambiar modelo",
+                    tint = colors.textTertiary,
+                    modifier = Modifier.size(12.dp),
+                )
+                if (sessionTokens > 0 && !isLocalModel) {
+                    val formattedTokens = if (sessionTokens >= 1000) {
+                        String.format("%.1fK", sessionTokens / 1000.0)
+                    } else {
+                        "$sessionTokens"
+                    }
+                    val costText = if (sessionCost < 0.01) "< $0.01" else "$${String.format("%.2f", sessionCost)}"
+                    val tokenSuffix = if (sessionCost > 0) {
+                        " · $formattedTokens tokens · $costText"
+                    } else {
+                        " · $formattedTokens tokens"
+                    }
+                    Text(
+                        text = tokenSuffix,
+                        fontSize = 11.sp,
+                        color = tokenColor,
+                        maxLines = 1,
+                    )
+                }
             }
+            Spacer(Modifier.width(8.dp))
+            ModelScopeSwitch(
+                selectedTab = selectedTab,
+                onTabChange = onTabChange,
+                colors = colors,
+            )
         }
             // Model switcher dropdown — only show configured/downloaded models
             DropdownMenu(
@@ -660,33 +678,74 @@ private fun ChatTopBar(
     }
 }
 
-// ======================== PERMISSION BANNER ========================
-
+/**
+ * Local / Cloud switch, as one segmented control rather than two loose buttons.
+ *
+ * The pair used to be two independent `Surface`s that each toggled their own border, so
+ * nothing said they were alternatives to each other — it read as two unrelated buttons
+ * where exactly one happened to be outlined.
+ *
+ * The selected side is drawn by a single pill that animates between the two halves. That
+ * movement is what communicates "these are the two options and you are on this one";
+ * cross-fading two backgrounds cannot say that.
+ */
 @Composable
-private fun PermissionBanner(onClick: () -> Unit, colors: BlackClawColors) {
-    Card(
-        onClick = onClick,
+private fun ModelScopeSwitch(
+    selectedTab: String,
+    onTabChange: (String) -> Unit,
+    colors: BlackClawColors,
+) {
+    val options = listOf("local" to "Local", "cloud" to "Cloud")
+    val selectedIndex = options.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
+
+    // Fixed segment width, deliberately. The first version measured the available space
+    // with BoxWithConstraints and used half of it — but a Row inside a top app bar hands
+    // its children essentially unbounded width, so "half of the maximum" resolved to an
+    // enormous number and the control swallowed the entire bar. A control this small
+    // should state its own size rather than ask.
+    val segment = 58.dp
+    val segmentHeight = 30.dp
+    val slide by animateDpAsState(
+        targetValue = segment * selectedIndex,
+        animationSpec = ClawMotion.gentleSpring(),
+        label = "scopeSlide",
+    )
+
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = colors.accent.copy(alpha = 0.12f),
-        ),
-        shape = RoundedCornerShape(12.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.background.copy(alpha = 0.75f))
+            .border(0.5.dp, colors.inputBorder, RoundedCornerShape(10.dp))
+            .padding(2.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.Shield, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "Permisos necesarios. Pulsa para configurar.",
-                color = colors.accent,
-                fontSize = 13.sp,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+        // The pill is drawn first so the labels sit on top of it.
+        Box(
+            modifier = Modifier
+                .offset(x = slide)
+                .width(segment)
+                .height(segmentHeight)
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.accent.copy(alpha = 0.16f))
+                .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(8.dp)),
+        )
+        Row {
+            options.forEachIndexed { index, (id, label) ->
+                Box(
+                    modifier = Modifier
+                        .width(segment)
+                        .height(segmentHeight)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onTabChange(id) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        fontSize = 12.sp,
+                        fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (index == selectedIndex) colors.accent else colors.textTertiary,
+                    )
+                }
+            }
         }
     }
 }
@@ -701,12 +760,39 @@ private fun MessageList(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            scope.launch { listState.animateScrollToItem(messages.size - 1) }
+    // Index of the 1 dp anchor emitted after the last bubble. Scrolling to a message
+    // index puts that message's FIRST line at the top of the viewport, which during
+    // streaming means watching the top of a reply while the part being written stays
+    // off-screen. The anchor cannot be over-scrolled, so a request to reach it clamps
+    // to "the end of the content is visible" — which is what following a reply means.
+    val anchorIndex = messages.size
+
+    // True while the newest bubble is on screen. Derived from layout rather than from a
+    // flag we maintain, so it cannot drift out of sync with where the list actually is.
+    val followingTail by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
+            last.index >= info.totalItemsCount - 2
         }
+    }
+
+    // A new bubble always wins the scroll: either the user just sent something or a
+    // reply just started, and in both cases they want to see it.
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(anchorIndex)
+    }
+
+    // Growth of the last bubble — the streaming case, which the old code missed
+    // entirely because it only watched `messages.size`.
+    //
+    // Instant rather than animated: one animation per token queues up and stutters.
+    // Suppressed unless the tail is already in view, so scrolling up to re-read
+    // history is not undone by the next arriving token.
+    val tailLength = messages.lastOrNull()?.content?.length ?: 0
+    LaunchedEffect(tailLength) {
+        if (messages.isNotEmpty() && followingTail) listState.scrollToItem(anchorIndex)
     }
 
     LazyColumn(
@@ -718,45 +804,84 @@ private fun MessageList(
             },
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        items(messages.size) { index ->
-            val message = messages[index]
-            // Slide-in + fade animation for the most recent bubble.
-            // Older messages render instantly so scrolling feels snappy.
-            val isLast = index == messages.size - 1
-            AnimatedMessageWrapper(animate = isLast) {
+        // No `key` on purpose. The transcript is append-only and the tail is mutated in
+        // place, so position already is stable identity. A key derived from content
+        // would be actively harmful: it would change on every streamed token and make
+        // the list discard and rebuild the bubble being written.
+        itemsIndexed(messages) { index, message ->
+            AnimatedMessageWrapper(animate = index == messages.lastIndex) {
                 when (message.role) {
                     ChatMessage.Role.USER -> UserBubble(message.content, message.timestamp, colors)
                     ChatMessage.Role.ASSISTANT -> AssistantBubble(message.content, message.timestamp, colors, message.modelName)
                     ChatMessage.Role.SYSTEM -> SystemMessage(message.content, colors)
                     ChatMessage.Role.TOOL_GROUP -> ToolGroup(message, colors)
+                    ChatMessage.Role.CARDS -> CardRow(message.content, colors)
                 }
             }
         }
+        item { Spacer(Modifier.height(1.dp)) }
     }
 }
 
+/**
+ * Structured tool results, drawn as cards in the transcript.
+ *
+ * Indented like an assistant bubble so it reads as part of the reply rather than as a
+ * separate speaker. The payload is decoded here and an unreadable one yields nothing:
+ * the reply text is already on screen, so a bad payload should cost the user a card, not
+ * an error.
+ */
+@Composable
+private fun CardRow(payload: String, colors: BlackClawColors) {
+    val cards = remember(payload) { AssistCardCodec.decode(payload) }
+    if (cards.isEmpty()) return
+    // Built from the active theme rather than the card layer's own palette, so a card in
+    // the chat belongs to whichever of the ten themes the user picked.
+    val skin = remember(colors) {
+        AssistCardSkin(
+            surface = colors.aiBubble,
+            surfaceRaised = colors.surface,
+            outline = colors.aiBubbleBorder,
+            textPrimary = colors.textPrimary,
+            textSecondary = colors.textSecondary,
+            textTertiary = colors.textTertiary,
+            accent = colors.accent,
+            onAccent = colors.userText,
+            price = ClawPalette.Finance.base,
+        )
+    }
+    AssistCardList(
+        cards = cards,
+        skin = skin,
+        modifier = Modifier.padding(start = 54.dp, end = 20.dp, top = 3.dp, bottom = 3.dp),
+    )
+}
+
+/**
+ * Fade-and-rise for the newest bubble. Older ones render instantly so scrolling back
+ * through a long conversation stays snappy.
+ */
 @Composable
 private fun AnimatedMessageWrapper(animate: Boolean, content: @Composable () -> Unit) {
-    if (!animate) {
+    if (!animate || ClawAnimation.reduceMotion()) {
         content()
         return
     }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
-    val alpha by animateFloatAsState(
+    // One driver for both properties. Two independent animations of the same entrance
+    // can desync, and the shared value also makes the timing obvious.
+    val progress by animateFloatAsState(
         targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "msg-alpha",
-    )
-    val translateY by animateFloatAsState(
-        targetValue = if (visible) 0f else 16f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "msg-translate",
+        animationSpec = ClawMotion.enterTween(),
+        label = "msgEnter",
     )
     Box(
         modifier = Modifier.graphicsLayer {
-            this.alpha = alpha
-            this.translationY = translateY
+            alpha = progress
+            // dp, not raw pixels. The previous 16f was 16 *pixels*, which on this
+            // phone's density is about 4 dp — an animation too small to perceive.
+            translationY = (1f - progress) * 16.dp.toPx()
         }
     ) {
         content()
@@ -804,17 +929,31 @@ private fun UserBubble(text: String, timestamp: Long, colors: BlackClawColors) {
             .padding(start = 64.dp, end = 14.dp, top = 3.dp, bottom = 3.dp),
     ) {
         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-            Surface(
-                color = colors.userBubble,
-                shape = RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp),
+            // Box rather than Surface because Surface takes a colour, not a Brush.
+            // The gradient is derived by leaning the bubble slightly toward the theme
+            // accent, so all ten themes get a matching sheen instead of one hardcoded
+            // pair of blues that would only look right on the default.
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                lerp(colors.userBubble, colors.accent, 0.20f),
+                                colors.userBubble,
+                            )
+                        )
+                    )
             ) {
-                Text(
-                    text = text,
-                    color = colors.userText,
-                    fontSize = 15.sp,
-                    lineHeight = 21.sp,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                )
+                SelectionContainer {
+                    Text(
+                        text = text,
+                        color = colors.userText,
+                        fontSize = 15.sp,
+                        lineHeight = 21.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                }
             }
         }
         Text(
@@ -828,74 +967,105 @@ private fun UserBubble(text: String, timestamp: Long, colors: BlackClawColors) {
     }
 }
 
+/**
+ * The assistant's reply.
+ *
+ * The body goes through [ChatMarkdownText]: models format their answers, and until now
+ * the bubble showed the source, so every `**bold**`, heading, list and fenced block
+ * arrived as literal punctuation.
+ *
+ * `"..."` stays a sentinel for "still thinking" because that is what the controllers
+ * emit; it is checked before parsing so the placeholder never reaches the renderer.
+ */
 @Composable
 private fun AssistantBubble(text: String, timestamp: Long, colors: BlackClawColors, modelName: String? = null) {
+    val isThinking = text == ChatMessage.PENDING
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(timestamp) { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1600)
+            copied = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 64.dp, top = 3.dp, bottom = 3.dp),
+            .padding(start = 14.dp, end = 48.dp, top = 3.dp, bottom = 3.dp),
     ) {
         Row(
             horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.Bottom,
+            // Top, not Bottom: a formatted reply can be many blocks tall, and an avatar
+            // floating beside its last line reads as belonging to the wrong message.
+            verticalAlignment = if (isThinking) Alignment.Bottom else Alignment.Top,
         ) {
-            // Avatar — vectorial BC initials with accent color, no PNG dependency
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(colors.avatar),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "BC",
-                    color = colors.accent,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp,
-                )
-            }
+            BCAvatar(size = 32.dp, cornerRadius = 16.dp, colors = colors)
             Spacer(Modifier.width(8.dp))
 
-            // Bubble
-            if (text == "...") {
-                Surface(
-                    color = colors.aiBubble,
-                    shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
-                    border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.aiBubbleBorder),
-                ) {
+            Surface(
+                color = colors.aiBubble,
+                shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.aiBubbleBorder),
+            ) {
+                if (isThinking) {
                     TypingIndicator(
                         color = colors.accent,
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                     )
-                }
-            } else {
-                Surface(
-                    color = colors.aiBubble,
-                    shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
-                    border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.aiBubbleBorder),
-                ) {
-                    Text(
-                        text = text,
-                        color = colors.aiText,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    )
+                } else {
+                    // SelectionContainer rather than a long-press gesture: the message
+                    // list already uses tap-to-dismiss-keyboard, and a competing
+                    // long-press handler on every bubble would fight it. This also lets
+                    // the user take part of a reply, not just all of it.
+                    SelectionContainer {
+                        ChatMarkdownText(
+                            raw = text,
+                            colors = colors,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    }
                 }
             }
         }
-        if (text != "...") {
+        if (!isThinking) {
             val footer = listOfNotNull(
                 modelName?.takeIf { it.isNotBlank() },
-                formatBubbleTimestamp(timestamp)
+                formatBubbleTimestamp(timestamp),
             ).joinToString(" · ")
-            Text(
-                text = footer,
-                fontSize = 9.sp,
-                color = colors.textTertiary,
-                modifier = Modifier.padding(start = 40.dp, top = 1.dp, bottom = 2.dp),
-            )
+            Row(
+                modifier = Modifier.padding(start = 40.dp, top = 2.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = footer, fontSize = 9.sp, color = colors.textTertiary)
+                Spacer(Modifier.width(8.dp))
+                // A visible affordance beats a hidden gesture: before this there was no
+                // way at all to get a reply out of the app.
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            clipboard.setText(AnnotatedString(text))
+                            copied = true
+                        }
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                        contentDescription = if (copied) "Copiado" else "Copiar respuesta",
+                        tint = if (copied) colors.accent else colors.textTertiary,
+                        modifier = Modifier.size(11.dp),
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        if (copied) "Copiado" else "Copiar",
+                        fontSize = 9.sp,
+                        color = if (copied) colors.accent else colors.textTertiary,
+                    )
+                }
+            }
         }
     }
 }
@@ -944,28 +1114,72 @@ private fun SystemMessage(text: String, colors: BlackClawColors) {
     )
 }
 
+/**
+ * What the agent did, as a run of steps.
+ *
+ * Given a container and a rail rather than left as loose grey lines: these sit between
+ * conversational bubbles, and without a boundary a run of six tool steps reads as the
+ * assistant having sent six separate cryptic messages.
+ *
+ * The tool name is monospaced to mark it as a machine action rather than something the
+ * model said. `success` is shown by the dot only, because it is the one thing this
+ * screen actually knows about a step.
+ */
 @Composable
 private fun ToolGroup(message: ChatMessage, colors: BlackClawColors) {
+    val steps = message.toolSteps.orEmpty()
+    if (steps.isEmpty()) return
+
     Column(
-        modifier = Modifier.padding(start = 54.dp, end = 64.dp, top = 2.dp, bottom = 2.dp),
+        modifier = Modifier.padding(start = 54.dp, end = 48.dp, top = 3.dp, bottom = 3.dp),
     ) {
-        message.toolSteps?.forEach { step ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(vertical = 1.dp),
-            ) {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(colors.aiBubble.copy(alpha = 0.6f))
+                .padding(start = 2.dp),
+        ) {
+            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
                 Box(
-                    modifier = Modifier
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(if (step.success) colors.accent else colors.textTertiary),
+                    Modifier
+                        .width(2.dp)
+                        .fillMaxHeight()
+                        .background(colors.accent.copy(alpha = 0.35f)),
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "${step.toolName} → ${step.summary}",
-                    fontSize = 12.sp,
-                    color = colors.textTertiary,
-                )
+                Column(Modifier.padding(start = 9.dp, end = 10.dp, top = 6.dp, bottom = 6.dp)) {
+                    steps.forEach { step ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 1.5.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (step.success) colors.accent
+                                        else colors.textTertiary
+                                    ),
+                            )
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                text = buildAnnotatedString {
+                                    withStyle(
+                                        SpanStyle(
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            color = colors.textSecondary,
+                                        )
+                                    ) { append(step.toolName) }
+                                    withStyle(SpanStyle(color = colors.textTertiary)) {
+                                        append("  ${step.summary}")
+                                    }
+                                },
+                                fontSize = 11.5.sp,
+                                lineHeight = 15.sp,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -985,6 +1199,8 @@ private fun ChatInputBar(
     onSendTask: (String) -> Unit,
     onStopAll: () -> Unit = {},
     onAttach: () -> Unit,
+    onOpenMonitor: () -> Unit = {},
+    onOpenSendMessage: () -> Unit = {},
     colors: BlackClawColors,
     prefillText: String = "",
     prefillIsTask: Boolean = false,
@@ -1033,109 +1249,121 @@ private fun ChatInputBar(
         }
     }
 
-    val taskBg = Color(0xFF1A1410)
-    val taskBorder = colors.accent.copy(alpha = 0.25f)
+    val taskMode = isTaskMode && isLocalModel
+
+    // Task mode tints the composer toward the theme accent. It used to use a hardcoded
+    // warm brown (0xFF1A1410), which only made sense beside an amber accent and read as
+    // a rendering fault on the other nine themes. Animated so the switch is legible as
+    // a change of mode rather than an instant repaint.
+    val barBackground by animateColorAsState(
+        if (taskMode) lerp(colors.surface, colors.accent, 0.10f) else colors.surface,
+        ClawMotion.standardTween(), label = "composerBg",
+    )
+    val barDivider by animateColorAsState(
+        if (taskMode) colors.accent.copy(alpha = 0.35f) else colors.divider,
+        ClawMotion.standardTween(), label = "composerDivider",
+    )
 
     Column(
         modifier = Modifier
-            .background(if (isTaskMode && isLocalModel) taskBg else colors.surface)
+            .background(barBackground)
             .navigationBarsPadding()
     ) {
-        HorizontalDivider(
-            color = if (isTaskMode && isLocalModel) taskBorder else colors.divider,
-            thickness = 1.dp,
-        )
+        HorizontalDivider(color = barDivider, thickness = 1.dp)
 
-        // Segmented Chat/Task toggle — Local LLM only
+        // Chat/Task toggle — local models only, because cloud requests already route
+        // through the task path regardless of this switch.
         if (isLocalModel) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 10.dp, end = 10.dp, top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(start = 10.dp, end = 10.dp, top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Chat button
-                Surface(
+                ModeChip(
+                    label = "Chat",
+                    icon = Icons.Outlined.ChatBubbleOutline,
+                    selected = !isTaskMode,
+                    fillWithAccent = false,
+                    colors = colors,
                     onClick = { onTaskModeChange(false) },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (!isTaskMode) colors.aiBubble else Color.Transparent,
-                    border = if (!isTaskMode) androidx.compose.foundation.BorderStroke(1.dp, colors.aiBubbleBorder) else null,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        "💬 Chat",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (!isTaskMode) colors.textPrimary else colors.textTertiary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 9.dp),
-                    )
-                }
-                // Task button
-                Surface(
+                )
+                ModeChip(
+                    label = "Tarea",
+                    icon = Icons.Outlined.AutoAwesome,
+                    selected = isTaskMode,
+                    fillWithAccent = true,
+                    colors = colors,
                     onClick = { onTaskModeChange(true) },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isTaskMode) colors.accent else Color.Transparent,
-                    border = if (isTaskMode) androidx.compose.foundation.BorderStroke(1.dp, colors.accent) else null,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        "🤖 Task",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isTaskMode) Color.White else colors.textTertiary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 9.dp),
-                    )
-                }
+                )
             }
         }
 
-        // Input bar — always visible, style changes in Task mode
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 8.dp),
+                .padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // One button opening a menu, rather than one button per action. Three
+            // controls already share this row and the text field is narrow because of
+            // it; a fourth and fifth would leave no room to type. The menu also gives
+            // each action a label, which an icon alone cannot do for "monitor a chat".
+            ComposerActionsButton(
+                enabled = inputEnabled,
+                colors = colors,
+                onAttach = onAttach,
+                onOpenMonitor = onOpenMonitor,
+                onOpenSendMessage = onOpenSendMessage,
+            )
+
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
                 placeholder = {
+                    // Short and single-line. Three action buttons share this row, so the
+                    // field is narrow; the longer wording wrapped onto a second line and
+                    // stretched the whole composer to twice its height while still empty.
                     Text(
                         when {
-                            isLocalModel && isTaskMode -> "Describe una tarea…"
-                            !isLocalModel -> "Chatea o pide una tarea…"
+                            taskMode -> "Describe una tarea…"
+                            !isLocalModel -> "Escribe o pide algo…"
                             else -> "Habla con la IA local…"
                         },
-                        color = if (isTaskMode && isLocalModel) colors.accent.copy(alpha = 0.5f) else colors.textTertiary,
+                        color = if (taskMode) colors.accent.copy(alpha = 0.55f) else colors.textTertiary,
                         fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 40.dp, max = 100.dp),
+                    .heightIn(min = 44.dp, max = 120.dp),
                 shape = RoundedCornerShape(20.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = if (isTaskMode && isLocalModel) colors.accent else colors.accent.copy(alpha = 0.4f),
-                    unfocusedBorderColor = if (isTaskMode && isLocalModel) colors.accent.copy(alpha = 0.6f) else colors.inputBorder,
-                    cursorColor = if (isTaskMode && isLocalModel) colors.accent else colors.accent,
+                    focusedBorderColor = if (taskMode) colors.accent else colors.accent.copy(alpha = 0.4f),
+                    unfocusedBorderColor = if (taskMode) colors.accent.copy(alpha = 0.6f) else colors.inputBorder,
+                    cursorColor = colors.accent,
                     focusedTextColor = colors.textPrimary,
                     unfocusedTextColor = colors.textPrimary,
-                    focusedContainerColor = if (isTaskMode && isLocalModel) taskBg else Color.Transparent,
-                    unfocusedContainerColor = if (isTaskMode && isLocalModel) taskBg else Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
                 ),
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
                 maxLines = 4,
             )
 
-            Spacer(Modifier.width(6.dp))
-
-            // Voice input mic button (Issue #44) — launches Android system speech dialog.
-            // Available whenever input is enabled (including while a task runs, so user
-            // can queue next prompt with voice without waiting).
-            val micEnabled = inputEnabled
-            FloatingActionButton(
+            // Voice input — the Android system speech dialog, which handles its own
+            // permission. Stays available while a task runs so the next prompt can be
+            // dictated without waiting. The transcript is appended, not substituted.
+            InputActionButton(
+                icon = Icons.Default.Mic,
+                contentDescription = stringResource(R.string.voice_input_button_cd),
+                tint = colors.textTertiary,
+                background = Color.Transparent,
+                enabled = inputEnabled,
                 onClick = {
                     XLog.i("VoiceInput", "mic tapped: text.len=${text.length}, isTaskMode=$isTaskMode, isLocalModel=$isLocalModel")
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -1153,186 +1381,222 @@ private fun ChatInputBar(
                         voiceLauncher.launch(intent)
                     } catch (e: ActivityNotFoundException) {
                         XLog.e("VoiceInput", "no speech recognition service installed", e)
-                        Toast.makeText(
-                            context,
-                            R.string.voice_input_unavailable,
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(context, R.string.voice_input_unavailable, Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         XLog.e("VoiceInput", "voice launch failed unexpectedly", e)
-                        Toast.makeText(
-                            context,
-                            R.string.voice_input_error,
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(context, R.string.voice_input_error, Toast.LENGTH_SHORT).show()
                     }
                 },
-                modifier = Modifier
-                    .size(34.dp)
-                    .alpha(if (micEnabled) 1f else 0.35f),
-                containerColor = colors.background,
-                shape = CircleShape,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp),
-            ) {
-                Icon(
-                    Icons.Default.Mic,
-                    contentDescription = stringResource(R.string.voice_input_button_cd),
-                    tint = colors.textTertiary,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
+            )
 
-            Spacer(Modifier.width(6.dp))
-
-            FloatingActionButton(
+            val canSend = text.isNotBlank() && inputEnabled && !isAwaitingReply
+            val sendFill by animateColorAsState(
+                when {
+                    // Stop is deliberately NOT themed. Danger is semantic, and a stop
+                    // control that turns green under the aurora theme would be actively
+                    // misleading.
+                    isTaskRunning -> ClawPalette.Danger.base
+                    !canSend -> colors.aiBubble
+                    taskMode -> colors.accent
+                    else -> colors.userBubble
+                },
+                ClawMotion.quickTween(), label = "sendFill",
+            )
+            InputActionButton(
+                icon = when {
+                    isTaskRunning -> Icons.Default.Close
+                    isAwaitingReply -> Icons.Default.MoreHoriz
+                    else -> Icons.Default.ArrowUpward
+                },
+                contentDescription = when {
+                    isTaskRunning -> "Detener"
+                    isAwaitingReply -> "Esperando respuesta"
+                    else -> "Enviar"
+                },
+                tint = when {
+                    isTaskRunning -> ClawPalette.Danger.onAccent
+                    !canSend -> colors.textTertiary
+                    else -> colors.userText
+                },
+                background = sendFill,
+                enabled = isTaskRunning || canSend,
                 onClick = {
                     if (isTaskRunning) {
                         onStopAll()
-                    } else if (!isAwaitingReply && inputEnabled && text.isNotBlank()) {
-                        if (!isLocalModel || isTaskMode) {
-                            onSendTask(text.trim())
-                            text = ""
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                        } else {
-                            onSendChat(text.trim())
-                            text = ""
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                        }
+                    } else if (canSend) {
+                        if (!isLocalModel || isTaskMode) onSendTask(text.trim())
+                        else onSendChat(text.trim())
+                        text = ""
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
                     }
                 },
-                modifier = Modifier
-                    .size(34.dp)
-                    .alpha(if ((text.isBlank() || !inputEnabled || isAwaitingReply) && !isTaskRunning) 0.35f else 1f),
-                containerColor = when {
-                    isTaskRunning -> Color(0xFFF44336)
-                    isAwaitingReply -> colors.background
-                    text.isBlank() -> colors.background
-                    isTaskMode && isLocalModel -> colors.accent
-                    else -> colors.userBubble
-                },
-                shape = CircleShape,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp),
-            ) {
-                Icon(
-                    when {
-                        isTaskRunning -> Icons.Default.Close
-                        isAwaitingReply -> Icons.Default.MoreHoriz
-                        else -> Icons.Default.ArrowUpward
-                    },
-                    contentDescription = when {
-                        isTaskRunning -> "Detener"
-                        isAwaitingReply -> "Esperando respuesta"
-                        else -> "Enviar"
-                    },
-                    tint = Color.White,
-                    modifier = Modifier.size(14.dp),
-                )
+            )
+        }
+    }
+}
+
+/**
+ * One of the two composer modes.
+ *
+ * The labels were `"💬 Chat"` and `"🤖 Task"` — an emoji baked into the string, and one
+ * word left untranslated in an otherwise Spanish UI. Icon and text are separate now so
+ * both can be styled and the label can be localised.
+ *
+ * The selected accent fill uses `colors.userText` for its content rather than a
+ * hardcoded white: that slot exists precisely because it is the colour proven to sit on
+ * the theme's saturated surface, and white fails contrast on the light themes.
+ */
+@Composable
+private fun ModeChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    fillWithAccent: Boolean,
+    colors: BlackClawColors,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fill by animateColorAsState(
+        when {
+            selected && fillWithAccent -> colors.accent
+            selected -> colors.aiBubble
+            else -> Color.Transparent
+        },
+        ClawMotion.quickTween(), label = "modeFill",
+    )
+    val content by animateColorAsState(
+        when {
+            selected && fillWithAccent -> colors.userText
+            selected -> colors.textPrimary
+            else -> colors.textTertiary
+        },
+        ClawMotion.quickTween(), label = "modeContent",
+    )
+    val outline by animateColorAsState(
+        when {
+            selected && fillWithAccent -> colors.accent
+            selected -> colors.aiBubbleBorder
+            else -> Color.Transparent
+        },
+        ClawMotion.quickTween(), label = "modeOutline",
+    )
+    Row(
+        modifier = modifier
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(fill)
+            .border(1.dp, outline, RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = content)
+    }
+}
+
+/**
+ * Round action for the composer.
+ *
+ * Replaces the 34 dp [FloatingActionButton]s these used to be. 34 dp is well under the
+ * platform's 48 dp minimum target and is genuinely awkward to hit one-handed; the touch
+ * area here is 48 dp while the painted circle stays small, so nothing grows visually.
+ */
+@Composable
+private fun InputActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    tint: Color,
+    background: Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.35f),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(background),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/**
+ * The composer's "+" menu.
+ *
+ * ## Why this exists
+ *
+ * [MonitorDialog] and [SendMessageDialog] were fully implemented and unreachable: their
+ * `show…` flags were never set to true from anywhere, so two finished features shipped
+ * dark. This is the entry point they were missing.
+ *
+ * A menu rather than more buttons — the row's three existing controls already squeeze the
+ * text field, and these two actions need words to be understandable. "Monitor a chat" is
+ * not an icon.
+ */
+@Composable
+private fun ComposerActionsButton(
+    enabled: Boolean,
+    colors: BlackClawColors,
+    onAttach: () -> Unit,
+    onOpenMonitor: () -> Unit,
+    onOpenSendMessage: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        InputActionButton(
+            icon = Icons.Outlined.Add,
+            contentDescription = "Más acciones",
+            tint = colors.textTertiary,
+            background = Color.Transparent,
+            enabled = enabled,
+            onClick = { expanded = true },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = colors.surface,
+        ) {
+            ComposerMenuItem("Adjuntar imagen", Icons.Outlined.Image, colors) {
+                expanded = false
+                onAttach()
+            }
+            ComposerMenuItem("Vigilar un chat", Icons.Outlined.Visibility, colors) {
+                expanded = false
+                onOpenMonitor()
+            }
+            ComposerMenuItem("Enviar un mensaje", Icons.Outlined.Send, colors) {
+                expanded = false
+                onOpenSendMessage()
             }
         }
     }
 }
 
-// ======================== SKILL SHORTCUT BAR ========================
-
 @Composable
-private fun SkillShortcutBar(
-    skills: List<Skill>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onSkillTap: (Skill) -> Unit,
+private fun ComposerMenuItem(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     colors: BlackClawColors,
+    onClick: () -> Unit,
 ) {
-    val categoryIcons = mapOf(
-        SkillCategory.INPUT to Icons.Outlined.Keyboard,
-        SkillCategory.DISMISS to Icons.Outlined.Close,
-        SkillCategory.NAVIGATION to Icons.Outlined.Navigation,
-        SkillCategory.MESSAGING to Icons.Outlined.Chat,
-        SkillCategory.MEDIA to Icons.Outlined.CameraAlt,
-        SkillCategory.GENERAL to Icons.Outlined.AutoAwesome,
+    DropdownMenuItem(
+        text = { Text(label, fontSize = 14.sp, color = colors.textPrimary) },
+        leadingIcon = { Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp)) },
+        onClick = onClick,
     )
-
-    Column {
-        // Toggle row
-        Surface(
-            onClick = onToggle,
-            color = Color.Transparent,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    tint = colors.textTertiary,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "Skills",
-                    fontSize = 12.sp,
-                    color = colors.textTertiary,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Plegar" else "Desplegar",
-                    tint = colors.textTertiary,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-
-        // Expanded skill chips
-        if (expanded) {
-            // Two rows of chips using FlowRow-style layout
-            val rows = skills.chunked((skills.size + 1) / 2)
-            Column(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                for (row in rows) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        for (skill in row) {
-                            val icon = categoryIcons[skill.category] ?: Icons.Outlined.AutoAwesome
-                            Surface(
-                                onClick = { onSkillTap(skill) },
-                                shape = RoundedCornerShape(20.dp),
-                                color = colors.accent.copy(alpha = 0.1f),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        icon,
-                                        contentDescription = null,
-                                        tint = colors.accent,
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        skill.name,
-                                        fontSize = 11.sp,
-                                        color = colors.accent,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-        }
-    }
 }
 
 // ======================== DOWNLOAD OVERLAY ========================
@@ -1413,7 +1677,9 @@ private fun EmptyStateWithPrompts(
         listOf(
             Prompt("¿Qué hora es en Tokio?", false),
             Prompt("Ayúdame a escribir un mensaje de cumpleaños", false),
-            Prompt("💬 Manda hola a Mamá por WhatsApp", true),
+            // No emoji in the text: this string is sent to the model verbatim, and the
+            // rail beside the row is what marks it as a task now.
+            Prompt("Manda hola a Mamá por WhatsApp", true),
         )
     } else {
         listOf(
@@ -1424,286 +1690,160 @@ private fun EmptyStateWithPrompts(
     }
 
     val headerText = if (!isLocalModel) "IA en la nube" else "IA local"
+    val reduceMotion = ClawAnimation.reduceMotion()
 
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(40.dp))
-        BCAvatar(
-            size = 48.dp,
-            cornerRadius = 12.dp,
-            colors = colors,
-        )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(48.dp))
+
+        // A slow halo behind the mark. This is the one purely decorative animation on
+        // the screen, so it is the one that checks the reduced-motion setting, and it
+        // breathes rather than pulses — a fast throb on the first thing you see reads as
+        // an alert, not as welcome.
+        Box(contentAlignment = Alignment.Center) {
+            if (!reduceMotion) {
+                val halo = rememberInfiniteTransition(label = "emptyHalo")
+                val scale by halo.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.35f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(2600, easing = ClawMotion.EaseInOut),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "haloScale",
+                )
+                val fade by halo.animateFloat(
+                    initialValue = 0.18f,
+                    targetValue = 0.04f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(2600, easing = ClawMotion.EaseInOut),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "haloFade",
+                )
+                Box(
+                    Modifier
+                        .size(72.dp)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            alpha = fade
+                        }
+                        .clip(CircleShape)
+                        .background(colors.accent),
+                )
+            }
+            BCAvatar(size = 52.dp, cornerRadius = 15.dp, colors = colors)
+        }
+
+        Spacer(Modifier.height(12.dp))
         Text(
             "BlackClaw",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Bold,
             color = colors.textPrimary,
         )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            headerText,
-            fontSize = 12.sp,
-            color = colors.accent,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(6.dp))
-        // Hint text — Local has styled bold parts, Cloud is plain
-        if (isLocalModel) {
-            Text(
-                buildAnnotatedString {
-                    append("Habla en modo ")
-                    withStyle(SpanStyle(color = colors.accent, fontWeight = FontWeight.Bold)) {
-                        append("💬 Chat")
-                    }
-                    append(", o cambia a ")
-                    withStyle(SpanStyle(color = colors.accent, fontWeight = FontWeight.Bold)) {
-                        append("🤖 Tarea")
-                    }
-                    append(" para controlar tu teléfono")
-                },
-                fontSize = 11.sp,
-                color = colors.textSecondary,
-                textAlign = TextAlign.Center,
-                lineHeight = 16.sp,
-                modifier = Modifier.widthIn(max = 260.dp),
-            )
-        } else {
-            Text(
-                "Chat y tareas en uno \u2014 escribe lo que quieras",
-                fontSize = 11.sp,
-                color = colors.textSecondary,
-                textAlign = TextAlign.Center,
-                lineHeight = 16.sp,
-                modifier = Modifier.widthIn(max = 260.dp),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-
-        // Suggested prompt chips — same style as Quick Tasks items
-        Column(
-            modifier = Modifier.padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            prompts.forEach { prompt ->
-                val barAlpha = if (prompt.isTask) 1f else 0.5f
-                Surface(
-                    shape = RoundedCornerShape(9.dp),
-                    color = colors.background,
-                    border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.inputBorder),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectPrompt(prompt.text, prompt.isTask) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(38.dp)
-                                .background(
-                                    colors.accent.copy(alpha = barAlpha),
-                                    RoundedCornerShape(topStart = 9.dp, bottomStart = 9.dp),
-                                ),
-                        )
-                        Text(
-                            prompt.text,
-                            fontSize = 12.sp,
-                            color = colors.textSecondary,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ======================== QUICK TASKS PANEL (v9) ========================
-
-@Composable
-private fun QuickTasksPanel(
-    isLocalModel: Boolean,
-    onFillTask: (String) -> Unit,
-    onMonitorClick: () -> Unit,
-    monitorActive: Boolean,
-    colors: BlackClawColors,
-) {
-    // Default to collapsed — user opens it explicitly with the button.
-    var expanded by remember { mutableStateOf(false) }
-
-    // Cloud-only tasks (multi-step, Siri can't do)
-    val cloudOnlyTasks = listOf(
-        "🦞 Abre Reddit y busca blackclaw",
-        "🎬 Busca en YouTube vídeos divertidos de gatos",
-        "📦 Instala Telegram desde Play Store",
-        "🐦 Mira qué es tendencia en Twitter y dímelo",
-        "💬 Mira mi último chat de WhatsApp y resúmelo",
-        "📋 Copia el último email y búscalo en Google",
-        "📧 Escribe un email diciendo que llegaré tarde",
-    )
-    val reasoningTasks = listOf(
-        "📵 Mira mis notificaciones — ¿algo importante?",
-        "📋 Lee mi portapapeles y explícame qué dice",
-        "🧹 Mira mi almacenamiento — ¿qué puedo borrar?",
-        "🔔 Lee mis notificaciones y resúmelas",
-        "🔋 Mira mi batería y dime si debo cargarla",
-    )
-    val deterministicTasks = listOf(
-        "💬 Manda hola a Mamá por WhatsApp",
-        "📱 ¿Qué apps tengo instaladas?",
-        "🌡️ ¿Cuánto está mi teléfono de caliente?",
-        "🔵 ¿Está el Bluetooth encendido?",
-        "🔋 ¿Cuánta batería me queda?",
-        "📞 Llama a Mamá",
-        "💾 ¿Cuánto almacenamiento tengo?",
-        "📲 ¿Qué versión de Android tengo?",
-    )
-    val quickTasks = if (isLocalModel) {
-        reasoningTasks + deterministicTasks
-    } else {
-        cloudOnlyTasks + reasoningTasks + deterministicTasks
-    }
-
-    Column(
-        modifier = Modifier.background(colors.surface),
-    ) {
-        HorizontalDivider(color = colors.divider, thickness = 1.dp)
-
-        // Handle / button — ▲ Plantillas Rápidas ▲
+        Spacer(Modifier.height(5.dp))
+        // Which brain is answering, as a chip — it changes what the assistant can do,
+        // so it deserves more than a line of tinted text.
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.Center,
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.accent.copy(alpha = 0.12f))
+                .border(0.5.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                contentDescription = "Alternar",
-                tint = colors.accent,
-                modifier = Modifier.size(12.dp),
+            Box(
+                Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent),
             )
             Spacer(Modifier.width(6.dp))
-            Text(
-                "Plantillas rápidas",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = colors.accent,
-            )
-            Spacer(Modifier.width(6.dp))
-            Icon(
-                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                contentDescription = "Alternar",
-                tint = colors.accent,
-                modifier = Modifier.size(12.dp),
-            )
+            Text(headerText, fontSize = 11.sp, color = colors.accent, fontWeight = FontWeight.Medium)
         }
 
-        // Collapsible content
-        if (expanded) {
-            // Quick task items — scrollable
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 280.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                quickTasks.forEach { task ->
-                    Surface(
-                        shape = RoundedCornerShape(9.dp),
-                        color = colors.background,
-                        border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.inputBorder),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onFillTask(task.substringAfter(" ")) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(3.dp)
-                                    .height(38.dp)
-                                    .background(colors.accent, RoundedCornerShape(topStart = 9.dp, bottomStart = 9.dp)),
-                            )
-                            Text(
-                                task,
-                                fontSize = 12.sp,
-                                color = colors.textSecondary,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                            )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = if (isLocalModel) {
+                "Escribe para charlar, o cambia a Tarea para que controle tu teléfono"
+            } else {
+                "Chat y tareas en uno — escribe lo que quieras"
+            },
+            fontSize = 12.sp,
+            color = colors.textSecondary,
+            textAlign = TextAlign.Center,
+            lineHeight = 17.sp,
+            modifier = Modifier.widthIn(max = 280.dp),
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "PRUEBA CON",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            color = colors.textTertiary,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Column(
+            modifier = Modifier.padding(horizontal = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            prompts.forEachIndexed { index, prompt ->
+                // Staggered so the suggestions arrive as a set instead of appearing
+                // fully formed, which is what makes an empty screen feel inert.
+                var shown by remember { mutableStateOf(reduceMotion) }
+                LaunchedEffect(Unit) { shown = true }
+                val appear by animateFloatAsState(
+                    targetValue = if (shown) 1f else 0f,
+                    animationSpec = ClawMotion.enterTween(ClawMotion.staggerDelay(index, stepMs = 70)),
+                    label = "promptAppear",
+                )
+                Row(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            alpha = appear
+                            translationY = (1f - appear) * 12.dp.toPx()
                         }
-                    }
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.aiBubble)
+                        .border(0.5.dp, colors.inputBorder, RoundedCornerShape(12.dp))
+                        .clickable { onSelectPrompt(prompt.text, prompt.isTask) }
+                        .padding(end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Task suggestions get a solid rail, chat ones a faint rail: the
+                    // difference matters because one of them will operate the phone.
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(42.dp)
+                            .background(colors.accent.copy(alpha = if (prompt.isTask) 1f else 0.4f)),
+                    )
+                    Spacer(Modifier.width(11.dp))
+                    Text(
+                        prompt.text,
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.sp,
+                        color = colors.textSecondary,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 10.dp),
+                    )
+                    Icon(
+                        Icons.Default.ArrowUpward,
+                        contentDescription = null,
+                        tint = colors.textTertiary,
+                        modifier = Modifier.size(13.dp),
+                    )
                 }
             }
-
-            // Background section — always visible, NOT inside scroll
-            Column(modifier = Modifier.padding(horizontal = 12.dp)) {
-                Text(
-                    "BACKGROUND",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.textTertiary,
-                    letterSpacing = 0.5.sp,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
-                )
-
-                // Monitor card
-                val monitorBorderColor = if (monitorActive) colors.accent else colors.inputBorder
-                Surface(
-                    onClick = {
-                        if (!monitorActive) onMonitorClick()
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.background,
-                    border = androidx.compose.foundation.BorderStroke(
-                        if (monitorActive) 1.dp else 0.5.dp,
-                        monitorBorderColor,
-                    ),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(
-                                    colors.accent.copy(alpha = 0.12f),
-                                    RoundedCornerShape(9.dp),
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("👁️", fontSize = 15.sp)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                if (monitorActive) "Activo" else "Monitor & auto-respuesta",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = colors.textPrimary,
-                            )
-                            Text(
-                                if (monitorActive) "Monitorización activa — usa la barra superior para detener" else "Lee mensajes y responde automáticamente",
-                                fontSize = 9.sp,
-                                color = colors.textTertiary,
-                            )
-                        }
-                        if (!monitorActive) {
-                            Text("›", color = colors.textTertiary, fontSize = 14.sp)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-            } // end Background Column
         }
     }
 }
@@ -2094,215 +2234,6 @@ private fun SidebarContent(
         }
 
         Spacer(Modifier.height(16.dp))
-    }
-}
-
-// ======================== TASK SKILLS PANEL ========================
-
-@Composable
-private fun TaskSkillsPanel(
-    isLocalModel: Boolean,
-    taskMessages: List<ChatMessage>,
-    onMonitorClick: () -> Unit,
-    onSendClick: () -> Unit,
-    onSkillTap: (String) -> Unit,
-    activatingSkill: String?,
-    monitorActive: Boolean,
-    colors: BlackClawColors,
-    modifier: Modifier = Modifier,
-) {
-    val builtInSkills = remember { SkillRegistry.getUserFacing() }
-    val categoryIcons = mapOf(
-        SkillCategory.INPUT to Icons.Outlined.Keyboard,
-        SkillCategory.DISMISS to Icons.Outlined.Close,
-        SkillCategory.NAVIGATION to Icons.Outlined.Navigation,
-        SkillCategory.MESSAGING to Icons.Outlined.Chat,
-        SkillCategory.GENERAL to Icons.Outlined.AutoAwesome,
-    )
-
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            Text(
-                "Flujos",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.textPrimary,
-            )
-            Text(
-                "Tareas en segundo plano impulsadas por IA — cosas que un prompt no puede hacer.",
-                fontSize = 12.sp,
-                color = colors.textTertiary,
-                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-            )
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = colors.accent.copy(alpha = 0.12f),
-                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
-            ) {
-                Text(
-                    "Experimental — más flujos próximamente",
-                    fontSize = 11.sp,
-                    color = colors.accent,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                )
-            }
-        }
-
-        // Monitor Messages — always shown (background workflow, both modes need it)
-        item {
-            SkillCard(
-                icon = Icons.Outlined.Visibility,
-                title = "Monitorizar mensajes",
-                description = "Responde mensajes en segundo plano",
-                onClick = onMonitorClick,
-                isActivating = activatingSkill == "monitor",
-                isActive = monitorActive,
-                colors = colors,
-            )
-        }
-
-        // Send Message — available on both (workflow card shortcut)
-        item {
-            SkillCard(
-                icon = Icons.Outlined.Send,
-                title = "Enviar mensaje",
-                description = "Envía un mensaje desde cualquier app",
-                onClick = onSendClick,
-                colors = colors,
-            )
-        }
-
-        // Built-in user-facing skills from SkillRegistry
-        if (builtInSkills.isNotEmpty()) {
-            items(builtInSkills.size) { index ->
-                val skill = builtInSkills[index]
-                val example = skill.triggerPatterns.firstOrNull()
-                    ?.replace(Regex("\\{\\w+\\}"), "...")
-                    ?.replace(".+", "...")
-                    ?: skill.name
-                SkillCard(
-                    icon = categoryIcons[skill.category] ?: Icons.Outlined.AutoAwesome,
-                    title = skill.name,
-                    description = skill.description,
-                    onClick = { onSkillTap(example) },
-                    colors = colors,
-                )
-            }
-        }
-
-        // Task progress messages (if any)
-        if (taskMessages.isNotEmpty()) {
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Recientes",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.textTertiary,
-                )
-            }
-            items(taskMessages.size) { index ->
-                val msg = taskMessages[index]
-                if (msg.role == ChatMessage.Role.USER) {
-                    UserBubble(msg.content, msg.timestamp, colors)
-                } else {
-                    SystemMessage(msg.content, colors)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SkillCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    description: String,
-    onClick: () -> Unit,
-    isActivating: Boolean = false,
-    isActive: Boolean = false,
-    colors: BlackClawColors,
-) {
-    val activeOrange = Color(0xFFE8751A)
-    val borderColor = when {
-        isActive -> activeOrange
-        isActivating -> colors.accent
-        else -> colors.inputBorder
-    }
-    val cardBg = when {
-        isActive -> activeOrange.copy(alpha = 0.08f)
-        else -> colors.surface
-    }
-    val iconBg = when {
-        isActive -> activeOrange.copy(alpha = 0.15f)
-        else -> colors.accent.copy(alpha = 0.12f)
-    }
-    val iconTint = if (isActive) activeOrange else colors.accent
-
-    // Progress animation
-    val progress by animateFloatAsState(
-        targetValue = if (isActivating) 1f else 0f,
-        animationSpec = if (isActivating) tween(2000, easing = LinearEasing) else snap(),
-        label = "skillProgress",
-    )
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = cardBg,
-        border = androidx.compose.foundation.BorderStroke(if (isActive) 1.dp else 0.5.dp, borderColor),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(iconBg, RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isActive) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = activeOrange, modifier = Modifier.size(22.dp))
-                    } else {
-                        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
-                    }
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = if (isActive) activeOrange else colors.textPrimary)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        if (isActive) "Ejecutándose en segundo plano" else description,
-                        fontSize = 12.sp,
-                        color = if (isActive) activeOrange.copy(alpha = 0.7f) else colors.textTertiary,
-                        lineHeight = 16.sp,
-                    )
-                }
-                if (!isActive && !isActivating) {
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(20.dp))
-                }
-            }
-
-            // Progress bar during activation
-            if (isActivating) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = activeOrange,
-                    trackColor = colors.inputBorder,
-                )
-            }
-        }
     }
 }
 

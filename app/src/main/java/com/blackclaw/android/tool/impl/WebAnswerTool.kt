@@ -1,5 +1,8 @@
 package com.blackclaw.android.tool.impl
 
+import com.blackclaw.android.cards.AssistCard
+import com.blackclaw.android.cards.AssistCardCodec
+import com.blackclaw.android.cards.PriceText
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
 import com.blackclaw.android.tool.ToolResult
@@ -76,8 +79,42 @@ class WebAnswerTool : BaseTool() {
         val out = sb.toString().trim()
         return if (out.isBlank())
             ToolResult.error("No obtuve resultados para '$query'. Intenta reformular la búsqueda.")
-        else ToolResult.success(out.take(8000))
+        else ToolResult.successWithCards(
+            data = out.take(8000),
+            cards = AssistCardCodec.encode(results.map(::cardFor)),
+        )
     }
+
+    /**
+     * One search result as a card.
+     *
+     * A result becomes an offer only when a price is actually present in its title or
+     * snippet, and the price is carried through exactly as written. Guessing a price the
+     * user might act on would be worse than showing none, so anything without one stays a
+     * plain link.
+     *
+     * The title is searched before the snippet because shopping results put the price in
+     * the title and a merchant's snippet often quotes a different, unrelated one
+     * ("desde 99 €", shipping thresholds, other products).
+     */
+    private fun cardFor(r: Result): AssistCard {
+        val price = PriceText.find(r.title) ?: PriceText.find(r.snippet)
+        return if (price == null) {
+            AssistCard.Link(title = r.title, url = r.url, snippet = r.snippet)
+        } else {
+            AssistCard.Offer(
+                title = r.title,
+                priceLabel = price,
+                url = r.url,
+                merchant = hostOf(r.url),
+                snippet = r.snippet,
+            )
+        }
+    }
+
+    private fun hostOf(url: String): String = runCatching {
+        java.net.URI(url).host?.removePrefix("www.").orEmpty()
+    }.getOrDefault("")
 
     private data class Result(val title: String, val snippet: String, val url: String)
 

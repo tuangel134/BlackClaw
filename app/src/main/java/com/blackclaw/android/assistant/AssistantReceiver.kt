@@ -76,6 +76,32 @@ class AssistantReceiver : BroadcastReceiver() {
                 .build()
             nm.notify(Random.nextInt(1, Int.MAX_VALUE), n)
         }
+
+        /** A real decision surface: the user answers directly from the notification. */
+        fun postDecisionNotification(context: Context, title: String, body: String, yesTask: String): String {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                nm.createNotificationChannel(NotificationChannel(
+                    CHANNEL_ID_HIGH, "Asistente · Alarmas y avisos", NotificationManager.IMPORTANCE_HIGH))
+            }
+            val id = AssistantDecisionStore.put(title, yesTask)
+            fun actionPending(action: String, code: Int): PendingIntent = PendingIntent.getBroadcast(
+                context, code,
+                Intent(context, AssistantDecisionReceiver::class.java).apply {
+                    this.action = action; putExtra(AssistantDecisionReceiver.EXTRA_ID, id)
+                }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val yes = actionPending(AssistantDecisionReceiver.ACTION_YES, id.hashCode())
+            val no = actionPending(AssistantDecisionReceiver.ACTION_NO, id.hashCode() xor 0x55aa)
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID_HIGH)
+                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setContentTitle(title).setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true)
+                .addAction(0, "Sí", yes).addAction(0, "No", no)
+                .build()
+            nm.notify(id.hashCode(), notification)
+            return id
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {

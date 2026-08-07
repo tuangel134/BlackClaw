@@ -105,6 +105,12 @@ object ChatHistoryManager {
                     }
                     sb.appendLine()
                 }
+                // Not written to the transcript. A card is a live view of a tool result:
+                // a price, a temperature or a search hit that was true when it was
+                // fetched. Persisting it would reopen the conversation weeks later
+                // showing yesterday's weather as if it were current, and the reply text
+                // beside it already says what was found.
+                ChatMessage.Role.CARDS -> Unit
             }
         }
 
