@@ -5,7 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import dev.langchain4j.data.message.AiMessage
+import dev.langchain4j.data.message.ImageContent
 import dev.langchain4j.data.message.SystemMessage
+import dev.langchain4j.data.message.TextContent
 import dev.langchain4j.data.message.UserMessage
 import com.blackclaw.android.agent.ModelPricing
 import com.blackclaw.android.agent.llm.LlmClient
@@ -19,6 +21,8 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.Content
+import com.blackclaw.android.perception.VisionImage
 import java.io.File
 import java.util.concurrent.ExecutorService
 
@@ -422,6 +426,133 @@ class ChatSessionController(
                 }
             }
         }
+    }
+
+    /**
+     * Sends the actual image bytes to a multimodal model. OCR remains supplemental
+     * context and is used as a safe fallback for text-only or incompatible models.
+     */
+    fun sendImage(image: VisionImage) {
+        val prompt = visionPrompt(image.ocrText)
+        val historyText = imageHistoryText(image.ocrText)
+        com.blackclaw.android.conversation.ConversationRepository.appendLocal(
+            com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT,
+            com.blackclaw.android.conversation.ConversationRepository.Role.USER,
+            historyText,
+            com.blackclaw.android.conversation.ConversationRouter.Mode.CONVERSE.name,
+        )
+        addUser(historyText)
+        uiState.isAwaitingReply.value = true
+        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, ChatMessage.PENDING))
+
+        executor.submit {
+            try {
+                val streamIdx = uiState.messages.indexOfLast { it.isPending }
+                if (cloudClient != null) {
+                    ensureCloudHistoryInitialized()
+                    // If this is the first turn, rebuilding from the visible UI has
+                    // already added the textual placeholder. Replace it with the
+                    // multimodal message instead of sending both representations.
+                    val lastHistory = cloudHistory.lastOrNull() as? UserMessage
+                    if (lastHistory?.hasSingleText() == true && lastHistory.singleText() == historyText) {
+                        cloudHistory.removeAt(cloudHistory.lastIndex)
+                    }
+                    val visionMessage = UserMessage.from(listOf(
+                        TextContent.from(prompt),
+                        ImageContent.from(image.base64, image.mimeType, ImageContent.DetailLevel.AUTO),
+                    ))
+                    cloudHistory.add(visionMessage)
+                    val visionIndex = cloudHistory.lastIndex
+                    val fallbackModelName = cloudModelName ?: ModelConfigRepository.snapshot().activeCloud.modelName
+                    val buffer = StringBuilder()
+                    var hasVisibleContent = false
+                    val response = try {
+                        cloudClient!!.chatStreaming(cloudHistory, emptyList(), object : com.blackclaw.android.agent.llm.StreamingListener {
+                            override fun onPartialText(token: String) {
+                                if (token.isNotEmpty()) {
+                                    hasVisibleContent = true
+                                    buffer.append(token)
+                                    postToMain { setStreamingText(streamIdx, buffer.toString(), fallbackModelName) }
+                                } else if (!hasVisibleContent) {
+                                    postToMain { setStreamingText(streamIdx, "Analizando imagen…", fallbackModelName) }
+                                }
+                            }
+                            override fun onComplete(response: com.blackclaw.android.agent.llm.LlmResponse) = Unit
+                            override fun onError(error: Throwable) = Unit
+                        })
+                    } catch (visionError: Exception) {
+                        // Some OpenAI-compatible endpoints expose text-only models.
+                        // Replace the large image message before retrying so the OCR
+                        // fallback does not send image bytes to a model that rejected it.
+                        XLog.w(TAG, "Vision request failed; using OCR fallback: ${visionError.message}")
+                        cloudHistory[visionIndex] = UserMessage.from(prompt)
+                        buffer.clear()
+                        cloudClient!!.chat(cloudHistory, emptyList())
+                    }
+                    val responseText = response.text?.takeIf { it.isNotBlank() }
+                        ?: buffer.toString().ifBlank { "(no response)" }
+                    // Do not resend the same base64 payload on every later turn.
+                    cloudHistory[visionIndex] = UserMessage.from(historyText)
+                    cloudHistory.add(AiMessage.from(responseText))
+                    recordSharedAssistant(responseText)
+                    val usage = response.tokenUsage
+                    postToMain {
+                        setStreamingText(streamIdx, responseText, response.modelName ?: fallbackModelName)
+                        uiState.isAwaitingReply.value = false
+                        uiState.sessionTokens.value += (usage?.inputTokenCount() ?: (prompt.length / 4 + 1)) +
+                            (usage?.outputTokenCount() ?: (responseText.length / 4 + 1))
+                        uiState.sessionCost.value += ModelPricing.estimateCost(
+                            response.modelName ?: fallbackModelName,
+                            usage?.inputTokenCount() ?: (prompt.length / 4 + 1),
+                            usage?.outputTokenCount() ?: (responseText.length / 4 + 1),
+                        )
+                        onPersistConversation()
+                        onChatReply?.invoke(responseText)
+                    }
+                } else {
+                    val currentConversation = conversation
+                        ?: throw IllegalStateException("El modelo local aún está cargando")
+                    val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
+                    val modelTag = localModelTag(modelPath)
+                    val responseText = try {
+                        currentConversation.sendMessage(
+                            Contents.of(Content.ImageBytes(image.bytes), Content.Text(prompt))
+                        ).contents?.toString()?.trim().orEmpty()
+                    } catch (visionError: Exception) {
+                        XLog.w(TAG, "Local model has no usable vision path; using OCR fallback: ${visionError.message}")
+                        currentConversation.sendMessage(prompt)?.contents?.toString()?.trim().orEmpty()
+                    }.ifBlank { "(no response)" }
+                    recordSharedAssistant(responseText)
+                    postToMain {
+                        setStreamingText(streamIdx, responseText, modelTag)
+                        uiState.isAwaitingReply.value = false
+                        uiState.sessionTokens.value += prompt.length / 4 + responseText.length / 4 + 2
+                        onPersistConversation()
+                        onChatReply?.invoke(responseText)
+                    }
+                }
+            } catch (error: Exception) {
+                XLog.e(TAG, "Image chat failed", error)
+                postToMain {
+                    replaceTypingIndicator("Error al analizar la imagen: ${error.message}")
+                    uiState.isAwaitingReply.value = false
+                }
+            }
+        }
+    }
+
+    private fun visionPrompt(ocrText: String): String = buildString {
+        append("Analiza la imagen adjunta directamente. Describe lo que realmente ves y responde en español. ")
+        append("No inventes detalles si algo no se distingue.")
+        if (ocrText.isNotBlank()) {
+            append("\n\nOCR auxiliar (puede contener errores):\n")
+            append(ocrText.take(4000))
+        }
+    }
+
+    private fun imageHistoryText(ocrText: String): String = buildString {
+        append("📷 Imagen adjunta")
+        if (ocrText.isNotBlank()) append("\nTexto OCR:\n").append(ocrText.take(4000))
     }
 
     fun switchModel(modelId: String, displayName: String) {

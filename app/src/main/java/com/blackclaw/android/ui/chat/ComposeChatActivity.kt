@@ -40,7 +40,7 @@ class ComposeChatActivity : ComponentActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val conversationStore by lazy { ConversationStore(this) }
 
-    /** Image picker for the attach button → OCR → route to the agent. */
+    /** Image picker: preserve the original image for visual models and add OCR as context. */
     private val pickImageLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri: android.net.Uri? ->
@@ -48,18 +48,14 @@ class ComposeChatActivity : ComponentActivity() {
     }
 
     private fun onImagePicked(uri: android.net.Uri) {
-        Toast.makeText(this, "Leyendo imagen…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Analizando imagen…", Toast.LENGTH_SHORT).show()
         executor.submit {
-            val text = runCatching { com.blackclaw.android.perception.ImageOcr.recognizeUri(uri) }.getOrDefault("")
+            val image = runCatching { com.blackclaw.android.perception.VisionImageLoader.load(this, uri) }
             runOnUiThread {
-                if (text.isBlank()) {
-                    Toast.makeText(this, "No detecté texto en la imagen", Toast.LENGTH_SHORT).show()
-                    return@runOnUiThread
-                }
-                val prompt = "Te comparto una imagen. Su texto (OCR):\n\n${text.take(4000)}\n\n" +
-                    "Si es un recibo o factura y te pido registrarlo, regístralo en finanzas. " +
-                    "Si te pido traducir o resumir, hazlo. Si no, dime brevemente qué contiene."
-                taskFlowController.sendTask(prompt)
+                image.onSuccess { chatSessionController.sendImage(it) }
+                    .onFailure {
+                        Toast.makeText(this, it.message ?: "No pude leer la imagen", Toast.LENGTH_LONG).show()
+                    }
             }
         }
     }

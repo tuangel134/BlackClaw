@@ -65,6 +65,10 @@ object EngineHolder {
             val engineConfig = EngineConfig(
                 modelPath = modelPath,
                 backend = backend,
+                // A vision backend is dormant for text-only turns. Supplying it lets
+                // a compatible LiteRT-LM model receive ImageBytes in the same shared
+                // conversation instead of reducing every attachment to OCR text.
+                visionBackend = backend,
                 maxNumTokens = 8192,
                 cacheDir = cacheDir
             )
