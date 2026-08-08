@@ -85,15 +85,24 @@ class ZimLibraryActivity : BaseActivity() {
         message = "Buscando archivos .zim…"
         lifecycleScope.launch {
             val scan = withContext(Dispatchers.IO) { DirectZimLibrary.scan() }
-            val loaded = withContext(Dispatchers.IO) {
-                scan.archives.mapNotNull { file ->
+            val scanResult = withContext(Dispatchers.IO) {
+                val loaded = mutableListOf<Library>()
+                val failures = mutableListOf<String>()
+                scan.archives.forEach { file ->
                     runCatching {
                         DirectZimReader(file).use { reader ->
                             Library(file, reader.libraryInfo(), ZimContentIndex.exists(this@ZimLibraryActivity, file))
                         }
-                    }.getOrNull()
+                    }.onSuccess(loaded::add).onFailure { error ->
+                        // Do not label every failure as an incomplete download: the
+                        // actual reason distinguishes permissions, codecs and damage.
+                        failures += "${file.name}: ${error.message ?: error.javaClass.simpleName}"
+                    }
                 }
+                loaded to failures
             }
+            val loaded = scanResult.first
+            val failures = scanResult.second
             libraries = loaded
             loading = false
             message = when {
@@ -102,7 +111,7 @@ class ZimLibraryActivity : BaseActivity() {
                 // user looking for a file that is right there.
                 loaded.isEmpty() && scan.archives.isNotEmpty() ->
                     "Encontré ${scan.archives.size} archivo(s) .zim pero no pude abrirlos. " +
-                        "Puede que la descarga esté incompleta."
+                        failures.take(2).joinToString(" · ")
                 loaded.isEmpty() ->
                     ZimDiscovery.explainEmptyResult(scan.hasFullStorageAccess, scan.splitPartNames)
                 loaded.size == 1 -> "1 biblioteca offline disponible"

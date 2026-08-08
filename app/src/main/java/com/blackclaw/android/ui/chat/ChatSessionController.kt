@@ -349,6 +349,9 @@ class ChatSessionController(
                             })
                     } catch (e: Exception) {
                         XLog.w(TAG, "cloud streaming failed, falling back: ${e.message}")
+                        // A timeout is not a streaming-format incompatibility. Retrying
+                        // it as a blocking call recreates the endless-looking state.
+                        if (e.message?.contains("timed out", ignoreCase = true) == true) throw e
                         cloudClient!!.chat(cloudHistory, emptyList())
                     }
                     val responseText = llmResponse.text?.takeIf { it.isNotBlank() }

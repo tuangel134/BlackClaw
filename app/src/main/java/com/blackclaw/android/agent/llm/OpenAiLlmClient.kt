@@ -99,8 +99,10 @@ class OpenAiLlmClient(
             }
         })
 
-        if (!latch.await(120, TimeUnit.SECONDS)) {
-            throw RuntimeException("OpenAI streaming response timed out after 120 seconds")
+        // Some free OpenAI-compatible endpoints accept SSE but never close it.
+        // A chat bubble must not remain pending forever in that situation.
+        if (!latch.await(90, TimeUnit.SECONDS)) {
+            throw RuntimeException("OpenAI streaming response timed out after 90 seconds")
         }
         errorRef.get()?.let { throw RuntimeException("OpenAI streaming error", it) }
         return resultRef.get()

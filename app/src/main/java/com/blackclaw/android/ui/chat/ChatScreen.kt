@@ -455,6 +455,11 @@ private fun ChatTopBar(
 
     Column {
         var showModelMenu by remember { mutableStateOf(false) }
+        // CloudProvider contains only the offline seed for Zen. Keep an observable
+        // copy of the live catalog so a refresh changes this picker immediately.
+        var zenModels by remember { mutableStateOf(com.blackclaw.android.agent.OpenCodeZenModels.models()) }
+        var refreshingZenModels by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
 
         TopAppBar(
             title = {
@@ -593,18 +598,43 @@ private fun ChatTopBar(
                 onDismissRequest = { showModelMenu = false },
             ) {
                 val kvUtils = com.blackclaw.android.utils.KVUtils
-                val apiKey = kvUtils.getLlmApiKey()
-                val baseUrl = kvUtils.getLlmBaseUrl()
                 val currentModel = kvUtils.getLlmModelName()
 
                 if (selectedTab == "cloud") {
-                    // Cloud models: from configured provider
-                    if (apiKey.isNotEmpty()) {
-                        val activeProvider = com.blackclaw.android.agent.CloudProvider.entries.find {
-                            it.defaultBaseUrl == baseUrl
+                    // Resolve by persisted provider, not URL. Custom URLs and a
+                    // trailing slash used to make Zen fall back to static OpenAI cards.
+                    val activeCloud = com.blackclaw.android.agent.llm.ModelConfigRepository.snapshot().activeCloud
+                    val activeProvider = activeCloud.provider
+                    if (activeCloud.isConfigured) {
+                        val modelsToShow = if (activeProvider == com.blackclaw.android.agent.CloudProvider.OPENCODE_ZEN) {
+                            zenModels
+                        } else {
+                            activeProvider.models
                         }
-                        val modelsToShow = activeProvider?.models
-                            ?: com.blackclaw.android.agent.CloudProvider.OPENAI.models
+                        if (activeProvider == com.blackclaw.android.agent.CloudProvider.OPENCODE_ZEN) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (refreshingZenModels) "Actualizando modelos gratis…" else "↻ Actualizar modelos gratis",
+                                        fontSize = 13.sp,
+                                        color = colors.accent,
+                                    )
+                                },
+                                enabled = !refreshingZenModels,
+                                onClick = {
+                                    refreshingZenModels = true
+                                    com.blackclaw.android.agent.OpenCodeZenModels.refreshNow {
+                                        // Zen refreshes on its worker thread; Compose state
+                                        // must be changed from the composition's main scope.
+                                        scope.launch {
+                                            zenModels = com.blackclaw.android.agent.OpenCodeZenModels.models()
+                                            refreshingZenModels = false
+                                        }
+                                    }
+                                },
+                            )
+                            HorizontalDivider()
+                        }
                         modelsToShow.forEach { model ->
                             DropdownMenuItem(
                                 text = {
@@ -1244,12 +1274,12 @@ private fun ChatInputBar(
     LaunchedEffect(prefillText) {
         if (prefillText.isNotEmpty()) {
             text = prefillText
-            if (isLocalModel) onTaskModeChange(prefillIsTask)
+            onTaskModeChange(prefillIsTask)
             onPrefillConsumed()
         }
     }
 
-    val taskMode = isTaskMode && isLocalModel
+    val taskMode = isTaskMode
 
     // Task mode tints the composer toward the theme accent. It used to use a hardcoded
     // warm brown (0xFF1A1410), which only made sense beside an amber accent and read as
@@ -1271,10 +1301,10 @@ private fun ChatInputBar(
     ) {
         HorizontalDivider(color = barDivider, thickness = 1.dp)
 
-        // Chat/Task toggle — local models only, because cloud requests already route
-        // through the task path regardless of this switch.
-        if (isLocalModel) {
-            Row(
+        // Conversation and device work are distinct intents regardless of where the
+        // model runs. Previously every cloud message was sent to the task agent, so a
+        // simple "hola" could sit behind its tool/planning loop instead of chat.
+        Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 10.dp, end = 10.dp, top = 6.dp),
@@ -1298,7 +1328,6 @@ private fun ChatInputBar(
                     onClick = { onTaskModeChange(true) },
                     modifier = Modifier.weight(1f),
                 )
-            }
         }
 
         Row(
@@ -1329,7 +1358,7 @@ private fun ChatInputBar(
                     Text(
                         when {
                             taskMode -> "Describe una tarea…"
-                            !isLocalModel -> "Escribe o pide algo…"
+                            !isLocalModel -> "Habla con la IA en la nube…"
                             else -> "Habla con la IA local…"
                         },
                         color = if (taskMode) colors.accent.copy(alpha = 0.55f) else colors.textTertiary,
@@ -1424,8 +1453,7 @@ private fun ChatInputBar(
                     if (isTaskRunning) {
                         onStopAll()
                     } else if (canSend) {
-                        if (!isLocalModel || isTaskMode) onSendTask(text.trim())
-                        else onSendChat(text.trim())
+                        if (taskMode) onSendTask(text.trim()) else onSendChat(text.trim())
                         text = ""
                         focusManager.clearFocus()
                         keyboardController?.hide()

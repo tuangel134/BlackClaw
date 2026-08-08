@@ -14,6 +14,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.text.Normalizer
 import java.util.Locale
+import java.util.zip.InflaterInputStream
 
 /** Direct ZIM v5/v6 reader used by both interactive reads and the resumable local indexer. */
 class DirectZimReader(private val file: File) : Closeable {
@@ -168,7 +169,9 @@ class DirectZimReader(private val file: File) : Closeable {
         require(entries in 1..50_000_000 && clusters in 1..entries) { "Contadores ZIM inválidos" }
         require(pathPos in HEADER_SIZE until raf.length()) { "Índice de rutas inválido" }
         require(clusterPos in HEADER_SIZE until raf.length()) { "Índice de clusters inválido" }
-        require(mimePos == 72L || mimePos == 80L) { "Lista MIME inválida" }
+        // The common layout puts MIME data immediately after the header, but valid
+        // writers may place optional data first. It only has to precede path pointers.
+        require(mimePos in HEADER_SIZE until pathPos) { "Lista MIME inválida" }
         return Header(major, entries, clusters, pathPos, titlePos, clusterPos, mimePos, checksum)
     }
 
@@ -185,7 +188,9 @@ class DirectZimReader(private val file: File) : Closeable {
     }
 
     private fun loadTitleIndex(): TitleIndex {
-        if (header.titleIdxPos != -1L && header.titleIdxPos != Long.MAX_VALUE) {
+        // Zero, -1 and UINT64_MAX mean there is no header title listing. Such ZIMs
+        // are still readable through X/listing/titleOrdered/v1.
+        if (header.titleIdxPos != 0L && header.titleIdxPos != -1L && header.titleIdxPos != Long.MAX_VALUE) {
             val pos = header.titleIdxPos
             require(pos in HEADER_SIZE until raf.length()) { "Índice de títulos inválido" }
             return object : TitleIndex {
@@ -308,9 +313,12 @@ class DirectZimReader(private val file: File) : Closeable {
         val extended = info and 0x10 != 0
         val decoded = when (compression) {
             0, 1 -> payload
+            // Historical ZIM "Zip" clusters are zlib streams. Supporting them
+            // prevents intact older libraries being reported as unreadable.
+            2 -> InflaterInputStream(ByteArrayInputStream(payload)).use(::readLimited)
             4 -> XZInputStream(ByteArrayInputStream(payload)).use(::readLimited)
             5 -> ZstdInputStream(ByteArrayInputStream(payload)).use(::readLimited)
-            2, 3 -> error("Compresión ZIM histórica no soportada: $compression")
+            3 -> error("Compresión BZip2 ZIM histórica no soportada")
             else -> error("Compresión ZIM desconocida: $compression")
         }
         val width = if (extended) 8 else 4
