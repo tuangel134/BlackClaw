@@ -491,6 +491,16 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.4
+
+- Image attachments now preserve the original image for compatible vision models
+  while including on-device OCR as supporting text. Text-only or incompatible
+  endpoints automatically fall back to OCR instead of failing the request.
+- Added local-model discovery and import: BlackClaw searches shared Downloads,
+  Documents and AI folders for visible model files, imports compatible
+  `.litertlm` files, and clearly marks detected formats that the current local
+  runtime cannot execute.
+
 ### v1.2.3
 
 - Emergency and discreet protection now activate immediately from Quick Assist on
