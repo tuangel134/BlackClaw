@@ -491,6 +491,18 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.5
+
+- The chat model picker now resolves the active provider correctly and includes
+  **Actualizar modelos gratis** for an immediate, verified OpenCode Zen refresh.
+  Newly available free models appear in the picker without reopening Settings.
+- Cloud chat and device tasks are now separate modes. Normal conversation such
+  as "hola" no longer enters the agent task loop, and a stalled streaming reply
+  ends with a clear error instead of leaving the typing indicator indefinitely.
+- Improved the offline ZIM library: it accepts compatible alternate title-index
+  layouts and legacy zlib clusters, and reports the exact archive-read failure
+  rather than incorrectly blaming every failure on an incomplete download.
+
 ### v1.2.4
 
 - Image attachments now preserve the original image for compatible vision models
