@@ -6,7 +6,7 @@ import org.junit.Test
 class CloudContextHandoffFormatterTest {
 
     @Test
-    fun `conversation handoff keeps user and assistant only`() {
+    fun `conversation handoff keeps user assistant and authoritative tool evidence`() {
         val lines = CloudContextHandoffFormatter.conversationLines(
             listOf(
                 ChatMessage(ChatMessage.Role.SYSTEM, "Auto-reply active for Mom on Telegram."),
@@ -21,6 +21,7 @@ class CloudContextHandoffFormatterTest {
             listOf(
                 "User: The codeword is zulu731.",
                 "Assistant: ok",
+                "Tool result (authoritative): search: SUCCESS — done",
             ),
             lines
         )

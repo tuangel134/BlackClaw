@@ -491,6 +491,13 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.7
+
+- Tool results are now persisted as authoritative execution evidence, so a follow-up such as “ya”, “pudiste?” or “otros 30” resumes the task instead of falling back to chat and losing context.
+- The task prompt no longer treats the model’s prose as proof of success; only verified tool results can confirm an action.
+- Bulk contact creation verifies every requested name and phone after Android accepts the batch and reports missing entries as a failure, preventing false “contactos creados” confirmations.
+- Release compilation is delegated to GitHub Actions; local development no longer requires running a resource-heavy Gradle build.
+
 ### v1.2.6
 
 - Updated paid cloud-provider model catalogs, pricing metadata, and Google OpenAI-compatible base URL migration.

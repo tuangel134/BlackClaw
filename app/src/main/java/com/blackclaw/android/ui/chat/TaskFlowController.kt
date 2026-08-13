@@ -326,7 +326,26 @@ class TaskFlowController(
                 is TaskEvent.ToolResult -> {
                     uiState.isAwaitingReply.value = false
                     uiState.isTaskRunning.value = true
-                    if (!event.success) addSystem("${event.toolName} failed")
+                    // Keep the real tool outcome in the visible transcript. A later
+                    // "ya", "pudiste?" or "otros 30" is routed back to the task
+                    // agent, which must see authoritative execution evidence instead
+                    // of relying on the model's previous prose.
+                    val detail = event.detail.trim().ifBlank {
+                        if (event.success) "completed" else "failed"
+                    }.take(300)
+                    uiState.messages.add(
+                        ChatMessage(
+                            role = ChatMessage.Role.TOOL_GROUP,
+                            content = "",
+                            toolSteps = listOf(
+                                ToolStep(
+                                    toolName = event.toolName,
+                                    summary = detail,
+                                    success = event.success,
+                                )
+                            ),
+                        )
+                    )
                 }
                 is TaskEvent.ToolCards -> {
                     // Inserted before the pending bubble so the cards appear above the

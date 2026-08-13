@@ -212,14 +212,36 @@ object ChatHistoryManager {
     ) {
         if (role != null && content.isNotEmpty()) {
             val resolvedTimestamp = timestamp ?: (fallbackConversationTimestamp + messages.size * 1000L)
-            messages.add(
-                ChatMessage(
-                    role = role,
-                    content = content.toString().trim(),
-                    timestamp = resolvedTimestamp,
-                    modelName = modelName
+            if (role == ChatMessage.Role.TOOL_GROUP) {
+                val raw = content.toString().trim()
+                val steps = raw.lines().mapNotNull { line ->
+                    val match = Regex("^-\\s*([✓○])\\s+(.+?)\\s+→\\s*(.*)$").matchEntire(line.trim())
+                        ?: return@mapNotNull null
+                    ToolStep(
+                        toolName = match.groupValues[2].trim(),
+                        summary = match.groupValues[3].trim(),
+                        success = match.groupValues[1] == "✓",
+                    )
+                }
+                messages.add(
+                    ChatMessage(
+                        role = role,
+                        content = if (steps.isEmpty()) raw else "",
+                        timestamp = resolvedTimestamp,
+                        toolSteps = steps.takeIf { it.isNotEmpty() },
+                        modelName = modelName,
+                    )
                 )
-            )
+            } else {
+                messages.add(
+                    ChatMessage(
+                        role = role,
+                        content = content.toString().trim(),
+                        timestamp = resolvedTimestamp,
+                        modelName = modelName
+                    )
+                )
+            }
             content.clear()
         }
     }

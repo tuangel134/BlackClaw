@@ -117,6 +117,19 @@ class CreateContactsTool : BaseTool() {
 
         return try {
             context.contentResolver.applyBatch(ContactsContract.AUTHORITY, operations)
+            // applyBatch() succeeding only means the provider accepted the
+            // transaction. It does not prove that the rows are visible in the
+            // Contacts database (sync/account providers can reject or hide them
+            // afterwards). Read the exact name+number pairs back before reporting
+            // success to the model.
+            val verified = verifyCreatedPairs(context, unique.values.toList())
+            if (verified.missing.isNotEmpty()) {
+                return ToolResult.error(
+                    "Android accepted the contact transaction, but verification found " +
+                        "${verified.missing.size} missing contact(s): ${verified.missing.joinToString(", ")}. " +
+                        "Do not report these as created; retry only the missing entries."
+                )
+            }
             val names = unique.values.joinToString(", ") { it.name }
             ToolResult.success(
                 "Created ${unique.size} contact(s): $names" +
@@ -182,8 +195,60 @@ class CreateContactsTool : BaseTool() {
         return pairs
     }
 
+    private data class Verification(val missing: List<String>)
+
+    private fun verifyCreatedPairs(
+        context: android.content.Context,
+        contacts: List<ContactInput>,
+    ): Verification {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            return Verification(contacts.map { it.name })
+        }
+        val existingPhones = readExistingPairs(context)
+        val existingEmails = readExistingEmailPairs(context)
+        val missing = contacts.filter { contact ->
+            if (contact.phone.isNotBlank()) {
+                pairKey(contact.name, contact.phone) !in existingPhones
+            } else {
+                emailKey(contact.name, contact.email) !in existingEmails
+            }
+        }
+            .map { contact ->
+                val value = contact.phone.ifBlank { contact.email }
+                "${contact.name} ($value)"
+            }
+        return Verification(missing)
+    }
+
+    private fun readExistingEmailPairs(context: android.content.Context): Set<String> {
+        val pairs = HashSet<String>()
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Email.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Email.ADDRESS,
+        )
+        context.contentResolver.query(
+            ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+            projection,
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(0).orEmpty()
+                val email = cursor.getString(1).orEmpty()
+                pairs += emailKey(name, email)
+            }
+        }
+        return pairs
+    }
+
     private fun pairKey(name: String, phone: String): String =
         name.trim().lowercase() + "|" + phone.filter { it.isDigit() }
+
+    private fun emailKey(name: String, email: String): String =
+        name.trim().lowercase() + "|" + email.trim().lowercase()
 
     companion object {
         private const val TAG = "CreateContactsTool"
