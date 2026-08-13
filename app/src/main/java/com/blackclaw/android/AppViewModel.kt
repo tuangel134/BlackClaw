@@ -89,9 +89,14 @@ class AppViewModel : ViewModel() {
             return
         }
         taskOrchestrator.taskEventCallback = { event ->
-            if (event is TaskEvent.Completed) {
-                ConversationRepository.appendLocal(surface, ConversationRepository.Role.ASSISTANT,
-                    event.answer, decision.mode.name)
+            when (event) {
+                is TaskEvent.Completed -> ConversationRepository.appendLocal(
+                    surface, ConversationRepository.Role.ASSISTANT, event.answer, decision.mode.name
+                )
+                is TaskEvent.Failed -> ConversationRepository.appendLocal(
+                    surface, ConversationRepository.Role.ASSISTANT, "Task error: ${event.error}", decision.mode.name
+                )
+                else -> Unit
             }
             onEvent(event)
         }

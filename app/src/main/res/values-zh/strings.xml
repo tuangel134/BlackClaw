@@ -100,7 +100,7 @@
     <string name="llm_config_base_url">Base URL</string>
     <string name="llm_config_base_url_hint">如 https://api.openai.com/v1（留空则使用 OpenAI 默认）</string>
     <string name="llm_config_model_name">模型名称</string>
-    <string name="llm_config_model_name_hint">如 gpt-4o、gpt-4o-mini、claude-3-5-sonnet</string>
+    <string name="llm_config_model_name_hint">如 gpt-5.6-luna、claude-sonnet-5、gemini-3.6-flash</string>
     <string name="llm_config_saved">LLM 配置已保存</string>
     <string name="llm_config_api_key_required">请填写 API Key</string>
     <string name="menu_llm_config">LLM 配置</string>
@@ -164,7 +164,7 @@
     <string name="agent_task_completed">任务完成</string>
     <string name="agent_task_cancel">任务取消</string>
     <string name="agent_api_call_failed">AI 服务调用失败: %s</string>
-    <string name="agent_max_iterations">在未完成任务的情况下达到了最大迭代次数 (%d)</string>
+    <string name="agent_max_iterations">任务未完成，已达到安全迭代上限 (%d)。进度已保留；说“继续”即可恢复。</string>
 
     <!-- 文件工具 -->
     <string name="tool_no_storage_permission">没有读写文件的权限</string>

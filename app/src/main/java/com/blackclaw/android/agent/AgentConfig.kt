@@ -126,6 +126,7 @@ Rule 13: Use direct tools when available.
 - Notifications → get_notifications
 - Clipboard → clipboard(action="get") only for the CURRENT clipboard contents
 - Installed apps → get_installed_apps()
+- Creating contacts explicitly requested by the user → create_contacts(contacts="[{\"name\":\"Ana\",\"phone\":\"+521...\"}]") once with the complete list. Do not open Contacts and create rows one by one when this tool is available.
 These return data in one call. Only navigate apps when no direct tool exists.
 
 Rule 13b: Do not confuse "copy from another source" with "read the current clipboard".
@@ -182,7 +183,9 @@ Steps:
         private var baseUrl: String = ""
         private var modelName: String = ""
         private var systemPrompt: String = DEFAULT_SYSTEM_PROMPT
-        private var maxIterations: Int = 20
+        // Keep the Java builder aligned with the runtime default. The loop turns
+        // this into a bounded checkpoint window (with safe auto-continuations).
+        private var maxIterations: Int = 60
         private var temperature: Double = 0.1
         private var provider: LlmProvider = LlmProvider.OPENAI
         private var streaming: Boolean = false

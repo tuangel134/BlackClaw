@@ -165,6 +165,7 @@ object ToolRegistry {
         register(SendSmsTool())
         register(GetCallLogTool())
         register(FindContactTool())
+        register(CreateContactsTool())
 
         // System integrations
         register(SetAlarmTool())

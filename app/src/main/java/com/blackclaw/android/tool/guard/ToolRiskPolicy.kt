@@ -87,6 +87,7 @@ object ToolRiskPolicy {
      */
     private val SENSITIVE_TOOLS = setOf(
         "send_message", "send_sms", "make_call",
+        "create_contacts",
         "force_stop_app", "uninstall_app",
         "set_brightness", "set_volume", "toggle_setting",
         "forget_fact", "cancel_scheduled_task",

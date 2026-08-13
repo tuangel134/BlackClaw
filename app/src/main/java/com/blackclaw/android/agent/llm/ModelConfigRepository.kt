@@ -245,8 +245,18 @@ object ModelConfigRepository {
     }
 
     private fun resolveCloudBaseUrl(providerName: String, baseUrl: String): String {
-        if (baseUrl.isNotBlank()) return baseUrl.trim()
         val provider = CloudProvider.fromName(providerName)
+        val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+        // Configurations saved before the Google OpenAI-compatible endpoint was
+        // added point at /v1beta, which cannot serve /chat/completions. Migrate
+        // that exact default (including a trailing slash) transparently; custom
+        // Google-compatible gateways remain untouched.
+        if (provider == CloudProvider.GOOGLE &&
+            normalizedBaseUrl == "https://generativelanguage.googleapis.com/v1beta"
+        ) {
+            return provider.defaultBaseUrl
+        }
+        if (baseUrl.isNotBlank()) return baseUrl.trim()
         return if (provider == CloudProvider.CUSTOM) "" else provider.defaultBaseUrl
     }
 }

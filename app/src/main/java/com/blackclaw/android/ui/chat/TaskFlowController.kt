@@ -380,6 +380,9 @@ class TaskFlowController(
         uiState.isTaskRunning.value = false
         appViewModel.clearTaskCallback()
         onTaskSettled?.invoke()
+        // The task agent and chat agent use separate histories. Include the task's
+        // final/error bubble before the next "continúa" message is sent.
+        chatSessionController.refreshCloudHistoryFromVisibleMessages()
         Handler(Looper.getMainLooper()).postDelayed({
             try {
                 chatSessionController.loadModelIfReady(

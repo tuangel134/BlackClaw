@@ -100,7 +100,7 @@
     <string name="llm_config_base_url">Base URL</string>
     <string name="llm_config_base_url_hint">例: https://api.openai.com/v1（空欄の場合はOpenAIデフォルト）</string>
     <string name="llm_config_model_name">モデル名</string>
-    <string name="llm_config_model_name_hint">例: gpt-4o、gpt-4o-mini、claude-3-5-sonnet</string>
+    <string name="llm_config_model_name_hint">例: gpt-5.6-luna、claude-sonnet-5、gemini-3.6-flash</string>
     <string name="llm_config_saved">LLM設定を保存しました</string>
     <string name="llm_config_api_key_required">API Keyを入力してください</string>
     <string name="menu_llm_config">LLM設定</string>
@@ -164,7 +164,7 @@
     <string name="agent_task_completed">タスク完了</string>
     <string name="agent_task_cancel">タスクキャンセル</string>
     <string name="agent_api_call_failed">AIサービスの呼び出しに失敗: %s</string>
-    <string name="agent_max_iterations">タスク未完了のまま最大反復回数 (%d) に達しました</string>
+    <string name="agent_max_iterations">タスク未完了のまま安全な反復回数の上限 (%d) に達しました。進捗は保存されています。「続けて」と言えば再開できます。</string>
 
     <!-- ファイルツール -->
     <string name="tool_no_storage_permission">ファイルの読み書き権限がありません</string>

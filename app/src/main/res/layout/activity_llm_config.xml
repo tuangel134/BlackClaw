@@ -482,7 +482,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="44dp"
                             android:background="@drawable/bg_edit_text"
-                            android:hint="google/gemini-2.5-flash"
+                            android:hint="google/gemini-3.6-flash"
                             android:inputType="text"
                             android:paddingHorizontal="12dp"
                             android:textColor="@color/colorTextPrimary"

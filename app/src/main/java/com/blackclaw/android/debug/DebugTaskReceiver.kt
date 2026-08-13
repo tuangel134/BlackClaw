@@ -25,11 +25,11 @@ import org.json.JSONObject
  *
  * Set Cloud LLM config (any provider):
  *   adb shell am broadcast -a com.blackclaw.android.DEBUG_TASK --es task "config:" \
- *     --es api_key "sk-..." --es model_name "gpt-4o-mini"
+ *     --es api_key "sk-..." --es model_name "gpt-5.6-luna"
  *
  * With custom base URL (OpenRouter, Groq, Ollama, etc.):
  *   adb shell am broadcast -a com.blackclaw.android.DEBUG_TASK --es task "config:" \
- *     --es api_key "sk-..." --es base_url "https://api.openrouter.ai/v1" --es model_name "google/gemini-2.5-flash"
+ *     --es api_key "sk-..." --es base_url "https://api.openrouter.ai/v1" --es model_name "google/gemini-3.6-flash"
  */
 class DebugTaskReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

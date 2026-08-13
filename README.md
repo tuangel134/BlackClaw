@@ -491,6 +491,13 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.6
+
+- Updated paid cloud-provider model catalogs, pricing metadata, and Google OpenAI-compatible base URL migration.
+- Long-running tasks now use bounded continuation windows, preserve task failures in history, and resume correctly when the user says “continúa”.
+- Added an in-task UI pattern accelerator: repeated form actions can be condensed into a verified `execute_plan` while text fields remain variable.
+- Added native bulk contact creation with duplicate protection and a 100-contact limit, avoiding slow row-by-row navigation.
+
 ### v1.2.5
 
 - The chat model picker now resolves the active provider correctly and includes

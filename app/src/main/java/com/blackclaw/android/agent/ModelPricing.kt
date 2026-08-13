@@ -4,7 +4,7 @@ package com.blackclaw.android.agent
  * Model pricing table and cost estimation.
  *
  * Prices are in USD per 1 million tokens.
- * Source: official provider pricing pages as of 2026-04.
+ * Source: official provider pricing pages as of 2026-08.
  */
 object ModelPricing {
 
@@ -15,6 +15,12 @@ object ModelPricing {
 
     private val PRICES = mapOf(
         // OpenAI
+        "gpt-5.6-sol" to Price(5.00, 30.00),
+        "gpt-5.6" to Price(5.00, 30.00), // API alias for gpt-5.6-sol
+        "gpt-5.6-terra" to Price(2.00, 12.00),
+        "gpt-5.6-luna" to Price(0.20, 1.20),
+        // Legacy IDs are retained so an existing saved configuration still has
+        // a meaningful estimate until the user migrates to the current catalog.
         "gpt-4o" to Price(2.50, 10.00),
         "gpt-4o-mini" to Price(0.15, 0.60),
         "gpt-4.1" to Price(2.00, 8.00),
@@ -25,13 +31,23 @@ object ModelPricing {
         "o4-mini" to Price(1.10, 4.40),
 
         // Anthropic
-        "claude-opus-4-6" to Price(15.00, 75.00),
+        "claude-fable-5" to Price(10.00, 50.00),
+        "claude-opus-5" to Price(5.00, 25.00),
+        "claude-sonnet-5" to Price(2.00, 10.00),
+        "claude-haiku-4-5-20251001" to Price(1.00, 5.00),
+        "claude-opus-4-6" to Price(5.00, 25.00),
         "claude-sonnet-4-6" to Price(3.00, 15.00),
-        "claude-haiku-4-5" to Price(0.80, 4.00),
+        "claude-haiku-4-5" to Price(1.00, 5.00),
 
         // Google
-        "gemini-2.5-flash" to Price(0.15, 0.60),
+        "gemini-3.6-flash" to Price(1.50, 7.50),
+        "gemini-3.5-flash" to Price(1.50, 9.00),
+        "gemini-3.5-flash-lite" to Price(0.30, 2.50),
+        "gemini-3.1-flash-lite" to Price(0.25, 1.50),
+        "gemini-3.1-pro-preview" to Price(2.00, 12.00),
         "gemini-2.5-pro" to Price(1.25, 10.00),
+        "gemini-2.5-flash" to Price(0.30, 2.50),
+        "gemini-2.5-flash-lite" to Price(0.10, 0.40),
         "gemini-2.0-flash" to Price(0.10, 0.40),
 
         // Open-source via OpenRouter/Groq

@@ -70,7 +70,7 @@ object ToolSelector {
         ),
         Category(
             triggers = listOf("contacto", "contact", "agenda"),
-            tools = listOf("find_contact"),
+            tools = listOf("find_contact", "create_contacts"),
         ),
         Category(
             triggers = listOf("calendario", "evento", "cita", "calendar", "event", "reunion", "reunión",

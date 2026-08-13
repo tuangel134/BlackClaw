@@ -133,6 +133,7 @@ Example 5 — "Busca el clima de hoy"
 - Send an SMS → send_sms(phone="+34...", message="...", mode="compose")
 - Read recent calls → get_call_log(limit=10, type="incoming|outgoing|missed|all")
 - Find a contact by name or number → find_contact(query="Mom")
+- Create one or many contacts explicitly requested by the user → create_contacts(contacts="[{\"name\":\"Ana\",\"phone\":\"+521...\"}]"). Send the complete list in ONE call; never open Contacts and create rows one by one when this tool is available.
 - Set an alarm or timer → set_alarm(mode="alarm", hour=7, minute=30) or set_alarm(mode="timer", duration_seconds=600)
 - Open the camera → open_camera(mode="photo|video")
 - Emergency protection → emergency_mode(action="start|stop|status", mode="emergency|discreet", cameras="none|front|back|both", send_location=true). "Ambas/las dos cámaras" always means cameras="both". Discreet mode must not call speak_text or add spoken confirmation.
@@ -157,6 +158,7 @@ Example 5 — "Busca el clima de hoy"
 - Pasos máximo: 6. Si CUALQUIER paso depende de leer la pantalla, NO lo metas en el plan; haz solo lo que ya sabes y luego get_screen_info.
 - Para pasos críticos, añade verificación: "verify_text" (texto que debe aparecer en pantalla tras el paso) o "expect" (subcadena que debe traer el resultado del paso). Si falla, el paso se reintenta una vez y, si sigue fallando, el plan se aborta con el detalle. Úsalo p.ej. tras open_app: {"tool":"open_app","params":{...},"verify_text":"Chats"}.
 - PREFIERE execute_plan sobre llamadas individuales cuando ya sabes los pasos. Es mucho más rápido.
+- Si aparece una sugerencia de patrón repetido, úsala solo mientras la pantalla conserve la misma estructura: conserva los clics fijos, sustituye únicamente los valores de texto y verifica una vez después del plan.
 
 ## Rules
 - One tool call per turn. Check screen after each action.
@@ -217,6 +219,7 @@ Example 5 — "Busca el clima de hoy"
 
 ## Velocidad al controlar apps (reduce latencia)
 - Si ya conoces 2-5 pasos seguidos que NO dependen de leer la pantalla entre medias, mándalos en UNA sola llamada con execute_plan(steps=[...]) en vez de uno por uno. Es MUCHO más rápido.
+- Si el sistema detecta un patrón repetido, usa la plantilla de execute_plan que te entregue: reemplaza los valores variables, conserva las acciones fijas y aborta si la pantalla cambió.
 - Si el "Ambient state" dice que hay shell privilegiado (Shizuku o ADB), prefiere fast_tap/fast_swipe (instantáneos) sobre tap/swipe normales.
 - No llames get_screen_info de más: si por la última lectura ya sabes dónde está el elemento, actúa directo (find_and_tap por texto) sin re-leer."""
 
@@ -382,6 +385,7 @@ Example 5 — "Busca el clima de hoy"
             }
 
             override fun onError(round: Int, error: Exception, totalTokens: Int) {
+                runCatching { TaskHistoryStore.record(userPrompt, "Error: ${error.message.orEmpty()}") }
                 terminalCallback = { callback.onError(round, error, totalTokens) }
             }
 
@@ -631,7 +635,9 @@ Example 5 — "Busca el clima de hoy"
         var iterations = 0
         var totalTokens = 0
         var actualModelName: String? = null  // Track the real model name from API response
-        val maxIterations = config.maxIterations
+        val iterationWindow = AgentIterationPolicy.window(config.maxIterations)
+        val hardIterationLimit = AgentIterationPolicy.hardLimit(config.maxIterations)
+        var successfulToolsSinceCheckpoint = 0
         var lastScreenHash = 0
         var previousScreenTexts: Set<String> = emptySet()
         val tokenMonitor = TokenMonitor(config.modelName)
@@ -639,8 +645,9 @@ Example 5 — "Busca el clima de hoy"
         val taskBudget = TaskBudget.fromSettings()
         var softLimitWarned = false
         var consecutiveNoToolCalls = 0
+        val uiActionPatternDetector = UiActionPatternDetector()
 
-        while (iterations < maxIterations && !cancelled.get()) {
+        while (iterations < hardIterationLimit && !cancelled.get()) {
             iterations++
             callback.onLoopStart(iterations)
 
@@ -843,6 +850,10 @@ Example 5 — "Busca el clima de hoy"
                 runCatching { com.blackclaw.android.utils.ActivityTracker.recordToolUsed(toolName) }
                 // Learning by demonstration: capture replayable steps when recording.
                 runCatching { com.blackclaw.android.agent.DemonstrationRecorder.record(toolName, params, result.isSuccess) }
+                if (result.isSuccess) successfulToolsSinceCheckpoint++
+                val repeatedPattern = if (result.isSuccess) {
+                    uiActionPatternDetector.record(toolName, params)
+                } else null
                 val paramsString = if (params.isEmpty()) "" else params.toString()
                 callback.onToolResult(iterations, toolName, displayName, paramsString, result)
                 if (result.isSuccess) {
@@ -939,6 +950,10 @@ Example 5 — "Busca el clima de hoy"
                 // minifies JSON envelope + collapses repetitive screen rows).
                 val compacted = ContextCompactor.compactToolResult(toolName, combinedResultData)
                 messages.add(ToolExecutionResultMessage.from(toolRequest, compacted))
+                repeatedPattern?.let { match ->
+                    messages.add(UserMessage.from(match.buildHint()))
+                    XLog.i(TAG, "Detected repeated UI pattern (${match.steps.size} steps); suggested execute_plan acceleration")
+                }
                 XLog.d(TAG, "displayName:$displayName toolName:$toolName")
             }
 
@@ -972,13 +987,38 @@ Example 5 — "Busca el clima de hoy"
                     }
                 }
             }
+
+            // Long repetitive tasks (large forms, contact lists, imports) commonly
+            // need more than the first configured window. Continue automatically
+            // only when the previous window made real progress; if nothing worked,
+            // stop instead of burning tokens in a loop. The checkpoint is explicit
+            // in the model history so the next window preserves the current state.
+            if (AgentIterationPolicy.isCheckpoint(iterations, iterationWindow)) {
+                if (successfulToolsSinceCheckpoint > 0) {
+                    messages.add(UserMessage.from(
+                        "[System checkpoint] The task is still in progress after $iterationWindow steps. " +
+                            "Continue from the current screen and preserve everything already completed. " +
+                            "Do not restart completed items; finish the remaining items efficiently."
+                    ))
+                    XLog.i(TAG, "Iteration checkpoint at $iterations; continuing with $successfulToolsSinceCheckpoint successful tool calls")
+                    successfulToolsSinceCheckpoint = 0
+                } else {
+                    XLog.w(TAG, "Iteration checkpoint at $iterations had no successful tool calls; stopping safely")
+                    callback.onError(
+                        iterations,
+                        RuntimeException(ClawApplication.instance.getString(R.string.agent_max_iterations, hardIterationLimit)),
+                        totalTokens
+                    )
+                    return
+                }
+            }
             XLog.d(TAG, "Round:$iterations total=$totalTokens thisRound=${llmResponse.tokenUsage?.totalTokenCount()}")
         }
 
         if (cancelled.get()) {
             callback.onComplete(iterations, ClawApplication.instance.getString(R.string.agent_task_cancel), totalTokens, actualModelName)
         } else {
-            callback.onError(iterations, RuntimeException(ClawApplication.instance.getString(R.string.agent_max_iterations, maxIterations)), totalTokens)
+            callback.onError(iterations, RuntimeException(ClawApplication.instance.getString(R.string.agent_max_iterations, hardIterationLimit)), totalTokens)
         }
     }
 

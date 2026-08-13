@@ -338,6 +338,14 @@ class ComposeChatActivity : ComponentActivity() {
     private fun sendChat(text: String) {
         // Record interaction for profile learning
         runCatching { com.blackclaw.android.memory.UserProfile.recordInteraction("chat", text.take(80)) }
+        // A short "continúa" after an interrupted task must return to the task
+        // agent, not the plain chat model. TaskFlowController also hands it the
+        // visible transcript, so it can resume instead of starting from zero.
+        if (TaskContinuationDetector.isContinuationRequest(text, _messages.toList())) {
+            XLog.i(TAG, "sendChat: continuation request → resuming previous task")
+            taskFlowController.sendTask(TaskContinuationDetector.buildPrompt(text))
+            return
+        }
         // If the message is clearly an action ("pon una alarma", "manda un mensaje"),
         // route it to the agent (which has tools) instead of plain chat — otherwise
         // the chat model just *describes* doing it instead of actually doing it.

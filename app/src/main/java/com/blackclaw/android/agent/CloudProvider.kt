@@ -32,27 +32,37 @@ enum class CloudProvider(
         displayName = "OpenAI",
         defaultBaseUrl = "https://api.openai.com/v1",
         models = listOf(
-            CloudModel("gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60, ModelTier.FAST, 128_000, recommended = true),
-            CloudModel("gpt-4o", "GPT-4o", 2.50, 10.00, ModelTier.SMART, 128_000),
-            CloudModel("gpt-4.1", "GPT-4.1", 2.00, 8.00, ModelTier.PRO, 1_000_000),
-            CloudModel("gpt-4.1-mini", "GPT-4.1 Mini", 0.40, 1.60, ModelTier.FAST, 1_000_000),
-            CloudModel("gpt-4.1-nano", "GPT-4.1 Nano", 0.10, 0.40, ModelTier.LITE, 1_000_000),
+            CloudModel("gpt-5.6-sol", "GPT-5.6 Sol", 5.00, 30.00, ModelTier.PRO, 1_050_000, recommended = true),
+            CloudModel("gpt-5.6-terra", "GPT-5.6 Terra", 2.00, 12.00, ModelTier.SMART, 1_050_000),
+            CloudModel("gpt-5.6-luna", "GPT-5.6 Luna", 0.20, 1.20, ModelTier.FAST, 1_050_000),
         )
     ),
     ANTHROPIC(
         displayName = "Anthropic",
         defaultBaseUrl = "https://api.anthropic.com/v1",
         models = listOf(
-            CloudModel("claude-sonnet-4-6", "Claude Sonnet 4.6", 3.00, 15.00, ModelTier.PRO, 200_000),
-            CloudModel("claude-haiku-4-5", "Claude Haiku 4.5", 0.80, 4.00, ModelTier.FAST, 200_000, recommended = true),
+            CloudModel("claude-fable-5", "Claude Fable 5", 10.00, 50.00, ModelTier.PRO, 1_000_000),
+            CloudModel("claude-opus-5", "Claude Opus 5", 5.00, 25.00, ModelTier.PRO, 1_000_000, recommended = true),
+            CloudModel("claude-sonnet-5", "Claude Sonnet 5", 2.00, 10.00, ModelTier.SMART, 1_000_000),
+            CloudModel("claude-haiku-4-5", "Claude Haiku 4.5", 1.00, 5.00, ModelTier.FAST, 200_000),
         )
     ),
     GOOGLE(
         displayName = "Google",
-        defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta",
+        // The app uses LangChain's OpenAI-compatible client for Google. The
+        // /openai/ suffix is required for chat/completions and model listing.
+        defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/",
         models = listOf(
-            CloudModel("gemini-2.5-flash", "Gemini 2.5 Flash", 0.15, 0.60, ModelTier.FAST, 1_000_000, recommended = true),
+            CloudModel("gemini-3.6-flash", "Gemini 3.6 Flash", 1.50, 7.50, ModelTier.SMART, 1_000_000, recommended = true),
+            CloudModel("gemini-3.5-flash", "Gemini 3.5 Flash", 1.50, 9.00, ModelTier.SMART, 1_000_000),
+            CloudModel("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", 0.30, 2.50, ModelTier.FAST, 1_000_000),
+            CloudModel("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", 0.25, 1.50, ModelTier.FAST, 1_000_000),
+            CloudModel("gemini-3.1-pro-preview", "Gemini 3.1 Pro (Preview)", 2.00, 12.00, ModelTier.PRO, 1_000_000),
+            // Stable 2.5 models remain available as a migration fallback while
+            // providers roll out the Gemini 3 catalog to every account.
             CloudModel("gemini-2.5-pro", "Gemini 2.5 Pro", 1.25, 10.00, ModelTier.PRO, 1_000_000),
+            CloudModel("gemini-2.5-flash", "Gemini 2.5 Flash", 0.30, 2.50, ModelTier.FAST, 1_000_000),
+            CloudModel("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", 0.10, 0.40, ModelTier.LITE, 1_000_000),
         )
     ),
     OPENCODE_ZEN(

@@ -309,6 +309,18 @@ class ChatSessionController(
         isModelReady = false
     }
 
+    /**
+     * The task agent has its own request history. After a task finishes, the
+     * visible chat contains the task and its result, so rebuild the cloud history
+     * before the next conversational turn. Without this, saying "continúa" could
+     * hit a stale chat history that never saw the task at all.
+     */
+    fun refreshCloudHistoryFromVisibleMessages() {
+        if (cloudClient == null) return
+        rebuildCloudHistoryFromVisibleMessages()
+        XLog.d(TAG, "Cloud history synchronized after task (${cloudHistory.size} messages)")
+    }
+
     fun sendChat(text: String) {
         com.blackclaw.android.conversation.ConversationRepository.appendLocal(
             com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT,

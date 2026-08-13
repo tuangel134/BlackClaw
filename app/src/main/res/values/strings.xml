@@ -100,7 +100,7 @@
     <string name="llm_config_base_url">Base URL</string>
     <string name="llm_config_base_url_hint">ej. https://api.openai.com/v1 (déjalo vacío para OpenAI por defecto)</string>
     <string name="llm_config_model_name">Nombre del modelo</string>
-    <string name="llm_config_model_name_hint">ej. gpt-4o, gpt-4o-mini, claude-3-5-sonnet</string>
+    <string name="llm_config_model_name_hint">ej. gpt-5.6-luna, claude-sonnet-5, gemini-3.6-flash</string>
     <string name="llm_config_saved">Configuración del LLM guardada</string>
     <string name="llm_config_api_key_required">Introduce la API Key</string>
     <string name="menu_llm_config">Configurar LLM</string>
@@ -164,7 +164,7 @@
     <string name="agent_task_completed">Tarea completada</string>
     <string name="agent_task_cancel">Tarea cancelada</string>
     <string name="agent_api_call_failed">Llamada al servicio de IA fallida: %s</string>
-    <string name="agent_max_iterations">Se alcanzó el número máximo de iteraciones (%d) sin completar la tarea</string>
+    <string name="agent_max_iterations">Se alcanzó el límite seguro de iteraciones (%d). Conservé el progreso; di «continúa» para reanudar.</string>
 
     <!-- Herramientas de archivo -->
     <string name="tool_no_storage_permission">Sin permiso de lectura/escritura</string>

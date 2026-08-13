@@ -52,7 +52,7 @@ object LlmSessionManager {
             else -> OpenAiChatModel.builder()
                 .httpClientBuilder(OkHttpClientBuilderAdapter())
                 .apiKey(cloud.resolvedApiKey)
-                .modelName(cloud.modelName.ifEmpty { "gpt-4o-mini" })
+                .modelName(cloud.modelName.ifEmpty { "gpt-5.6-luna" })
                 .baseUrl(cloud.resolvedBaseUrl.ifEmpty { "https://api.openai.com/v1" })
                 .temperature(temperature)
                 .build()
