@@ -491,6 +491,10 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.12
+
+- Hardened Bluetooth automation events so device-name reads respect Android 12+ runtime permissions and never crash when access is revoked.
+
 ### v1.2.11
 
 - Corrected the handoff test fixture so it explicitly marks its successful tool evidence as successful.

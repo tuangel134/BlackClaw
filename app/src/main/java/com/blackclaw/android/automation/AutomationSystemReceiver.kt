@@ -1,12 +1,15 @@
 package com.blackclaw.android.automation
 
+import android.Manifest
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.BatteryManager
 import android.telephony.TelephonyManager
 import android.provider.Telephony
@@ -66,7 +69,7 @@ class AutomationSystemReceiver : BroadcastReceiver() {
                 BluetoothDevice.ACTION_ACL_CONNECTED, BluetoothDevice.ACTION_ACL_DISCONNECTED ->
                     AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.BLUETOOTH, mapOf(
                         "connected" to (action == BluetoothDevice.ACTION_ACL_CONNECTED).toString(),
-                        "name" to (intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.name.orEmpty()),
+                        "name" to bluetoothDeviceName(app, intent),
                     ))
                 WifiManager.NETWORK_STATE_CHANGED_ACTION,
                 ConnectivityManager.CONNECTIVITY_ACTION,
@@ -109,5 +112,20 @@ class AutomationSystemReceiver : BroadcastReceiver() {
                 }.getOrDefault("")),
             ))
         }
+    }
+
+    /**
+     * Device names require BLUETOOTH_CONNECT on Android 12+. Broadcasts can
+     * still arrive while the user has revoked that permission, so keep the
+     * automation event useful without risking a SecurityException.
+     */
+    private fun bluetoothDeviceName(context: Context, intent: Intent): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) return ""
+
+        return runCatching {
+            intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.name.orEmpty()
+        }.getOrDefault("")
     }
 }
