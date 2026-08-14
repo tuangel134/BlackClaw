@@ -38,6 +38,8 @@ class TaskClassifierTest {
         task("silencia el teléfono")
         task("programa una reunión")
         task("agenda una cita el viernes")
+        task("crea una tarea: comprar leche")
+        task("crea una tarea cuando me conecte al wifi")
     }
 
     // ── Spanish infinitive / indirect / polite ──

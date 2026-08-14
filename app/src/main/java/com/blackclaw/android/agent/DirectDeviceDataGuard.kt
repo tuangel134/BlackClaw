@@ -100,7 +100,7 @@ internal class DirectDeviceDataGuard private constructor(
                 normalized.contains("battery") ->
                     DeterministicToolCall("get_device_info", mapOf("category" to "battery"))
 
-                normalized.contains("wifi") ->
+                isWifiStatusRequest(normalized) ->
                     DeterministicToolCall("get_device_info", mapOf("category" to "wifi"))
 
                 normalized.contains("bluetooth") ->
@@ -137,8 +137,8 @@ internal class DirectDeviceDataGuard private constructor(
                         requiredAction = "Call get_notifications() before you answer.",
                     )
 
-                normalized.contains("battery") ||
-                    normalized.contains("wifi") ||
+                isWifiStatusRequest(normalized) ||
+                    normalized.contains("battery") ||
                     normalized.contains("bluetooth") ||
                     normalized.contains("storage") ||
                     normalized.contains("android version") ||
@@ -181,6 +181,39 @@ internal class DirectDeviceDataGuard private constructor(
             return value.lowercase(Locale.US)
                 .replace(Regex("""\s+"""), " ")
                 .trim()
+        }
+
+        /**
+         * Wi‑Fi is mentioned in many real actions ("apaga el wifi", "cuando me
+         * conecte al wifi", "arregla mi wifi"). Those must reach the agent or
+         * automation tools. Only a clearly read-only status request gets the
+         * zero-round device-info shortcut.
+         */
+        private fun isWifiStatusRequest(normalized: String): Boolean {
+            if (!normalized.contains("wifi") &&
+                !normalized.contains("wi-fi") &&
+                !normalized.contains("wi fi")
+            ) return false
+
+            val actionOrAutomationMarkers = listOf(
+                "apaga", "apagar", "enciende", "encender", "prende", "prender",
+                "activa", "activar", "desactiva", "desactivar", "toggle",
+                "conecta", "conectar", "desconecta", "desconectar", "disconnect",
+                "arregla", "arreglar", "fix", "reinicia", "reiniciar", "restart",
+                "cambia", "cambiar", "switch", "comparte", "compartir",
+                "crea", "crear", "programa", "programar", "automatiza", "automatizar",
+                "tarea", "task", "regla", "perfil", "rutina", "cuando", "cada",
+                "si ", "al conect", "no funciona", "no tengo", "sin internet", "lento",
+            )
+            if (actionOrAutomationMarkers.any { normalized.contains(it) }) return false
+
+            val statusMarkers = listOf(
+                "como esta", "como anda", "estado", "status", "informacion", "info",
+                "que red", "a que red", "conectado", "hay wifi", "revisa", "revisar",
+                "checa", "checar", "muestra", "mostrar", "check", "what is", "what's",
+                "is wifi", "am i connected",
+            )
+            return statusMarkers.any { normalized.contains(it) }
         }
 
         private val NOTIFICATION_NOUN =

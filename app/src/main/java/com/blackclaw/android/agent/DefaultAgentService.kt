@@ -555,6 +555,7 @@ Example 5 — "Busca el clima de hoy"
         val inAppSearchGuard = InAppSearchGuard.fromTask(rawUserRequest)
         val emailComposeGuard = EmailComposeGuard.fromTask(rawUserRequest)
         val directDeviceDataGuard = DirectDeviceDataGuard.fromTask(rawUserRequest)
+        val taskCreationGuard = TaskCreationGuard.fromTask(rawUserRequest)
 
         // For local LLM, inject matching playbook into system prompt
         val playbookSection = if (config.provider == LlmProvider.LOCAL) {
@@ -573,6 +574,7 @@ Example 5 — "Busca el clima de hoy"
             append(inAppSearchGuard.buildPromptSection())
             append(emailComposeGuard.buildPromptSection())
             append(directDeviceDataGuard.buildPromptSection())
+            append(taskCreationGuard.buildPromptSection())
             append(buildDeviceContext())
             append(AmbientContext.asPromptSection())
             // Unified memory: profile + facts + routines + task history +
@@ -733,7 +735,8 @@ Example 5 — "Busca el clima de hoy"
                 val suppressHallucinatedCompletion =
                     !llmResponse.hasToolExecutionRequests() &&
                         (inAppSearchGuard.shouldBlockTextOnlyCompletion() ||
-                            emailComposeGuard.shouldBlockTextOnlyCompletion())
+                            emailComposeGuard.shouldBlockTextOnlyCompletion() ||
+                            taskCreationGuard.shouldBlockTextOnlyCompletion(llmResponse.text))
                 if (!suppressHallucinatedCompletion) {
                     callback.onContent(iterations, llmResponse.text)
                 }
@@ -759,6 +762,13 @@ Example 5 — "Busca el clima de hoy"
                     if (emailComposeGuard.shouldBlockTextOnlyCompletion()) {
                         val correction = emailComposeGuard.buildCompletionCorrection()
                         XLog.i(TAG, "EmailComposeGuard blocked text-only completion for '$userPrompt'")
+                        messages.add(UserMessage.from(correction))
+                        continue
+                    }
+                    if (taskCreationGuard.shouldBlockTextOnlyCompletion(responseText)) {
+                        val correction = taskCreationGuard.maybeBlockFinish()
+                            ?: "[System Guard] Create the requested task with a native BlackClaw tool before answering."
+                        XLog.i(TAG, "TaskCreationGuard blocked text-only completion for '$userPrompt'")
                         messages.add(UserMessage.from(correction))
                         continue
                     }
@@ -815,6 +825,7 @@ Example 5 — "Busca el clima de hoy"
                     directDeviceDataGuard.maybeBlockFinish()
                         ?: inAppSearchGuard.maybeBlockFinish(screenInfo)
                         ?: emailComposeGuard.maybeBlockFinish(screenInfo)
+                        ?: taskCreationGuard.maybeBlockFinish()
                 } else null
                 if (blockedFinish != null) {
                     val blockedResult = ToolResult.error(blockedFinish)
@@ -829,6 +840,7 @@ Example 5 — "Busca el clima de hoy"
                 callback.onToolCall(iterations, toolName, displayName, toolArgs)
                 directDeviceDataGuard.recordToolAttempt(toolName)
                 emailComposeGuard.recordToolAttempt(toolName)
+                taskCreationGuard.recordToolAttempt(toolName)
 
                 // Soft destructive-action guard. We never silently block; we surface
                 // an error result so the LLM can self-correct or request confirmation
@@ -860,6 +872,7 @@ Example 5 — "Busca el clima de hoy"
                     inAppSearchGuard.recordSuccessfulTool(toolName, params)
                     emailComposeGuard.recordSuccessfulTool(toolName)
                 }
+                taskCreationGuard.recordToolResult(toolName, result.isSuccess)
 
                 // Progressive disclosure: when the model loads tools via
                 // request_tool, add their full schemas to the active set so the

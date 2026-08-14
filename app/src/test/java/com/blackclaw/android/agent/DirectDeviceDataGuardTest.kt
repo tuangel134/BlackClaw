@@ -46,4 +46,21 @@ class DirectDeviceDataGuardTest {
         assertTrue(guard.buildCompletionCorrection().contains("valid answer", ignoreCase = true))
         assertTrue(guard.maybeBlockFinish()?.contains("valid result", ignoreCase = true) == true)
     }
+
+    @Test
+    fun `wifi action is not replaced by an instant status response`() {
+        assertNotNull(
+            DirectDeviceDataGuard.deterministicToolCall("cómo está el wifi")
+        )
+        assertNull(
+            DirectDeviceDataGuard.deterministicToolCall("apaga el wifi")
+        )
+        assertNull(
+            DirectDeviceDataGuard.deterministicToolCall("crea una tarea cuando me conecte al wifi")
+        )
+        assertFalse(
+            DirectDeviceDataGuard.fromTask("crea una tarea cuando me conecte al wifi")
+                .shouldBlockTextOnlyCompletion()
+        )
+    }
 }

@@ -97,6 +97,12 @@ object ToolSelector {
             tools = listOf("set_volume", "set_brightness", "toggle_setting", "flashlight", "vibrate"),
         ),
         Category(
+            triggers = listOf("tarea", "tareas", "todo", "to-do", "to do", "pendiente", "pendientes",
+                "crear tarea", "crea una tarea", "nueva tarea", "new task", "create task"),
+            tools = listOf("assistant_note", "kb_add_todo", "schedule_task", "list_scheduled_tasks",
+                "automation_profile"),
+        ),
+        Category(
             triggers = listOf("foto", "camara", "cámara", "camera", "selfie", "graba", "video"),
             tools = listOf("open_camera"),
         ),
@@ -343,6 +349,23 @@ object ToolSelector {
         val selected = LinkedHashSet<String>()
         CORE.forEach { if (it in available) selected.add(it) }
 
+        // Creation intents need native persistence tools immediately. Without
+        // this priority, CORE plus the generic Wi‑Fi/alarm categories can fill
+        // the cap before the model ever receives the task/automation schema.
+        val priorityTools = when {
+            isAutomationCreationRequest(lower) -> listOf(
+                "automation_profile", "automation_rule", "schedule_task", "toggle_setting",
+            )
+            isScheduledCreationRequest(lower) -> listOf(
+                "schedule_task", "assistant_reminder", "assistant_note", "kb_add_todo",
+            )
+            isTodoCreationRequest(lower) -> listOf(
+                "assistant_note", "kb_add_todo", "schedule_task", "list_scheduled_tasks",
+            )
+            else -> emptyList()
+        }
+        priorityTools.forEach { if (it in available) selected.add(it) }
+
         for (cat in CATEGORIES) {
             if (cat.triggers.any { lower.contains(it) }) {
                 cat.tools.forEach { if (it in available) selected.add(it) }
@@ -355,6 +378,28 @@ object ToolSelector {
             CORE.forEach { if (it in available) add(it) }
             for (n in selected) { if (size >= maxTools) break; add(n) }
         }
+    }
+
+    private fun isAutomationCreationRequest(lower: String): Boolean {
+        val mentionsTaskOrAutomation = listOf(
+            "tarea", "task", "automat", "regla", "perfil", "tasker", "macro",
+        ).any { lower.contains(it) }
+        val hasEventTrigger = listOf(
+            "cuando ", "si ", "al conect", "al entrar", "al salir", "cada vez", "if then", "si-entonces",
+        ).any { lower.contains(it) }
+        return mentionsTaskOrAutomation && hasEventTrigger
+    }
+
+    private fun isScheduledCreationRequest(lower: String): Boolean {
+        val mentionsTask = listOf("tarea", "task", "recordatorio", "remind", "alarma", "alarm").any { lower.contains(it) }
+        val hasTime = listOf(" a las ", " a la ", " en ", "hoy", "mañana", "manana", "tomorrow", "cada ", "daily", "weekly", "diario", "semanal").any { lower.contains(it) }
+        return mentionsTask && hasTime
+    }
+
+    private fun isTodoCreationRequest(lower: String): Boolean {
+        val mentionsTodo = listOf("tarea", "task", "todo", "pendiente", "to-do").any { lower.contains(it) }
+        val creates = listOf("crea", "crear", "agrega", "agregar", "anota", "apunta", "guarda", "create", "add", "save", "make").any { lower.contains(it) }
+        return mentionsTodo && creates
     }
 
     /**
