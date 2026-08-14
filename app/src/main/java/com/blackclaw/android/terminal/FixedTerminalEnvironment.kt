@@ -167,7 +167,7 @@ object FixedTerminalEnvironment {
         if (link.isBlank()) throw SecurityException("Enlace simbólico vacío")
         target.parentFile?.mkdirs()
         if (target.exists() || target.isSymbolicLink()) target.delete()
-        java.nio.file.Files.createSymbolicLink(target.toPath(), java.nio.file.Path.of(link))
+        java.nio.file.Files.createSymbolicLink(target.toPath(), File(link).toPath())
     }
 
     private fun createHardLink(target: File, link: String, root: File) {
@@ -181,7 +181,7 @@ object FixedTerminalEnvironment {
 
     private fun safeChild(root: File, relative: String): File? {
         if (relative.isBlank() || relative.startsWith('/')) return null
-        val normalized = java.nio.file.Path.of(relative).normalize()
+        val normalized = File(relative).toPath().normalize()
         if (normalized.startsWith("..") || normalized.toString() == ".") return null
         // Do not call canonicalFile here: a Linux rootfs deliberately contains
         // absolute and ../ symlinks that are meaningful *inside PRoot*.  Resolving

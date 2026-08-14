@@ -491,6 +491,10 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.13
+
+- Replaced Android-incompatible `Path.of` calls in the fixed terminal bootstrap with API 28-compatible path conversion.
+
 ### v1.2.12
 
 - Hardened Bluetooth automation events so device-name reads respect Android 12+ runtime permissions and never crash when access is revoked.
