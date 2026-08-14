@@ -311,10 +311,11 @@ object AutomationProfileEngine {
         AutomationProfileStore.ActionType.WAIT -> {
             val ms = automationLong(action.params["ms"])?.coerceIn(0L, 60_000L) ?: 0L
             if (System.currentTimeMillis() + ms > deadline) {
-                return Result.failure(IllegalStateException("tiempo máximo del perfil alcanzado"))
+                Result.failure(IllegalStateException("tiempo máximo del perfil alcanzado"))
+            } else {
+                Thread.sleep(ms)
+                Result.success(Unit)
             }
-            Thread.sleep(ms)
-            Result.success(Unit)
         }
         AutomationProfileStore.ActionType.SET_VARIABLE -> {
             val name = action.params["name"]?.toString().orEmpty()

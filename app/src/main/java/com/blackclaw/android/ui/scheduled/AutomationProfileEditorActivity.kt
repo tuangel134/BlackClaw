@@ -27,7 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenu
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -322,6 +322,7 @@ private fun TriggerEditorCard(colors: BlackClawColors, draft: TriggerDraft,
 
 @Composable
 private fun TriggerParams(colors: BlackClawColors, draft: TriggerDraft, onChange: (TriggerDraft) -> Unit) {
+    @Composable
     fun field(key: String, label: String) {
         val value = draft.params[key].orEmpty()
         OutlinedTextField(value, { onChange(draft.withParam(key, it)) }, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
@@ -431,7 +432,7 @@ private fun <T : Enum<T>> Picker(
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(selected.label(), {}, readOnly = true, label = { Text(label) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().then(modifier).fillMaxWidth())
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             values.forEach { value -> DropdownMenuItem(text = { Text(value.label()) }, onClick = { onSelected(value); expanded = false }) }
         }
     }
@@ -499,12 +500,28 @@ private fun AutomationProfileStore.Profile?.toActionDrafts(): List<ActionDraft> 
 private fun parseJsonParams(raw: String, fallback: Map<String, Any>): Map<String, Any> {
     if (raw.isBlank()) return fallback
     return runCatching {
-        @Suppress("UNCHECKED_CAST")
-        JSONObject(raw).toMap() as Map<String, Any>
+        jsonObjectToMap(JSONObject(raw))
     }.getOrDefault(fallback)
 }
 
 private fun Map<String, Any>.toJsonText(): String = JSONObject(this).toString()
+
+private fun jsonObjectToMap(json: JSONObject): Map<String, Any> {
+    val result = LinkedHashMap<String, Any>()
+    json.keys().forEach { key ->
+        val value = json.opt(key)
+        if (value != null && value != JSONObject.NULL) result[key] = jsonValueToEditorAny(value)
+    }
+    return result
+}
+
+private fun jsonValueToEditorAny(value: Any): Any = when (value) {
+    is JSONObject -> jsonObjectToMap(value)
+    is org.json.JSONArray -> (0 until value.length()).mapNotNull { index ->
+        value.opt(index)?.takeIf { it != JSONObject.NULL }?.let(::jsonValueToEditorAny)
+    }
+    else -> value
+}
 
 private fun Any?.editorText(): String = when (this) {
     null -> ""
