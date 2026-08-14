@@ -108,7 +108,7 @@ touching the phone.
 | **Web & data** | web search · fetch URL · weather · translate · currency/unit convert · QR · hash · JSON/regex |
 | **Files & memory** | read/write files · long-term facts · shared knowledge base |
 | **Assistant hub** | reminders · alarms · notes · calendar · alerts · finances (native, push) |
-| **Automation** | cron-style scheduled tasks · multi-step plan execution · external API (Tasker/ADB) |
+| **Automation** | guided scheduled tasks · recurring schedules · Tasker-style profiles · multi-step plan execution · external API (Tasker/ADB) |
 | **Terminal** | persistent internal shell (local/privileged) · adb-over-wifi to remote devices (pair/connect/shell) without a PC |
 | **Security** | app risk scanner · real-time ad attribution · neutralize/block/disable/uninstall problem apps |
 
@@ -227,26 +227,31 @@ touching the phone.
   and per-app watch lists keep it from being noisy
 - **Export finances to CSV** for a backup or to open in a spreadsheet
 
-- **New Features
-Agent Core Reliability:**
+### Reliability and assistant polish
 - Hardened ActionGuard with anti-prompt-injection defense
 - Guided permissions onboarding
 - Multi-step plans verified before execution
-- Implementation of TTS Voice for morning summary, evening summary.
+- TTS voice for morning and evening summaries
+- Explicit task requests are routed to BlackClaw's native task and automation
+  tools instead of being answered with recommendations for another app
+- Direct Wi‑Fi status questions stay instant, while Wi‑Fi actions and automations
+  reach the correct device or scheduling tools
 
-**Learning and Memory:**
+### Learning and memory
 - The assistant learns from your habits and anticipates your needs
 - Learns from your corrections (when you delete actions)
 - Context memory across tasks
 - Active learning of preferences (ignored apps)
 
-**Auto-Correction:**
+### Auto-correction
 - Automatically attaches what's on screen when a plan fails
 - Intelligent memory consolidation
 
-**Visual Refinement:**
+### Visual refinement
 - Cleaner and clearer onboarding
 - Improved suggestion cards
+- Interactive task creation sheet with selectable execution mode, date/time,
+  recurrence and live preview
 
 ### Messaging & remote control
 - Send messages on WhatsApp, Telegram, Discord, and more
@@ -269,10 +274,17 @@ Agent Core Reliability:**
   **BlackClaw Free**. Currently includes DeepSeek V4 Flash, Mimo V2.5,
   Nemotron 3 Ultra, and North Mini Code, each tagged with a speed/quality rating
   so you can pick fast vs. smart per task.
+- **Automatic mode:** choose **Automático** in the model picker and BlackClaw
+  uses the configured cloud model while the connection is validated, then
+  falls back to the downloaded local model when the phone is offline. The chat
+  shows which backend is active.
 - **Cloud (bring your own key):** OpenAI, Anthropic, Google Gemini, Groq,
   DeepSeek, Cerebras, or any OpenAI-compatible endpoint via a custom base URL
 - Switch modes anytime; chat can stay local, free-tier, or paid-cloud, and heavy
   tasks can use a stronger model while quick replies stay cheap or offline
+- The picker can refresh the current free-model catalog without reopening
+  Settings. Compatible local models found in shared Downloads, Documents and
+  AI folders can also be imported and selected.
 
 ### Reliability & safety
 - **Stuck detection** breaks out of loops and re-plans instead of repeating a
@@ -490,6 +502,27 @@ PR guidelines, and conventions.
 ---
 
 ## Changelog
+
+### v1.2.14
+
+- Added an interactive task-creation sheet in **Automatizaciones → Horarios**:
+  choose between executing an action or only receiving a notification, pick a
+  quick or custom date/time, configure daily/weekly recurrence, and review a
+  live preview before scheduling it. The same flow is available from the empty
+  state and the top-bar `+` button.
+- Added a native task-creation guard. Explicit requests such as “create a task”
+  now prioritize BlackClaw's task, reminder, schedule and automation tools and
+  cannot finish as a generic recommendation for Todoist, Tasker or another app.
+- Fixed Wi‑Fi routing: read-only status questions still use the instant device
+  shortcut, while Wi‑Fi actions, schedules and automations reach the agent and
+  the correct native tools.
+- Spanish request matching now normalizes accents, so commands such as “cómo
+  está el Wi‑Fi” behave consistently with their unaccented equivalents.
+- Added regression coverage for Wi‑Fi actions, native task creation and the
+  guarded tool-selection path.
+- Updated the in-app **¿Qué puede hacer BlackClaw?** guide with automatic
+  local/cloud switching, OCR and vision, the Termux-like terminal, offline ZIM
+  libraries, scheduled automations and the refreshed free/local model workflow.
 
 ### v1.2.13
 
