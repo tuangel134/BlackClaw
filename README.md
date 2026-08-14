@@ -491,6 +491,13 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.8
+
+- Added Tasker-style automation profiles with multiple triggers, conditions, ordered actions, cooldowns, daily/runtime limits, concurrency control, and safe execution boundaries.
+- Added a visual automation editor with create, edit, test, delete, and action/condition/trigger reordering support.
+- Added Android system triggers plus a token-protected `com.blackclaw.android.AUTOMATION_WEBHOOK` broadcast for Tasker and compatible automation apps.
+- Added shared validation, recovery for malformed stored profiles, and unit coverage for profile events and safety rules.
+
 ### v1.2.7
 
 - Tool results are now persisted as authoritative execution evidence, so a follow-up such as “ya”, “pudiste?” or “otros 30” resumes the task instead of falling back to chat and losing context.

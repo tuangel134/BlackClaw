@@ -1,0 +1,113 @@
+package com.blackclaw.android.automation
+
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
+import android.os.BatteryManager
+import android.telephony.TelephonyManager
+import android.provider.Telephony
+import com.blackclaw.android.utils.XLog
+
+/** Small system-event adapter; profiles do the matching and execution locally. */
+class AutomationSystemReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        val action = intent?.action ?: return
+        val app = context.applicationContext
+        runCatching {
+            when (action) {
+                Intent.ACTION_BOOT_COMPLETED,
+                "android.intent.action.QUICKBOOT_POWERON" ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.BOOT)
+
+                Intent.ACTION_SCREEN_ON ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.SCREEN, mapOf("state" to "on"))
+                Intent.ACTION_SCREEN_OFF ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.SCREEN, mapOf("state" to "off"))
+                Intent.ACTION_USER_PRESENT ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.SCREEN, mapOf("state" to "unlocked"))
+
+                Intent.ACTION_POWER_CONNECTED -> {
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.CHARGING, mapOf("charging" to "true"))
+                    emitBattery(app, intent)
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.CHARGING, mapOf("charging" to "false"))
+                    emitBattery(app, intent)
+                }
+                Intent.ACTION_BATTERY_LOW, Intent.ACTION_BATTERY_OKAY,
+                Intent.ACTION_BATTERY_CHANGED -> emitBattery(app, intent)
+
+                Intent.ACTION_HEADSET_PLUG ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.HEADSET, mapOf(
+                        "connected" to (intent.getIntExtra("state", 0) == 1).toString(),
+                        "name" to intent.getStringExtra("name").orEmpty(),
+                    ))
+                TelephonyManager.ACTION_PHONE_STATE_CHANGED ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.CALL_STATE, mapOf(
+                        "state" to when (intent.getStringExtra(TelephonyManager.EXTRA_STATE)) {
+                            TelephonyManager.EXTRA_STATE_RINGING -> "ringing"
+                            TelephonyManager.EXTRA_STATE_OFFHOOK -> "offhook"
+                            else -> "idle"
+                        },
+                        "number" to intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty(),
+                    ))
+                Telephony.Sms.Intents.SMS_RECEIVED_ACTION -> {
+                    val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+                    val body = messages.joinToString("") { it.messageBody.orEmpty() }
+                    val sender = messages.firstOrNull()?.originatingAddress.orEmpty()
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.SMS_RECEIVED, mapOf(
+                        "sender" to sender, "body" to body,
+                    ))
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED, BluetoothDevice.ACTION_ACL_DISCONNECTED ->
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.BLUETOOTH, mapOf(
+                        "connected" to (action == BluetoothDevice.ACTION_ACL_CONNECTED).toString(),
+                        "name" to (intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)?.name.orEmpty()),
+                    ))
+                WifiManager.NETWORK_STATE_CHANGED_ACTION,
+                ConnectivityManager.CONNECTIVITY_ACTION,
+                Intent.ACTION_AIRPLANE_MODE_CHANGED -> emitConnectivity(app)
+            }
+        }.onFailure { XLog.w("AutomationSystemReceiver", "System event failed: $action", it) }
+    }
+
+    private fun emitBattery(context: Context, intent: Intent) {
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+        val charging = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1).let {
+            it == BatteryManager.BATTERY_STATUS_CHARGING || it == BatteryManager.BATTERY_STATUS_FULL
+        }
+        if (level >= 0) AutomationProfileEngine.emitSystemEvent(
+            context, AutomationProfileStore.TriggerType.BATTERY,
+            mapOf("level" to ((level * 100) / scale).toString(), "charging" to charging.toString()),
+        )
+    }
+
+    private fun emitConnectivity(context: Context) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork
+        val caps = network?.let { cm.getNetworkCapabilities(it) }
+        val transport = when {
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ethernet"
+            else -> "none"
+        }
+        AutomationProfileEngine.emitSystemEvent(context, AutomationProfileStore.TriggerType.CONNECTIVITY, mapOf(
+            "state" to if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) "online" else "offline",
+            "transport" to transport,
+        ))
+        if (transport == "wifi") {
+            AutomationProfileEngine.emitSystemEvent(context, AutomationProfileStore.TriggerType.WIFI, mapOf(
+                "connected" to "true",
+                "ssid" to (runCatching {
+                    (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).connectionInfo?.ssid.orEmpty()
+                }.getOrDefault("")),
+            ))
+        }
+    }
+}

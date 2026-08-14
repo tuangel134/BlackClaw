@@ -41,6 +41,8 @@ import com.blackclaw.android.BuildConfig
 import com.blackclaw.android.agent.skill.UserSkillStore
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.scheduler.ScheduledTaskManager
+import com.blackclaw.android.automation.AutomationProfileStore
+import com.blackclaw.android.automation.AutomationRuleStore
 import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
@@ -199,7 +201,9 @@ private fun ModernSettingsScreen(
         ThemeManager.allThemes.firstOrNull { it.first == themeId }?.second ?: themeId
     }
     val skillCount = remember { UserSkillStore.all().size }
-    val scheduledCount = remember { ScheduledTaskManager.listAll().size }
+    val scheduledCount = remember {
+        ScheduledTaskManager.listAll().size + AutomationRuleStore.list().size + AutomationProfileStore.list().size
+    }
     val toolCount = remember { ToolRegistry.getInstance().getAllTools().size }
     val autoReplyCount = remember { com.blackclaw.android.autoreply.AutoReplyProfileStore.all().size }
     val activeAutoReplies = remember {
@@ -398,7 +402,7 @@ private fun ModernSettingsScreen(
                 NavRow(
                     icon = Icons.Outlined.Schedule,
                     title = "Tareas programadas",
-                    subtitle = "Horarios, crones y reglas Si → Entonces",
+                    subtitle = "Horarios, reglas y perfiles tipo Tasker",
                     trailing = if (scheduledCount == 0) "Ninguna" else "$scheduledCount",
                     trailingHighlight = scheduledCount > 0,
                     colors = colors,

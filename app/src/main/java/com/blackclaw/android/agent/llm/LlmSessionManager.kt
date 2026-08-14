@@ -28,7 +28,7 @@ object LlmSessionManager {
      */
     fun createCloudChatModel(temperature: Double = 0.7): dev.langchain4j.model.chat.ChatModel? {
         val config = ModelConfigRepository.snapshot()
-        if (config.activeMode == ActiveModelMode.LOCAL) {
+        if (config.effectiveMode == ActiveModelMode.LOCAL) {
             XLog.w(TAG, "createCloudChatModel: local mode is active")
             return null
         }
@@ -64,7 +64,7 @@ object LlmSessionManager {
      */
     fun createCloudClient(temperature: Double = 0.7): LlmClient? {
         val config = ModelConfigRepository.snapshot()
-        if (config.activeMode == ActiveModelMode.LOCAL) return null
+        if (config.effectiveMode == ActiveModelMode.LOCAL) return null
         val cloud = config.activeCloud
         if (cloud.resolvedApiKey.isEmpty() || cloud.modelName.isEmpty()) {
             XLog.w(TAG, "createCloudClient: incomplete cloud config")
@@ -86,7 +86,7 @@ object LlmSessionManager {
      * @return LLM response text, or null if failed
      */
     fun singleShot(prompt: String, temperature: Double = 0.3): String? {
-        return if (ModelConfigRepository.snapshot().activeMode == ActiveModelMode.CLOUD) {
+        return if (ModelConfigRepository.snapshot().effectiveMode == ActiveModelMode.CLOUD) {
             singleShotCloud(prompt, temperature)
         } else {
             singleShotLocal(prompt, temperature)

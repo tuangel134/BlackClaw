@@ -55,17 +55,21 @@ class SettingsViewModel : ViewModel() {
     private fun getActiveModelDisplayName(): String {
         val config = ModelConfigRepository.snapshot()
         val app = ClawApplication.instance
-        return if (config.activeMode == ActiveModelMode.LOCAL) {
+        return if (config.effectiveMode == ActiveModelMode.LOCAL) {
             val path = config.local.modelPath
             if (path.isNotEmpty() && java.io.File(path).exists()) {
-                config.local.displayName + " · Local"
+                config.local.displayName + if (config.isAutomaticActive()) {
+                    " · Automático · Local"
+                } else {
+                    " · Local"
+                }
             } else {
                 app.getString(R.string.common_unconfigured)
             }
         } else {
             val cloudModel = config.activeCloud.modelName
             if (cloudModel.isNotEmpty()) {
-                "$cloudModel · Cloud"
+                "$cloudModel · " + if (config.isAutomaticActive()) "Automático · Cloud" else "Cloud"
             } else {
                 app.getString(R.string.common_unconfigured)
             }

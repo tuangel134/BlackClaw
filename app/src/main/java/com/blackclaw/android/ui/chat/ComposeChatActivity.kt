@@ -64,6 +64,7 @@ class ComposeChatActivity : ComponentActivity() {
     private val _messages = mutableStateListOf<ChatMessage>()
     private val _modelStatus = mutableStateOf("No model loaded")
     private val _isLocalModelActive = mutableStateOf(ModelConfigRepository.isLocalActive())
+    private val _isAutomaticModeActive = mutableStateOf(ModelConfigRepository.isAutomaticActive())
     private val _needsPermission = mutableStateOf(false)
     private val _isAwaitingReply = mutableStateOf(false)
     private val _isTaskRunning = mutableStateOf(false)
@@ -79,6 +80,9 @@ class ComposeChatActivity : ComponentActivity() {
     private var pendingExternalRequestId: String? = null
     private var pendingExternalReturnAction: String? = null
     private var pendingExternalReturnPackage: String? = null
+    private var automaticNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private val automaticNetworkHandler = Handler(Looper.getMainLooper())
+    private val automaticNetworkSync = Runnable { syncModelModeFromRuntime() }
 
     private val chatSessionController by lazy {
         ChatSessionController(
@@ -172,6 +176,7 @@ class ComposeChatActivity : ComponentActivity() {
                 isDownloading = _isDownloading.value,
                 downloadProgress = _downloadProgress.value,
                 isLocalModel = _isLocalModelActive.value,
+                isAutomaticMode = _isAutomaticModeActive.value,
                 sessionTokens = _sessionTokens.value,
                 sessionCost = _sessionCost.value,
                 onSendChat = { sendChat(it) },
@@ -245,7 +250,7 @@ class ComposeChatActivity : ComponentActivity() {
                 visibleMessages = _messages.toList(),
             )
         }
-        _isLocalModelActive.value = ModelConfigRepository.isLocalActive()
+        syncModelModeFromRuntime()
 
         // Release local LLM conversation before task starts so the agent can use the engine
         // (LiteRT-LM only supports 1 session at a time)
@@ -281,7 +286,7 @@ class ComposeChatActivity : ComponentActivity() {
         runCatching { com.blackclaw.android.proactive.SmartQuietDetector.recordInteraction() }
         _needsPermission.value =
             AppCapabilityCoordinator.accessibilityState(this) != ServiceBindingState.READY
-        _isLocalModelActive.value = ModelConfigRepository.isLocalActive()
+        syncModelModeFromRuntime()
         _isTaskRunning.value = appViewModel.isTaskRunning()
         refreshSidebarHistory()
         permHandler.removeCallbacks(permPoller)
@@ -295,6 +300,16 @@ class ComposeChatActivity : ComponentActivity() {
         }
         maybeStartVoiceWakeLoop()
         runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        registerAutomaticNetworkMonitor()
+    }
+
+    override fun onStop() {
+        unregisterAutomaticNetworkMonitor()
+        super.onStop()
     }
 
     /**
@@ -373,7 +388,10 @@ class ComposeChatActivity : ComponentActivity() {
         handler.postDelayed(object : Runnable {
             override fun run() {
                 if (isTask) {
-                    taskFlowController.sendTask(automationText)
+                    taskFlowController.sendTask(
+                        automationText,
+                        com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.AUTOMATION,
+                    )
                     return
                 }
                 if (!KVUtils.hasLlmConfig()) {
@@ -455,11 +473,53 @@ class ComposeChatActivity : ComponentActivity() {
 
     private fun switchModel(modelId: String, displayName: String) {
         chatSessionController.switchModel(modelId, displayName)
-        _isLocalModelActive.value = ModelConfigRepository.isLocalActive()
+        syncModelModeFromRuntime()
         if (modelId != "NONE") {
             syncTaskAgentConfig()
         }
         XLog.i(TAG, "Model switched to: $modelId ($displayName)")
+    }
+
+    private fun syncModelModeFromRuntime() {
+        val config = ModelConfigRepository.snapshot()
+        _isAutomaticModeActive.value = config.isAutomaticActive()
+        _isLocalModelActive.value = config.isLocalActive()
+        if (config.isAutomaticActive()) {
+            chatSessionController.syncUiToActiveModel()
+        }
+    }
+
+    private fun registerAutomaticNetworkMonitor() {
+        if (automaticNetworkCallback != null) return
+        val connectivity = getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? android.net.ConnectivityManager ?: return
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) = scheduleAutomaticNetworkSync()
+            override fun onLost(network: android.net.Network) = scheduleAutomaticNetworkSync()
+            override fun onCapabilitiesChanged(
+                network: android.net.Network,
+                networkCapabilities: android.net.NetworkCapabilities,
+            ) = scheduleAutomaticNetworkSync()
+        }
+        runCatching {
+            connectivity.registerDefaultNetworkCallback(callback)
+            automaticNetworkCallback = callback
+            scheduleAutomaticNetworkSync()
+        }.onFailure { XLog.w(TAG, "Could not register automatic network monitor", it) }
+    }
+
+    private fun unregisterAutomaticNetworkMonitor() {
+        automaticNetworkHandler.removeCallbacks(automaticNetworkSync)
+        val callback = automaticNetworkCallback ?: return
+        val connectivity = getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? android.net.ConnectivityManager
+        runCatching { connectivity?.unregisterNetworkCallback(callback) }
+        automaticNetworkCallback = null
+    }
+
+    private fun scheduleAutomaticNetworkSync() {
+        automaticNetworkHandler.removeCallbacks(automaticNetworkSync)
+        automaticNetworkHandler.postDelayed(automaticNetworkSync, 450L)
     }
 
     private fun newChat() {

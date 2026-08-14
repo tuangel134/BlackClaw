@@ -63,6 +63,7 @@ class AppViewModel : ViewModel() {
         agentPromptOverride: String? = null,
         autoReturnToChat: Boolean = true,
         surface: ConversationRepository.Surface = ConversationRepository.Surface.TASK,
+        originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin? = null,
         onEvent: (TaskEvent) -> Unit,
     ) {
         val decision = ConversationRouter.decide(task)
@@ -101,7 +102,8 @@ class AppViewModel : ViewModel() {
             onEvent(event)
         }
         taskOrchestrator.startNewTask(Channel.LOCAL, task, taskId,
-            agentPromptOverride = effectivePrompt, autoReturnToChat = autoReturnToChat)
+            agentPromptOverride = effectivePrompt, autoReturnToChat = autoReturnToChat,
+            originOverride = originOverride)
     }
 
     fun stopTask() {

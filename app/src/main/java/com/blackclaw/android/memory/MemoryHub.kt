@@ -13,6 +13,7 @@ import com.blackclaw.android.assistant.RoutineEngine
  *   - ConversationMemory → summaries of past chats
  *   - TaskHistoryStore → recent task back-references
  *   - RoutineEngine    → available routines
+ *   - AutomationProfileStore → active Tasker-like profiles
  *
  * Left unmanaged, these append blindly and can bloat the prompt (bad for local
  * models and cloud rate limits). MemoryHub assembles them in PRIORITY order
@@ -78,13 +79,18 @@ object MemoryHub {
         RoutineEngine.asPromptSnippet().takeIf { it.isNotBlank() }
             ?.let { sections.add(Section(3, it)) }
 
-        // Priority 4: recent task back-references ("again", "same person").
-        TaskHistoryStore.asPromptSnippet().takeIf { it.isNotBlank() }
+        // Priority 4: deterministic profiles the AI can edit/test safely.
+        com.blackclaw.android.automation.AutomationProfileStore.asPromptSnippet()
+            .takeIf { it.isNotBlank() }
             ?.let { sections.add(Section(4, it)) }
 
-        // Priority 5: past conversation summaries (nice-to-have continuity).
-        ConversationMemory.asPromptSnippet(maxEntries = 4).takeIf { it.isNotBlank() }
+        // Priority 5: recent task back-references ("again", "same person").
+        TaskHistoryStore.asPromptSnippet().takeIf { it.isNotBlank() }
             ?.let { sections.add(Section(5, it)) }
+
+        // Priority 6: past conversation summaries (nice-to-have continuity).
+        ConversationMemory.asPromptSnippet(maxEntries = 4).takeIf { it.isNotBlank() }
+            ?.let { sections.add(Section(6, it)) }
 
         return packByPriority(sections, budgetChars)
     }

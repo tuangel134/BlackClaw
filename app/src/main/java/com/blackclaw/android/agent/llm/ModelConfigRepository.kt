@@ -6,7 +6,7 @@ import com.blackclaw.android.agent.LlmProvider
 import com.blackclaw.android.utils.KVUtils
 import java.io.File
 
-enum class ActiveModelMode { LOCAL, CLOUD }
+enum class ActiveModelMode { LOCAL, CLOUD, AUTOMATIC }
 
 data class LocalModelConfig(
     val modelPath: String,
@@ -46,9 +46,13 @@ data class ResolvedModelConfig(
     val activeMode: ActiveModelMode,
     val local: LocalModelConfig,
     val activeCloud: CloudModelConfig,
-    val defaultCloud: CloudModelConfig
+    val defaultCloud: CloudModelConfig,
+    val effectiveMode: ActiveModelMode,
 ) {
-    fun isLocalActive(): Boolean = activeMode == ActiveModelMode.LOCAL
+    /** True when the runtime should use the on-device model right now. */
+    fun isLocalActive(): Boolean = effectiveMode == ActiveModelMode.LOCAL
+
+    fun isAutomaticActive(): Boolean = activeMode == ActiveModelMode.AUTOMATIC
 
     fun toAgentConfig(
         temperature: Double,
@@ -60,7 +64,7 @@ data class ResolvedModelConfig(
         // bypassing AgentConfig.Builder.build(), so we must apply the helper here too.
         val finalSystemPrompt = com.blackclaw.android.agent.PromptUtils
             .applyGlobalPrompt(AgentConfig.DEFAULT_SYSTEM_PROMPT)
-        return if (activeMode == ActiveModelMode.LOCAL) {
+        return if (effectiveMode == ActiveModelMode.LOCAL) {
             AgentConfig(
                 apiKey = "",
                 baseUrl = local.modelPath,
@@ -96,12 +100,18 @@ object ModelConfigRepository {
 
     fun snapshot(): ResolvedModelConfig {
         val activeProviderRaw = KVUtils.getLlmProvider().ifBlank { "OPENAI" }.uppercase()
-        val activeMode = if (activeProviderRaw == "LOCAL") ActiveModelMode.LOCAL else ActiveModelMode.CLOUD
+        val activeMode = when (activeProviderRaw) {
+            "LOCAL" -> ActiveModelMode.LOCAL
+            "AUTO", "AUTOMATIC" -> ActiveModelMode.AUTOMATIC
+            else -> ActiveModelMode.CLOUD
+        }
 
         val localModelPath = KVUtils.getLocalModelPath()
         val matchedLocalModel = LocalModelManager.AVAILABLE_MODELS.find { localModelPath.endsWith(it.fileName) }
         val localModelId = matchedLocalModel?.id
-            ?: if (activeMode == ActiveModelMode.LOCAL) KVUtils.getLlmModelName() else ""
+            ?: KVUtils.getLocalModelId().ifBlank {
+                localModelPath.takeIf { it.isNotBlank() }?.let { File(it).nameWithoutExtension } ?: ""
+            }
         val localDisplayName = matchedLocalModel?.displayName
             ?: localModelPath.takeIf { it.isNotBlank() }?.let { File(it).nameWithoutExtension }
             ?: localModelId
@@ -156,14 +166,25 @@ object ModelConfigRepository {
             activeMode = activeMode,
             local = local,
             activeCloud = activeCloud,
-            defaultCloud = defaultCloud
+            defaultCloud = defaultCloud,
+            effectiveMode = AutomaticModelResolver.effectiveMode(
+                selectedMode = activeMode,
+                internetValidated = runCatching {
+                    AutomaticModelResolver.isInternetValidated(com.blackclaw.android.ClawApplication.instance)
+                }.getOrDefault(false),
+                hasLocalModel = local.isConfigured && File(local.modelPath).exists(),
+                hasCloudModel = activeCloud.isConfigured,
+            ),
         )
     }
 
     fun isLocalActive(): Boolean = snapshot().isLocalActive()
 
+    fun isAutomaticActive(): Boolean = snapshot().isAutomaticActive()
+
     fun saveLocalDefault(modelPath: String, modelId: String, activateNow: Boolean) {
         KVUtils.setLocalModelPath(modelPath)
+        KVUtils.setLocalModelId(modelId)
         if (activateNow) {
             activateLocal(modelPath, modelId)
         }
@@ -171,8 +192,26 @@ object ModelConfigRepository {
 
     fun activateLocal(modelPath: String, modelId: String) {
         KVUtils.setLocalModelPath(modelPath)
+        KVUtils.setLocalModelId(modelId)
         KVUtils.setLlmProvider("LOCAL")
         KVUtils.setLlmModelName(modelId)
+    }
+
+    /** Select automatic routing while preserving the last configured cloud model. */
+    fun activateAutomatic() {
+        val current = snapshot()
+        if (current.activeMode == ActiveModelMode.CLOUD && current.activeCloud.modelName.isNotBlank()) {
+            KVUtils.setDefaultCloudModel(current.activeCloud.modelName)
+            KVUtils.setDefaultCloudProvider(current.activeCloud.providerName)
+            KVUtils.setDefaultCloudBaseUrl(current.activeCloud.baseUrl)
+        }
+        KVUtils.setLlmProvider("AUTO")
+        // Keep these keys coherent for older screens and callers that still read
+        // the shared model name while AUTO resolves to the local fallback.
+        if (current.defaultCloud.modelName.isNotBlank()) {
+            KVUtils.setLlmModelName(current.defaultCloud.modelName)
+            KVUtils.setLlmBaseUrl(current.defaultCloud.baseUrl)
+        }
     }
 
     fun saveCloudDefault(

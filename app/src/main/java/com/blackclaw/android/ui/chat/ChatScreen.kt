@@ -134,6 +134,7 @@ fun ChatScreen(
     isDownloading: Boolean = false,
     downloadProgress: Int = 0,
     isLocalModel: Boolean = true,
+    isAutomaticMode: Boolean = false,
     sessionTokens: Int = 0,
     sessionCost: Double = 0.0,
     onSendChat: (String) -> Unit,
@@ -171,11 +172,19 @@ fun ChatScreen(
     var prefillIsTask by remember { mutableStateOf(false) }
     // Task mode state — lifted here so content area can react
     var isTaskMode by remember { mutableStateOf(false) }
-    // Local/Cloud tab — controls UI presentation AND triggers model switch.
+    // Model mode — Automatic follows connectivity; Local/Cloud are explicit.
     // Keep the tab aligned with the actual active model so returning from
     // Settings/model changes cannot leave the toolbar UI out of sync.
-    var selectedTab by remember { mutableStateOf(if (isLocalModel) "local" else "cloud") }
-    val isLocalUI = selectedTab == "local"
+    var selectedTab by remember {
+        mutableStateOf(
+            when {
+                isAutomaticMode -> "auto"
+                isLocalModel -> "local"
+                else -> "cloud"
+            }
+        )
+    }
+    val isLocalUI = if (selectedTab == "auto") isLocalModel else selectedTab == "local"
     // Skill dialog and activation states
     var showMonitorSheet by remember { mutableStateOf(false) }
     var showSendSheet by remember { mutableStateOf(false) }
@@ -192,8 +201,12 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(isLocalModel) {
-        selectedTab = if (isLocalModel) "local" else "cloud"
+    LaunchedEffect(isLocalModel, isAutomaticMode) {
+        selectedTab = when {
+            isAutomaticMode -> "auto"
+            isLocalModel -> "local"
+            else -> "cloud"
+        }
     }
 
     ModalNavigationDrawer(
@@ -237,14 +250,17 @@ fun ChatScreen(
                         isLocalModel = isLocalModel,
                         selectedTab = selectedTab,
                         onTabChange = { tab ->
-                            selectedTab = tab
-                            val kvUtils = com.blackclaw.android.utils.KVUtils
-                            if (tab == "cloud") {
+                        selectedTab = tab
+                        val kvUtils = com.blackclaw.android.utils.KVUtils
+                            if (tab == "auto") {
+                                onModelSwitch("AUTO", "Automático")
+                            } else if (tab == "cloud") {
                                 // Check if cloud default model is configured
-                                if (kvUtils.hasDefaultCloudModel()) {
-                                    val modelId = kvUtils.getDefaultCloudModel()
+                                val cloudConfig = com.blackclaw.android.agent.llm.ModelConfigRepository.snapshot().activeCloud
+                                if (cloudConfig.isConfigured) {
+                                    val modelId = cloudConfig.modelName
                                     val provider = com.blackclaw.android.agent.CloudProvider.fromName(
-                                        kvUtils.getDefaultCloudProvider().ifBlank { kvUtils.getLlmProvider() }
+                                        cloudConfig.providerName
                                     )
                                     val displayName = provider.models.find { it.id == modelId }?.displayName ?: modelId
                                     onModelSwitch(modelId, displayName)
@@ -600,7 +616,41 @@ private fun ChatTopBar(
                 val kvUtils = com.blackclaw.android.utils.KVUtils
                 val currentModel = kvUtils.getLlmModelName()
 
-                if (selectedTab == "cloud") {
+                if (selectedTab == "auto") {
+                    val automaticConfig = com.blackclaw.android.agent.llm.ModelConfigRepository.snapshot()
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (automaticConfig.isLocalActive()) {
+                                    "Automático · sin internet · ${automaticConfig.local.displayName}"
+                                } else {
+                                    "Automático · online · ${automaticConfig.activeCloud.modelName}"
+                                },
+                                fontSize = 13.sp,
+                                color = colors.accent,
+                            )
+                        },
+                        enabled = false,
+                        onClick = {},
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Con internet: ${automaticConfig.activeCloud.modelName.ifBlank { "sin modelo cloud" }}", fontSize = 13.sp) },
+                        enabled = false,
+                        onClick = {},
+                    )
+                    val localName = automaticConfig.local.displayName.ifBlank { "sin modelo local" }
+                    DropdownMenuItem(
+                        text = { Text("Sin internet: $localName", fontSize = 13.sp) },
+                        enabled = false,
+                        onClick = {},
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Configurar modelos…", fontSize = 13.sp, color = colors.accent) },
+                        onClick = { showModelMenu = false; onSettings() },
+                    )
+                } else if (selectedTab == "cloud") {
                     // Resolve by persisted provider, not URL. Custom URLs and a
                     // trailing slash used to make Zen fall back to static OpenAI cards.
                     val activeCloud = com.blackclaw.android.agent.llm.ModelConfigRepository.snapshot().activeCloud
@@ -709,10 +759,10 @@ private fun ChatTopBar(
 }
 
 /**
- * Local / Cloud switch, as one segmented control rather than two loose buttons.
+ * Automatic / Local / Cloud switch, as one segmented control rather than loose buttons.
  *
  * The pair used to be two independent `Surface`s that each toggled their own border, so
- * nothing said they were alternatives to each other — it read as two unrelated buttons
+ * nothing said they were alternatives to each other — it read as unrelated buttons
  * where exactly one happened to be outlined.
  *
  * The selected side is drawn by a single pill that animates between the two halves. That
@@ -725,7 +775,7 @@ private fun ModelScopeSwitch(
     onTabChange: (String) -> Unit,
     colors: BlackClawColors,
 ) {
-    val options = listOf("local" to "Local", "cloud" to "Cloud")
+    val options = listOf("auto" to "Auto", "local" to "Local", "cloud" to "Cloud")
     val selectedIndex = options.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
 
     // Fixed segment width, deliberately. The first version measured the available space
@@ -733,7 +783,7 @@ private fun ModelScopeSwitch(
     // its children essentially unbounded width, so "half of the maximum" resolved to an
     // enormous number and the control swallowed the entire bar. A control this small
     // should state its own size rather than ask.
-    val segment = 58.dp
+    val segment = 54.dp
     val segmentHeight = 30.dp
     val slide by animateDpAsState(
         targetValue = segment * selectedIndex,

@@ -313,6 +313,7 @@ object KVUtils {
     private const val KEY_LLM_MODEL_NAME = "KEY_LLM_MODEL_NAME"
     private const val KEY_LLM_PROVIDER = "KEY_LLM_PROVIDER"
     private const val KEY_LOCAL_MODEL_PATH = "KEY_LOCAL_MODEL_PATH"
+    private const val KEY_LOCAL_MODEL_ID = "KEY_LOCAL_MODEL_ID"
     private const val KEY_LOCAL_BACKEND_PREFERENCE = "KEY_LOCAL_BACKEND_PREFERENCE"
     private const val KEY_LOCAL_CPU_SAFE_DEVICE = "KEY_LOCAL_CPU_SAFE_DEVICE"
     private const val KEY_LOCAL_CPU_SAFE_REASON = "KEY_LOCAL_CPU_SAFE_REASON"
@@ -340,6 +341,8 @@ object KVUtils {
     fun setLlmProvider(value: String) = putString(KEY_LLM_PROVIDER, value)
     fun getLocalModelPath(): String = getString(KEY_LOCAL_MODEL_PATH, "")
     fun setLocalModelPath(value: String) = putString(KEY_LOCAL_MODEL_PATH, value)
+    fun getLocalModelId(): String = getString(KEY_LOCAL_MODEL_ID, "")
+    fun setLocalModelId(value: String) = putString(KEY_LOCAL_MODEL_ID, value)
     fun getLocalBackendPreference(): String = getString(KEY_LOCAL_BACKEND_PREFERENCE, "")
     fun setLocalBackendPreference(value: String) = putString(KEY_LOCAL_BACKEND_PREFERENCE, value)
     fun getLocalCpuSafeDevice(): String = getString(KEY_LOCAL_CPU_SAFE_DEVICE, "")
@@ -401,7 +404,7 @@ object KVUtils {
         val model = getDefaultCloudModel()
         val provider = getDefaultCloudProvider().ifEmpty { "OPENAI" }
         val apiKey = getApiKeyForProvider(provider).ifEmpty { getLlmApiKey() }
-        return model.isNotEmpty() && apiKey.isNotEmpty()
+        return model.isNotEmpty() && (apiKey.isNotEmpty() || provider.equals("OPENCODE_ZEN", ignoreCase = true))
     }
 
     /** Returns true if LLM is configured (API key, base URL, or local model path is non-empty) */

@@ -35,6 +35,11 @@ class BootReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 XLog.e(TAG, "Failed to re-arm briefings", e)
             }
+            try {
+                com.blackclaw.android.automation.AutomationProfileScheduler.sync(context.applicationContext)
+            } catch (e: Exception) {
+                XLog.e(TAG, "Failed to re-arm automation profiles", e)
+            }
         }
     }
 }

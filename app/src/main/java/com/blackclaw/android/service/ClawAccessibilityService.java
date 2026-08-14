@@ -193,13 +193,29 @@ public class ClawAccessibilityService extends AccessibilityService {
                     CharSequence p = event.getPackageName();
                     if (p != null) {
                         String packageName = p.toString();
-                        if (!packageName.equals(getPackageName())
-                                && !packageName.equals("com.android.systemui")) {
-                            if (!packageName.equals(lastExternalPackage)) {
-                                lastExternalScreenTree = null;
-                                lastExternalScreenTreeAtMs = 0L;
-                                com.blackclaw.android.perception.ExternalScreenOcrCache.clear();
+                        boolean external = !packageName.equals(getPackageName())
+                                && !packageName.equals("com.android.systemui");
+                        if (!external) {
+                            if (lastExternalPackage != null && !lastExternalPackage.isEmpty()) {
+                                com.blackclaw.android.automation.AutomationProfileEngine
+                                        .onAppClosed(this, lastExternalPackage);
                             }
+                            lastExternalPackage = null;
+                            lastExternalScreenTree = null;
+                            lastExternalScreenTreeAtMs = 0L;
+                            com.blackclaw.android.perception.ExternalScreenOcrCache.clear();
+                        } else if (!packageName.equals(lastExternalPackage)) {
+                            if (lastExternalPackage != null && !lastExternalPackage.isEmpty()) {
+                                com.blackclaw.android.automation.AutomationProfileEngine
+                                        .onAppClosed(this, lastExternalPackage);
+                            }
+                            lastExternalScreenTree = null;
+                            lastExternalScreenTreeAtMs = 0L;
+                            com.blackclaw.android.perception.ExternalScreenOcrCache.clear();
+                            com.blackclaw.android.automation.AutomationProfileEngine
+                                    .onAppForeground(this, packageName);
+                        }
+                        if (external) {
                             lastExternalPackage = packageName;
                             rememberExternalScreen(packageName);
                         }

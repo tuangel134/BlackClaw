@@ -62,8 +62,8 @@ android {
         applicationId = "com.blackclaw.android"
         minSdk = 28
         targetSdk = 36
-        versionCode = readLocalOrEnvInt("BLACKCLAW_VERSION_CODE", 121)
-        versionName = readLocalOrEnvString("BLACKCLAW_VERSION_NAME", "1.2.7")
+        versionCode = readLocalOrEnvInt("BLACKCLAW_VERSION_CODE", 122)
+        versionName = readLocalOrEnvString("BLACKCLAW_VERSION_NAME", "1.2.8")
         buildConfigField("String", "VERSION_INFO", getVersionGit())
         buildConfigField("String", "APP_ORIGIN", "\"BlackClaw by BlackClaw | github.com/tuangel134/BlackClaw\"")
         buildConfigField("String", "BUILD_FINGERPRINT", "\"${getBuildFingerprint()}\"")

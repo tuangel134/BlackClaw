@@ -9,6 +9,7 @@ import com.blackclaw.android.utils.AppLogStore
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
 import com.blankj.utilcode.util.NetworkUtils
+import androidx.core.content.ContextCompat
 
 /**
  * Application entry point
@@ -44,12 +45,15 @@ class ClawApplication : BaseApp() {
         com.blackclaw.android.shizuku.ShizukuManager.init()
         appViewModelInstance = getAppViewModelProvider()[AppViewModel::class.java]
         KVUtils.init(this)
+        registerAutomationBatteryObserver()
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
             .onFailure {
                 XLog.w(TAG, "Briefing scheduler sync failed, proactive daily briefings " +
                     "will not fire until next app start: ${it.message}")
             }
+        runCatching { com.blackclaw.android.automation.AutomationProfileScheduler.sync(this) }
+            .onFailure { XLog.w(TAG, "Automation profile scheduler sync failed: ${it.message}") }
         runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
             .onFailure {
                 XLog.w(TAG, "OpenCode Zen model refresh failed, model picker keeps the " +
@@ -150,6 +154,17 @@ class ClawApplication : BaseApp() {
 
     private var networkListener: NetworkUtils.OnNetworkStatusChangedListener? = null
 
+    private fun registerAutomationBatteryObserver() {
+        runCatching {
+            ContextCompat.registerReceiver(
+                this,
+                com.blackclaw.android.automation.AutomationSystemReceiver(),
+                android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED),
+                ContextCompat.RECEIVER_EXPORTED,
+            )
+        }.onFailure { XLog.w(TAG, "Automation battery observer unavailable: ${it.message}") }
+    }
+
     /**
      * Listen for network recovery and automatically re-initialize channels.
      * Fixes channel initialization failures when booting with no network, and reconnects channels after network outages.
@@ -157,6 +172,16 @@ class ClawApplication : BaseApp() {
     private fun registerNetworkCallback() {
         networkListener = object : NetworkUtils.OnNetworkStatusChangedListener {
             override fun onConnected(networkType: NetworkUtils.NetworkType?) {
+                runCatching {
+                    com.blackclaw.android.automation.AutomationProfileEngine.emitSystemEvent(
+                        this@ClawApplication,
+                        com.blackclaw.android.automation.AutomationProfileStore.TriggerType.CONNECTIVITY,
+                        mapOf(
+                            "state" to "online",
+                            "transport" to (networkType?.name?.lowercase() ?: "unknown"),
+                        ),
+                    )
+                }
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     if (KVUtils.hasLlmConfig()) {
                         XLog.i(TAG, "Network recovered (${networkType?.name}), checking and reconnecting dropped channels")
@@ -172,6 +197,13 @@ class ClawApplication : BaseApp() {
 
             override fun onDisconnected() {
                 XLog.w(TAG, "Network disconnected")
+                runCatching {
+                    com.blackclaw.android.automation.AutomationProfileEngine.emitSystemEvent(
+                        this@ClawApplication,
+                        com.blackclaw.android.automation.AutomationProfileStore.TriggerType.CONNECTIVITY,
+                        mapOf("state" to "offline", "transport" to "none"),
+                    )
+                }
             }
         }
         NetworkUtils.registerNetworkStatusChangedListener(networkListener)

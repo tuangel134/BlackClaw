@@ -58,7 +58,10 @@ class TaskFlowController(
     private var lastMonitorStatusNote: String? = null
     private val pipelineRouter = PipelineRouter(activity)
 
-    fun sendTask(text: String) {
+    fun sendTask(
+        text: String,
+        originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin? = null,
+    ) {
         if (appViewModel.isTaskRunning()) {
             addSystem("Another task is still running. Stop it first.")
             onTaskTerminal?.invoke(TaskEvent.Failed("Another task is still running. Stop it first."))
@@ -74,7 +77,7 @@ class TaskFlowController(
 
         DirectDeviceDataGuard.deterministicToolCall(text)?.let { directTool ->
             XLog.i(TAG, "sendTask: executing deterministic direct tool before LLM/accessibility gates")
-            executeDirectToolTask(text, directTool)
+            executeDirectToolTask(text, directTool, originOverride)
             return
         }
 
@@ -83,7 +86,7 @@ class TaskFlowController(
                 val directTool = DirectDeviceDataGuard.deterministicToolCall(text)
                 if (directTool != null) {
                     XLog.i(TAG, "sendTask: executing non-interactive direct tool without Accessibility")
-                    executeDirectToolTask(text, directTool)
+                    executeDirectToolTask(text, directTool, originOverride)
                     return
                 }
                 if (canRunWithoutAccessibility(text)) {
@@ -101,7 +104,7 @@ class TaskFlowController(
                 val directTool = DirectDeviceDataGuard.deterministicToolCall(text)
                 if (directTool != null) {
                     XLog.i(TAG, "sendTask: executing non-interactive direct tool while Accessibility connects")
-                    executeDirectToolTask(text, directTool)
+                    executeDirectToolTask(text, directTool, originOverride)
                     return
                 }
                 if (canRunWithoutAccessibility(text)) {
@@ -121,7 +124,7 @@ class TaskFlowController(
                     val connected = ClawAccessibilityService.awaitRunning(5000)
                     activity.runOnUiThread {
                         if (connected) {
-                            sendTask(text)
+                            sendTask(text, originOverride)
                         } else {
                             Toast.makeText(activity, "Accessibility service didn't connect", Toast.LENGTH_LONG).show()
                             addSystem("Accessibility service didn't connect. Go to Settings and toggle it off then on.")
@@ -137,7 +140,7 @@ class TaskFlowController(
                 val directTool = DirectDeviceDataGuard.deterministicToolCall(text)
                 if (directTool != null) {
                     XLog.i(TAG, "sendTask: executing non-interactive direct tool while Accessibility is degraded")
-                    executeDirectToolTask(text, directTool)
+                    executeDirectToolTask(text, directTool, originOverride)
                     return
                 }
                 if (canRunWithoutAccessibility(text)) {
@@ -180,7 +183,8 @@ class TaskFlowController(
             activity.runOnUiThread {
                 try {
                     appViewModel.startTask(text, taskId, agentPromptOverride = agentPromptOverride,
-                        surface = com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT) { event ->
+                        surface = com.blackclaw.android.conversation.ConversationRepository.Surface.CHAT,
+                        originOverride = originOverride) { event ->
                         activity.runOnUiThread { handleTaskEvent(event) }
                     }
                 } catch (e: Exception) {
@@ -192,7 +196,11 @@ class TaskFlowController(
         }
     }
 
-    private fun executeDirectToolTask(text: String, toolCall: DirectDeviceDataGuard.DeterministicToolCall) {
+    private fun executeDirectToolTask(
+        text: String,
+        toolCall: DirectDeviceDataGuard.DeterministicToolCall,
+        originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin?,
+    ) {
         ensureNotificationPermission()
         addUser(text)
         uiState.isAwaitingReply.value = true
@@ -208,7 +216,7 @@ class TaskFlowController(
                 // a future deterministic route to a privileged tool would otherwise be
                 // silently refused here.
                 com.blackclaw.android.tool.guard.ToolExecutionContext.setOrigin(
-                    com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.LOCAL
+                    originOverride ?: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.LOCAL
                 )
                 val result = ToolRegistry.getInstance().executeTool(toolCall.toolName, toolCall.params)
                 activity.runOnUiThread {

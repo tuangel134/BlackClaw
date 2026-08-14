@@ -18,6 +18,13 @@ object AutomationEngine {
     private const val LOCATION_STATE_PREFIX = "automation_location_inside_"
 
     fun onNotification(context: Context, packageName: String, title: String, text: String) {
+        AutomationProfileEngine.emit(
+            context,
+            AutomationProfileEngine.Event(
+                AutomationProfileStore.TriggerType.NOTIFICATION,
+                mapOf("package" to packageName, "title" to title, "text" to text),
+            ),
+        )
         AutomationRuleStore.list().asSequence()
             .filter { it.enabled && it.trigger == AutomationRuleStore.Trigger.NOTIFICATION }
             .filter { notificationMatches(it, packageName, title, text) }
@@ -26,6 +33,7 @@ object AutomationEngine {
     }
 
     fun onLocation(context: Context, location: Location) {
+        AutomationProfileEngine.onLocation(context, location)
         AutomationRuleStore.list().asSequence()
             .filter { it.enabled && it.trigger != AutomationRuleStore.Trigger.NOTIFICATION }
             .forEach { rule ->
@@ -79,7 +87,8 @@ object AutomationEngine {
         }
         runCatching {
             vm.startTask(text, "auto_${System.currentTimeMillis()}", autoReturnToChat = false,
-                surface = com.blackclaw.android.conversation.ConversationRepository.Surface.AUTOMATION) { event ->
+                surface = com.blackclaw.android.conversation.ConversationRepository.Surface.AUTOMATION,
+                originOverride = com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin.AUTOMATION) { event ->
                 if (event is TaskEvent.Completed || event is TaskEvent.Failed || event is TaskEvent.Cancelled) {
                     if (wakeLock.isHeld) wakeLock.release()
                 }

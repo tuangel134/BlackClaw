@@ -92,6 +92,7 @@ object ToolRiskPolicy {
         "set_brightness", "set_volume", "toggle_setting",
         "forget_fact", "cancel_scheduled_task",
         "http_fetch",
+        "automation_profile",
     )
 
     fun classify(toolName: String): Tier = when (toolName) {

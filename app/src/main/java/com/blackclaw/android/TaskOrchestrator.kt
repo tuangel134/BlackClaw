@@ -75,7 +75,8 @@ class TaskOrchestrator(
     // ==================== Task Lock ====================
 
     fun tryAcquireTask(messageId: String, channel: Channel, taskText: String = "",
-                       autoReturnToChat: Boolean = (channel == Channel.LOCAL)): Boolean {
+                       autoReturnToChat: Boolean = (channel == Channel.LOCAL),
+                       originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin? = null): Boolean {
         val acquired = taskSessionStore.tryAcquire(
             messageId = messageId,
             channel = channel,
@@ -91,7 +92,7 @@ class TaskOrchestrator(
             // Publish provenance so the tool layer can refuse arbitrary-command tools
             // for anything that did not originate on this device. Same single gate, so
             // no entry point can start a task without setting it.
-            com.blackclaw.android.tool.guard.ToolExecutionContext.setOrigin(originOf(channel))
+            com.blackclaw.android.tool.guard.ToolExecutionContext.setOrigin(originOverride ?: originOf(channel))
         }
         return acquired
     }
@@ -156,10 +157,11 @@ class TaskOrchestrator(
         agentPromptOverride: String? = null,
         isFallback: Boolean = false,
         autoReturnToChat: Boolean = (channel == Channel.LOCAL),
+        originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin? = null,
     ) {
         // Acquire task lock if not already held
         if (!isTaskRunning()) {
-            if (!tryAcquireTask(messageID, channel, task, autoReturnToChat)) {
+            if (!tryAcquireTask(messageID, channel, task, autoReturnToChat, originOverride)) {
                 XLog.w(TAG, "Failed to acquire task lock for: $task")
                 taskEventCallback?.invoke(TaskEvent.Failed("Another task is running"))
                 return

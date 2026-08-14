@@ -13,6 +13,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,6 +27,10 @@ import androidx.core.view.WindowCompat
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.scheduler.ScheduledTaskManager
 import com.blackclaw.android.automation.AutomationEngine
+import com.blackclaw.android.automation.AutomationProfileEngine
+import com.blackclaw.android.automation.AutomationProfileScheduler
+import com.blackclaw.android.automation.AutomationProfileStore
+import com.blackclaw.android.automation.AutomationProfileValidator
 import com.blackclaw.android.automation.AutomationRuleStore
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
@@ -50,9 +57,23 @@ class ScheduledTasksActivity : BaseActivity() {
 private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var tasks by remember { mutableStateOf(ScheduledTaskManager.listAll()) }
     var rules by remember { mutableStateOf(AutomationRuleStore.list()) }
+    var profiles by remember { mutableStateOf(AutomationProfileStore.list()) }
     var selected by remember { mutableStateOf(0) }
     var showAddRule by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                tasks = ScheduledTaskManager.listAll()
+                rules = AutomationRuleStore.list()
+                profiles = AutomationProfileStore.list()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Scaffold(
         containerColor = colors.background,
@@ -69,11 +90,16 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    if (selected == 1) {
-                        IconButton(onClick = { showAddRule = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "Nueva regla", tint = colors.accent)
+                    if (selected == 1 || selected == 2) {
+                        IconButton(onClick = {
+                            if (selected == 1) showAddRule = true
+                            else ctx.startActivity(AutomationProfileEditorActivity.editIntent(ctx))
+                        }) {
+                            Icon(Icons.Default.Add,
+                                contentDescription = if (selected == 1) "Nueva regla" else "Nuevo perfil",
+                                tint = colors.accent)
                         }
-                    } else if (tasks.isNotEmpty()) {
+                    } else if (selected == 0 && tasks.isNotEmpty()) {
                         IconButton(onClick = {
                             tasks.forEach { ScheduledTaskManager.cancel(ctx, it.id) }
                             tasks = ScheduledTaskManager.listAll()
@@ -92,7 +118,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(12.dp))
                 .background(colors.surface)) {
-                listOf("⏰ Horarios" to tasks.size, "⚡ Si → entonces" to rules.size).forEachIndexed { index, item ->
+                listOf("⏰ Horarios" to tasks.size, "⚡ Si → entonces" to rules.size, "🧩 Perfiles" to profiles.size).forEachIndexed { index, item ->
                     TextButton(onClick = { selected = index }, modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.textButtonColors(
                             containerColor = if (selected == index) colors.accent.copy(alpha = .16f) else androidx.compose.ui.graphics.Color.Transparent)) {
@@ -108,7 +134,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                         ScheduledTaskManager.cancel(ctx, task.id); tasks = ScheduledTaskManager.listAll()
                     } }
                 }
-            } else {
+            } else if (selected == 1) {
                 if (rules.isEmpty()) RuleEmptyState(colors, Modifier.weight(1f)) else LazyColumn(
                     modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -116,6 +142,26 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                         onToggle = { AutomationRuleStore.setEnabled(rule.id, it); rules = AutomationRuleStore.list() },
                         onRun = { AutomationEngine.fire(ctx, rule) },
                         onDelete = { AutomationRuleStore.delete(rule.id); rules = AutomationRuleStore.list() }) }
+                }
+            } else {
+                if (profiles.isEmpty()) ProfileEmptyState(colors, Modifier.weight(1f)) else LazyColumn(
+                    modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(profiles, key = { it.id }) { profile ->
+                        ProfileCard(profile, colors,
+                            onToggle = {
+                                AutomationProfileStore.setEnabled(profile.id, it)
+                                AutomationProfileScheduler.sync(ctx)
+                                profiles = AutomationProfileStore.list()
+                            },
+                            onRun = { AutomationProfileEngine.runNow(ctx, profile) },
+                            onEdit = { ctx.startActivity(AutomationProfileEditorActivity.editIntent(ctx, profile.id)) },
+                            onDelete = {
+                                AutomationProfileStore.delete(profile.id)
+                                AutomationProfileScheduler.sync(ctx)
+                                profiles = AutomationProfileStore.list()
+                            })
+                    }
                 }
             }
         }
@@ -133,6 +179,64 @@ private fun RuleEmptyState(colors: BlackClawColors, modifier: Modifier = Modifie
             Text("Sin reglas todavía", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
             Text("Crea reglas por notificación o ubicación con +\no pídele a BlackClaw: “si pasa X, haz Y”",
                 color = colors.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun ProfileEmptyState(colors: BlackClawColors, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("🧩", fontSize = 42.sp)
+            Spacer(Modifier.height(12.dp))
+            Text("Perfiles inteligentes", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+            Text("Pídele a BlackClaw: “cuando llegue a casa, activa Wi‑Fi y avísame”.\nAquí verás sus automatizaciones con sus límites.",
+                color = colors.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun ProfileCard(profile: AutomationProfileStore.Profile, colors: BlackClawColors,
+                        onToggle: (Boolean) -> Unit, onRun: () -> Unit, onEdit: () -> Unit,
+                        onDelete: () -> Unit) {
+    val validationErrors = remember(profile) { AutomationProfileValidator.validate(profile) }
+    Card(colors = CardDefaults.cardColors(containerColor = colors.surface), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🧩", fontSize = 24.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(profile.name, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("${profile.triggers.size} disparador(es) · ${profile.actions.size} acción(es)",
+                        color = colors.accent, fontSize = 11.sp)
+                }
+                Switch(checked = profile.enabled, onCheckedChange = onToggle)
+            }
+            if (profile.description.isNotBlank()) {
+                Text(profile.description, color = colors.textSecondary, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 5.dp))
+            }
+            if (validationErrors.isNotEmpty()) {
+                Text("Necesita revisión: ${validationErrors.first()}", color = colors.textTertiary,
+                    fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+            }
+            Text("Límite: ${if (profile.maxRunsPerDay == 0) "sin límite diario" else "${profile.maxRunsPerDay}/día"} · cooldown ${profile.cooldownMs / 1000}s · máximo ${profile.maxRuntimeMs / 1000}s",
+                color = colors.textSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+            if (profile.lastStatus != "never") {
+                Text("Último resultado: ${profile.lastStatus}${profile.lastError.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}",
+                    color = if (profile.lastStatus == "success") colors.accent else colors.textTertiary,
+                    fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(enabled = validationErrors.isEmpty(), onClick = onRun) {
+                    Text("Probar", color = if (validationErrors.isEmpty()) colors.accent else colors.textTertiary)
+                }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, "Editar", tint = colors.accent)
+                }
+                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Eliminar", tint = colors.textTertiary) }
+            }
         }
     }
 }

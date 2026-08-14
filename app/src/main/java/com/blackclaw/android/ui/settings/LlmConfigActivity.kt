@@ -118,10 +118,14 @@ class LlmConfigActivity : BaseActivity() {
         }
 
         // Active model — show what is ACTUALLY active based on provider
-        if (resolvedConfig.activeMode == ActiveModelMode.LOCAL) {
+        if (resolvedConfig.effectiveMode == ActiveModelMode.LOCAL) {
             val activeState = LocalModelManager.resolveActiveModelState(this, resolvedConfig.local)
             activeModelName.text = activeState.displayName
-            activeModelMeta.text = activeState.metaText
+            activeModelMeta.text = if (resolvedConfig.isAutomaticActive()) {
+                "Automático · ${activeState.metaText}"
+            } else {
+                activeState.metaText
+            }
             activeModelStatus.text = activeState.statusText
             activeModelStatus.setTextColor(
                 when (activeState.statusKind) {
@@ -135,8 +139,12 @@ class LlmConfigActivity : BaseActivity() {
             if (cloudModel.isNotEmpty()) {
                 activeModelName.text = cloudModel
                 val providerName = resolvedConfig.activeCloud.provider.displayName
-                activeModelMeta.text = "$providerName · Cloud"
-                activeModelStatus.text = "● Connected"
+                activeModelMeta.text = if (resolvedConfig.isAutomaticActive()) {
+                    "$providerName · Automático · Cloud"
+                } else {
+                    "$providerName · Cloud"
+                }
+                activeModelStatus.text = if (resolvedConfig.isAutomaticActive()) "● Online" else "● Connected"
                 activeModelStatus.setTextColor(getColor(R.color.colorSuccessPrimary))
             } else {
                 activeModelName.text = "No model selected"
@@ -170,7 +178,7 @@ class LlmConfigActivity : BaseActivity() {
             defaultCloudStatus.setTextColor(Color.parseColor("#8b949e"))
         }
 
-        val activeLocalModelId = if (resolvedConfig.activeMode == ActiveModelMode.LOCAL) resolvedConfig.local.modelId else ""
+        val activeLocalModelId = if (resolvedConfig.effectiveMode == ActiveModelMode.LOCAL) resolvedConfig.local.modelId else ""
         val defaultLocalModelId = resolvedConfig.local.modelId
         val configuredBuiltInLocal = LocalModelManager.configuredBuiltInModel(resolvedConfig.local)
 
@@ -258,7 +266,8 @@ class LlmConfigActivity : BaseActivity() {
                                 if (path != null) {
                                     // Save as default local model (independent of cloud config)
                                     // Only switch active provider if currently on local tab
-                                    val shouldActivateLocal = ModelConfigRepository.isLocalActive() || !KVUtils.hasDefaultCloudModel()
+                                    val shouldActivateLocal = !ModelConfigRepository.isAutomaticActive() &&
+                                        (ModelConfigRepository.isLocalActive() || !KVUtils.hasDefaultCloudModel())
                                     ModelConfigRepository.saveLocalDefault(path, model.id, shouldActivateLocal)
                                     ClawApplication.appViewModelInstance.updateAgentConfig()
                                     ClawApplication.appViewModelInstance.initAgent()
@@ -460,7 +469,8 @@ class LlmConfigActivity : BaseActivity() {
 
     private fun activateImportedLocalModel(modelPath: String) {
         val modelId = "imported-${File(modelPath).nameWithoutExtension}"
-        val shouldActivateLocal = ModelConfigRepository.isLocalActive() || !KVUtils.hasDefaultCloudModel()
+        val shouldActivateLocal = !ModelConfigRepository.isAutomaticActive() &&
+            (ModelConfigRepository.isLocalActive() || !KVUtils.hasDefaultCloudModel())
         ModelConfigRepository.saveLocalDefault(modelPath, modelId, shouldActivateLocal)
         ClawApplication.appViewModelInstance.updateAgentConfig()
         ClawApplication.appViewModelInstance.initAgent()
@@ -789,7 +799,8 @@ class LlmConfigActivity : BaseActivity() {
                 modelId = modelId,
                 baseUrl = baseUrl,
                 apiKey = apiKey,
-                activateNow = !ModelConfigRepository.isLocalActive()
+                activateNow = !ModelConfigRepository.isAutomaticActive() &&
+                    !ModelConfigRepository.isLocalActive()
             )
             ClawApplication.appViewModelInstance.updateAgentConfig()
             ClawApplication.appViewModelInstance.initAgent()

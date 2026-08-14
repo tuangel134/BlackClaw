@@ -13,7 +13,8 @@ class AutomationRuleTool : BaseTool() {
     override fun getDescriptionEN() =
         "Create and manage deterministic IF→THEN automations. Notification rules match a contact/title/text " +
         "and run a precise multi-step task. Location rules fire when entering/exiting coordinates. " +
-        "Use schedule_task for clock/cron triggers. Explicit user-created rules execute without asking again."
+        "Use schedule_task for simple clock/cron triggers. For new Tasker-like profiles with multiple " +
+        "triggers, conditions and bounded actions, use automation_profile. Explicit user-created rules execute without asking again."
     override fun getDescriptionCN() = getDescriptionEN()
     override fun getBrief() = "crea reglas si-entonces por notificación o ubicación y ejecuta acciones complejas"
     override fun getParameters() = listOf(

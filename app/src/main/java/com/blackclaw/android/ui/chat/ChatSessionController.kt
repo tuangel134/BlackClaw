@@ -63,6 +63,7 @@ class ChatSessionController(
     var onChatReply: ((String) -> Unit)? = null
     private val cloudHistory = mutableListOf<dev.langchain4j.data.message.ChatMessage>()
     private var localUiGeneration: Long = 0
+    @Volatile private var localLoadInProgress: Boolean = false
     private var suppressNextCloudSwitchMessage: Boolean = false
 
     fun isModelReady(): Boolean = isModelReady
@@ -75,8 +76,23 @@ class ChatSessionController(
 
         if (!resolvedConfig.isLocalActive()) {
             localUiGeneration++
+            // Automatic mode can move from the local runtime back to cloud when
+            // connectivity returns. LiteRT-LM permits only one live conversation,
+            // so release it before creating the cloud client.
+            if (conversation != null || engine != null) {
+                try {
+                    conversation?.close()
+                } catch (e: Exception) {
+                    XLog.w(TAG, "loadModelIfReady: local conversation close error", e)
+                }
+                conversation = null
+                engine = null
+                loadedModelPath = null
+                isModelReady = false
+                cloudHistory.clear()
+            }
             val cloudConfig = resolvedConfig.activeCloud
-            if (cloudConfig.apiKey.isNotEmpty() && cloudConfig.modelName.isNotEmpty()) {
+            if (cloudConfig.isConfigured) {
                 val previousModel = cloudModelName
                 cloudClient = LlmSessionManager.createCloudClient(temperature = 0.7)
                 if (cloudClient == null) {
@@ -101,7 +117,8 @@ class ChatSessionController(
                     }
                 }
                 isModelReady = true
-                uiState.modelStatus.value = "● ${cloudConfig.modelName} · Cloud"
+                uiState.modelStatus.value = "● ${cloudConfig.modelName} · " +
+                    if (resolvedConfig.isAutomaticActive()) "Automático · Cloud" else "Cloud"
                 setButtonsEnabled(true)
                 XLog.i(TAG, "Cloud chat ready: ${cloudConfig.modelName} via ${cloudConfig.resolvedBaseUrl}")
             } else {
@@ -113,6 +130,7 @@ class ChatSessionController(
         }
 
         cloudClient = null
+        if (localLoadInProgress) return
         val modelPath = resolvedConfig.local.modelPath
         if (isTaskRunning()) {
             uiState.modelStatus.value = "● Local task using model"
@@ -156,6 +174,7 @@ class ChatSessionController(
             uiState.isDownloading.value = true
             uiState.downloadProgress.value = 0
             setButtonsEnabled(false)
+            localLoadInProgress = true
 
             executor.submit {
                 LocalModelManager.downloadModel(activity, defaultModel, object : LocalModelManager.DownloadCallback {
@@ -170,9 +189,15 @@ class ChatSessionController(
                     override fun onComplete(modelPath: String) {
                         val currentPath = ModelConfigRepository.snapshot().local.modelPath
                         if (currentPath.isEmpty() || currentPath == modelPath) {
-                            ModelConfigRepository.activateLocal(modelPath, defaultModel.id)
+                            val keepAutomatic = ModelConfigRepository.isAutomaticActive()
+                            ModelConfigRepository.saveLocalDefault(
+                                modelPath = modelPath,
+                                modelId = defaultModel.id,
+                                activateNow = !keepAutomatic,
+                            )
                         }
                         postToMain {
+                            localLoadInProgress = false
                             uiState.isDownloading.value = false
                             loadModelIfReady()
                         }
@@ -180,6 +205,7 @@ class ChatSessionController(
 
                     override fun onError(error: String) {
                         postToMain {
+                            localLoadInProgress = false
                             uiState.isDownloading.value = false
                             uiState.modelStatus.value = "Download failed"
                             addSystem("Download failed: $error")
@@ -194,6 +220,7 @@ class ChatSessionController(
         uiState.modelStatus.value = "Loading..."
         setButtonsEnabled(false)
         val generation = ++localUiGeneration
+        localLoadInProgress = true
         executor.submit { loadModel(modelPath, generation, restoredSystemPrompt) }
     }
 
@@ -591,6 +618,10 @@ class ChatSessionController(
             uiState.modelStatus.value = "● ${localConfig.displayName} · On-device"
             addSystem("Switched to local model")
             loadModelIfReady()
+        } else if (modelId == "AUTO") {
+            ModelConfigRepository.activateAutomatic()
+            addSystem("Modo automático activado: usaré la nube con internet y el modelo local sin conexión.")
+            loadModelIfReady()
         } else {
             localUiGeneration++
             ModelConfigRepository.activateCloudSelection(modelId)
@@ -697,6 +728,13 @@ class ChatSessionController(
             postToMain {
                 if (!isLocalUiStillExpected(modelPath, generation)) {
                     XLog.i(TAG, "Ignoring stale local UI update for $modelPath (generation=$generation)")
+                    try {
+                        conversation?.close()
+                    } catch (_: Exception) {
+                    }
+                    conversation = null
+                    engine = null
+                    isModelReady = false
                     return@postToMain
                 }
                 updateLocalModelStatus(modelPath)
@@ -726,6 +764,8 @@ class ChatSessionController(
                 }
                 setButtonsEnabled(false)
             }
+        } finally {
+            localLoadInProgress = false
         }
     }
 
@@ -927,7 +967,12 @@ class ChatSessionController(
         val modelInfo = LocalModelManager.AVAILABLE_MODELS.find { modelPath.endsWith(it.fileName) }
         val modelName = modelInfo?.displayName ?: modelPath.substringAfterLast('/').substringBeforeLast('.')
         val backendLabel = LocalModelRuntime.currentBackendLabel(modelPath) ?: "On-device"
-        uiState.modelStatus.value = "● $modelName · $backendLabel"
+        uiState.modelStatus.value = "● $modelName · " +
+            if (ModelConfigRepository.isAutomaticActive()) {
+                "Automático · $backendLabel"
+            } else {
+                backendLabel
+            }
     }
 
     fun syncUiToActiveModel() {
@@ -967,7 +1012,8 @@ class ChatSessionController(
             loadModelIfReady()
             return
         }
-        uiState.modelStatus.value = "● ${cloud.modelName} · Cloud"
+        uiState.modelStatus.value = "● ${cloud.modelName} · " +
+            if (config.isAutomaticActive()) "Automático · Cloud" else "Cloud"
         setButtonsEnabled(true)
     }
 
