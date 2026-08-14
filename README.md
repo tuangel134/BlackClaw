@@ -491,6 +491,10 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.11
+
+- Corrected the handoff test fixture so it explicitly marks its successful tool evidence as successful.
+
 ### v1.2.10
 
 - Fixed a pre-existing chat handoff test regression that incorrectly treated accessibility connection noise as authoritative task evidence.
