@@ -491,6 +491,10 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.10
+
+- Fixed a pre-existing chat handoff test regression that incorrectly treated accessibility connection noise as authoritative task evidence.
+
 ### v1.2.9
 
 - Corrected the GitHub release compilation issues found in the first v1.2.8 build attempt; this release contains the same automation feature set with the editor and runtime fixes applied.

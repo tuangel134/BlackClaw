@@ -56,7 +56,7 @@ object CloudContextHandoffFormatter {
         return listOf(
             "cargar herramienta", "herramienta", "tool", "create contacts", "create_contacts",
             "failed", "falló", "fallo", "error", "intentando", "ejecutando",
-            "guardad", "agregad", "permiso", "accesibilidad", "tarea", "task",
+            "guardad", "agregad", "permiso", "tarea", "task",
         ).any { it in normalized }
     }
 }
