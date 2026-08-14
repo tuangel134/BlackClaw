@@ -1,5 +1,6 @@
 package com.blackclaw.android.agent
 
+import java.text.Normalizer
 import java.util.Locale
 
 /**
@@ -178,7 +179,8 @@ internal class DirectDeviceDataGuard private constructor(
         }
 
         private fun normalize(value: String): String {
-            return value.lowercase(Locale.US)
+            return Normalizer.normalize(value.lowercase(Locale.US), Normalizer.Form.NFD)
+                .replace(Regex("\\p{Mn}+"), "")
                 .replace(Regex("""\s+"""), " ")
                 .trim()
         }
