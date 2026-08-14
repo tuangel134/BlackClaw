@@ -1,8 +1,12 @@
 package com.blackclaw.android.ui.scheduled
 
 import android.os.Bundle
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +23,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,6 +41,7 @@ import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
 import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -60,6 +66,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var profiles by remember { mutableStateOf(AutomationProfileStore.list()) }
     var selected by remember { mutableStateOf(0) }
     var showAddRule by remember { mutableStateOf(false) }
+    var showAddTask by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -90,7 +97,19 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    if (selected == 1 || selected == 2) {
+                    if (selected == 0) {
+                        IconButton(onClick = { showAddTask = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "Nueva tarea", tint = colors.accent)
+                        }
+                        if (tasks.isNotEmpty()) {
+                            IconButton(onClick = {
+                                tasks.forEach { ScheduledTaskManager.cancel(ctx, it.id) }
+                                tasks = ScheduledTaskManager.listAll()
+                            }) {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = "Eliminar todas", tint = colors.textTertiary)
+                            }
+                        }
+                    } else if (selected == 1 || selected == 2) {
                         IconButton(onClick = {
                             if (selected == 1) showAddRule = true
                             else ctx.startActivity(AutomationProfileEditorActivity.editIntent(ctx))
@@ -98,13 +117,6 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                             Icon(Icons.Default.Add,
                                 contentDescription = if (selected == 1) "Nueva regla" else "Nuevo perfil",
                                 tint = colors.accent)
-                        }
-                    } else if (selected == 0 && tasks.isNotEmpty()) {
-                        IconButton(onClick = {
-                            tasks.forEach { ScheduledTaskManager.cancel(ctx, it.id) }
-                            tasks = ScheduledTaskManager.listAll()
-                        }) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = "Eliminar todas", tint = colors.textTertiary)
                         }
                     }
                 },
@@ -127,7 +139,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                 }
             }
             if (selected == 0) {
-                if (tasks.isEmpty()) EmptyState(colors, Modifier.weight(1f)) else LazyColumn(
+                if (tasks.isEmpty()) EmptyState(colors, Modifier.weight(1f), onCreate = { showAddTask = true }) else LazyColumn(
                     modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(tasks, key = { it.id }) { task -> TaskCard(task, colors) {
@@ -169,6 +181,14 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
     if (showAddRule) AddRuleDialog(colors, onDismiss = { showAddRule = false }) {
         rules = AutomationRuleStore.list(); showAddRule = false
     }
+    if (showAddTask) CreateTaskSheet(
+        colors = colors,
+        onDismiss = { showAddTask = false },
+        onSaved = {
+            tasks = ScheduledTaskManager.listAll()
+            showAddTask = false
+        },
+    )
 }
 
 @Composable
@@ -306,7 +326,7 @@ private fun AddRuleDialog(colors: BlackClawColors, onDismiss: () -> Unit, onSave
 }
 
 @Composable
-private fun EmptyState(colors: BlackClawColors, modifier: Modifier = Modifier) {
+private fun EmptyState(colors: BlackClawColors, modifier: Modifier = Modifier, onCreate: () -> Unit = {}) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
@@ -320,6 +340,284 @@ private fun EmptyState(colors: BlackClawColors, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(8.dp))
             Text("Pídele a la IA \"recuérdame X mañana a las 9\"\ny aparecerán aquí.",
                 fontSize = 13.sp, color = colors.textSecondary, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = onCreate, shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Crear tarea", color = colors.background, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+private enum class QuickTaskWhen { IN_30_MIN, TODAY_18, TOMORROW_09, CUSTOM }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreateTaskSheet(
+    colors: BlackClawColors,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val now = remember { System.currentTimeMillis() }
+    var text by remember { mutableStateOf("") }
+    var mode by remember { mutableStateOf(ScheduledTaskManager.Mode.TASK) }
+    var selectedWhen by remember { mutableStateOf(QuickTaskWhen.IN_30_MIN) }
+    var customTime by remember { mutableStateOf<Long?>(null) }
+    var recurrence by remember { mutableStateOf(ScheduledTaskManager.Recurrence.ONCE) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun clock(hour: Int, minute: Int, dayOffset: Int = 0): Long {
+        val calendar = Calendar.getInstance().apply {
+            timeInMillis = now
+            add(Calendar.DAY_OF_YEAR, dayOffset)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        if (dayOffset == 0 && calendar.timeInMillis <= System.currentTimeMillis()) {
+            calendar.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return calendar.timeInMillis
+    }
+
+    fun openCustomPicker() {
+        val seed = Calendar.getInstance()
+        val picker = DatePickerDialog(context, { _, year, month, day ->
+            val date = Calendar.getInstance().apply {
+                set(Calendar.YEAR, year)
+                set(Calendar.MONTH, month)
+                set(Calendar.DAY_OF_MONTH, day)
+            }
+            TimePickerDialog(context, { _, hour, minute ->
+                date.set(Calendar.HOUR_OF_DAY, hour)
+                date.set(Calendar.MINUTE, minute)
+                date.set(Calendar.SECOND, 0)
+                date.set(Calendar.MILLISECOND, 0)
+                customTime = date.timeInMillis
+                selectedWhen = QuickTaskWhen.CUSTOM
+            }, seed.get(Calendar.HOUR_OF_DAY), seed.get(Calendar.MINUTE), true).show()
+        }, seed.get(Calendar.YEAR), seed.get(Calendar.MONTH), seed.get(Calendar.DAY_OF_MONTH))
+        picker.datePicker.minDate = System.currentTimeMillis()
+        picker.show()
+    }
+
+    val triggerAtMs = when (selectedWhen) {
+        QuickTaskWhen.IN_30_MIN -> now + 30 * 60_000L
+        QuickTaskWhen.TODAY_18 -> clock(18, 0)
+        QuickTaskWhen.TOMORROW_09 -> clock(9, 0, 1)
+        QuickTaskWhen.CUSTOM -> customTime ?: (now + 30 * 60_000L)
+    }
+    val dateFormat = remember { SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()) }
+    val triggerLabel = dateFormat.format(Date(triggerAtMs))
+    val eveningTrigger = clock(18, 0)
+    val eveningLabel = if (eveningTrigger - now < 12 * 60 * 60_000L) "Hoy 18:00" else "Mañana 18:00"
+    val canSave = text.trim().isNotEmpty() && triggerAtMs > System.currentTimeMillis()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = colors.background,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary) },
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
+                        .background(colors.accent.copy(alpha = .16f)),
+                    contentAlignment = Alignment.Center,
+                ) { Text("✦", color = colors.accent, fontSize = 25.sp) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Nueva tarea", color = colors.textPrimary, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    Text("Se ejecutará aunque cierres BlackClaw", color = colors.textSecondary, fontSize = 12.sp)
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = colors.textTertiary)
+                }
+            }
+
+            Text("¿Qué quieres que haga?", color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it; error = null },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 5,
+                placeholder = { Text("Ej.: revisa el clima y avísame si lloverá") },
+                supportingText = { Text("Puedes escribirlo como se lo dirías a BlackClaw", color = colors.textTertiary) },
+                shape = RoundedCornerShape(16.dp),
+            )
+
+            Text("Tipo de ejecución", color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                QuickTaskChoice(
+                    colors = colors,
+                    selected = mode == ScheduledTaskManager.Mode.TASK,
+                    icon = Icons.Default.PlayArrow,
+                    title = "Ejecutar",
+                    subtitle = "BlackClaw actuará",
+                    modifier = Modifier.weight(1f),
+                    onClick = { mode = ScheduledTaskManager.Mode.TASK },
+                )
+                QuickTaskChoice(
+                    colors = colors,
+                    selected = mode == ScheduledTaskManager.Mode.CHAT,
+                    icon = Icons.Default.NotificationsActive,
+                    title = "Avisarme",
+                    subtitle = "Solo notificación",
+                    modifier = Modifier.weight(1f),
+                    onClick = { mode = ScheduledTaskManager.Mode.CHAT },
+                )
+            }
+
+            Text("¿Cuándo?", color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuickTaskChoice(
+                    colors = colors, selected = selectedWhen == QuickTaskWhen.IN_30_MIN,
+                    icon = Icons.Default.Timer, title = "30 min", subtitle = "Desde ahora",
+                    modifier = Modifier.weight(1f), onClick = { selectedWhen = QuickTaskWhen.IN_30_MIN },
+                )
+                QuickTaskChoice(
+                    colors = colors, selected = selectedWhen == QuickTaskWhen.TODAY_18,
+                    icon = Icons.Default.WbSunny, title = eveningLabel, subtitle = "Siguiente turno",
+                    modifier = Modifier.weight(1f), onClick = { selectedWhen = QuickTaskWhen.TODAY_18 },
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuickTaskChoice(
+                    colors = colors, selected = selectedWhen == QuickTaskWhen.TOMORROW_09,
+                    icon = Icons.Default.Event, title = "Mañana 09:00", subtitle = "Al comenzar el día",
+                    modifier = Modifier.weight(1f), onClick = { selectedWhen = QuickTaskWhen.TOMORROW_09 },
+                )
+                QuickTaskChoice(
+                    colors = colors, selected = selectedWhen == QuickTaskWhen.CUSTOM,
+                    icon = Icons.Default.Schedule, title = "Elegir fecha", subtitle = "Personalizado",
+                    modifier = Modifier.weight(1f), onClick = ::openCustomPicker,
+                )
+            }
+
+            Text("Repetición", color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    ScheduledTaskManager.Recurrence.ONCE to "Una vez",
+                    ScheduledTaskManager.Recurrence.DAILY to "Cada día",
+                    ScheduledTaskManager.Recurrence.WEEKLY to "Cada semana",
+                ).forEach { (value, label) ->
+                    FilterChip(
+                        selected = recurrence == value,
+                        onClick = { recurrence = value },
+                        label = { Text(label, fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            Surface(
+                color = colors.surface,
+                shape = RoundedCornerShape(18.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, colors.accent.copy(alpha = .35f)),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Vista previa", color = colors.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${if (mode == ScheduledTaskManager.Mode.TASK) "🤖 BlackClaw ejecutará" else "🔔 Te avisaré"} · $triggerLabel",
+                        color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text.ifBlank { "Escribe una tarea para verla aquí" },
+                        color = if (text.isBlank()) colors.textTertiary else colors.textSecondary,
+                        fontSize = 13.sp,
+                    )
+                    if (recurrence != ScheduledTaskManager.Recurrence.ONCE) {
+                        Text(
+                            if (recurrence == ScheduledTaskManager.Recurrence.DAILY) "Se repetirá cada día" else "Se repetirá cada semana",
+                            color = colors.accent, fontSize = 11.sp,
+                        )
+                    }
+                }
+            }
+
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+            Button(
+                onClick = {
+                    if (text.isBlank()) {
+                        error = "Escribe qué quieres que haga BlackClaw."
+                    } else if (triggerAtMs <= System.currentTimeMillis()) {
+                        error = "Elige una hora futura."
+                    } else {
+                        ScheduledTaskManager.schedule(
+                            context = context,
+                            mode = mode,
+                            text = text.trim(),
+                            triggerAtMs = triggerAtMs,
+                            recurrence = recurrence,
+                        )
+                        onSaved()
+                    }
+                },
+                enabled = canSave,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(17.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colors.accent,
+                    contentColor = colors.background,
+                    disabledContainerColor = colors.surface,
+                    disabledContentColor = colors.textTertiary,
+                ),
+            ) {
+                Icon(Icons.Default.Check, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Programar tarea", fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun QuickTaskChoice(
+    colors: BlackClawColors,
+    selected: Boolean,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val container by animateColorAsState(
+        if (selected) colors.accent.copy(alpha = .16f) else colors.surface,
+        label = "task-choice-container",
+    )
+    Card(
+        modifier = modifier.clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = container),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            if (selected) 1.2.dp else .5.dp,
+            if (selected) colors.accent else colors.aiBubbleBorder,
+        ),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) colors.accent else colors.textSecondary,
+                modifier = Modifier.size(22.dp),
+            )
+            Text(title, color = if (selected) colors.accent else colors.textPrimary,
+                fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text(subtitle, color = colors.textSecondary, fontSize = 10.sp, maxLines = 1)
         }
     }
 }
