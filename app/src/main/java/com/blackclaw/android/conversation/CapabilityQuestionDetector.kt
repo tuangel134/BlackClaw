@@ -25,6 +25,14 @@ object CapabilityQuestionDetector {
             return true
         }
         if (!CAPABILITY_FRAME.containsMatchIn(t)) return false
+
+        // A confirmation tail changes the speech act for every verb. For
+        // example, "¿puedes abrir WhatsApp, cierto?" asks whether the
+        // assistant has that ability; it does not ask it to open the app now.
+        // Keep this semantic rule independent from the action vocabulary so a
+        // new verb cannot accidentally reintroduce the slow task loop.
+        if (CAPABILITY_CONFIRMATION_TAIL.containsMatchIn(t)) return true
+
         if (hasConcreteRequestDetails(t)) return false
 
         // These are intentionally narrow. "¿Puedes poner una alarma?" is still
@@ -126,6 +134,10 @@ object CapabilityQuestionDetector {
     private val CAPABILITY_ONLY_OBJECT = Regex(
         """\b(terminal|telefono|android|imagen|imagenes|image|images|""" +
             """tareas?|automatizaciones?|rutinas?|capacidad|capacidades|esto|eso|algo|todo)\b"""
+    )
+
+    private val CAPABILITY_CONFIRMATION_TAIL = Regex(
+        """\b(cierto|verdad|correcto|no|right|correct|yes or no)$"""
     )
 
     private val EXPLANATORY_FRAME = Regex(
@@ -253,7 +265,8 @@ object CapabilityQuestionDetector {
             "manana", "hoy", "esta noche", "a las ", "en ", "cada ",
             "cuando ", "al ", "para ", "con ", "que diga ", "que haga ",
             "tomorrow", "today", "at ", "in ", "every ", "when ", "for ",
-        ).any { marker -> t.contains(marker) }
+        ).any { marker -> t.contains(marker) } ||
+            Regex("""\b(a|to)\s+\w+""").containsMatchIn(t)
     }
 
     private fun normalize(s: String): String {

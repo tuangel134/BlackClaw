@@ -8,6 +8,8 @@ class ConversationQuickRepliesTest {
     @Test fun `answers broad automation capability immediately`() {
         val reply = ConversationQuickReplies.replyFor("¿puedes programar tareas cierto?")
         assertTrue(reply?.startsWith("Sí.") == true)
+        assertTrue(ConversationQuickReplies.replyFor("¿puedes abrir WhatsApp, cierto?")?.startsWith("Sí.") == true)
+        assertTrue(ConversationQuickReplies.replyFor("¿puedes apagar la linterna, verdad?")?.startsWith("Sí.") == true)
         assertTrue(ConversationQuickReplies.replyFor("¿eres capaz de abrir WhatsApp?")?.startsWith("Sí.") == true)
     }
 

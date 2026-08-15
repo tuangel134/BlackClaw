@@ -148,7 +148,6 @@ class TaskClassifierTest {
     // ── Tricky: questions that ARE requests ──
     @Test fun trickyRequests() {
         task("¿puedes apagar la linterna?")
-        task("¿puedes apagar la linterna, cierto?")
         task("¿me pones una alarma?")
         task("¿puedes crear una nota?")
         task("¿puedes programar una tarea para mañana a las 9?")
@@ -165,6 +164,10 @@ class TaskClassifierTest {
 
     @Test fun capabilityQuestionsStayInChat() {
         chat("¿puedes programar tareas cierto?")
+        chat("¿puedes abrir WhatsApp, cierto?")
+        chat("¿puedes apagar la linterna, verdad?")
+        chat("¿puedes llamar a Juan, correcto?")
+        chat("¿puedes ejecutar ls, right?")
         chat("¿puedes programar una tarea?")
         chat("¿puedes crear automatizaciones?")
         chat("¿puedes usar la terminal?")
