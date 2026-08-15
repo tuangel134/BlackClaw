@@ -8,14 +8,17 @@ class ConversationQuickRepliesTest {
     @Test fun `answers broad automation capability immediately`() {
         val reply = ConversationQuickReplies.replyFor("¿puedes programar tareas cierto?")
         assertTrue(reply?.startsWith("Sí.") == true)
+        assertTrue(ConversationQuickReplies.replyFor("¿eres capaz de abrir WhatsApp?")?.startsWith("Sí.") == true)
     }
 
     @Test fun `does not intercept an actionable request`() {
         assertNull(ConversationQuickReplies.replyFor("¿puedes programar una tarea para mañana a las 9?"))
         assertNull(ConversationQuickReplies.replyFor("¿puedes apagar la linterna?"))
+        assertNull(ConversationQuickReplies.replyFor("¿puedes ejecutar ls?"))
     }
 
     @Test fun `answers general capability question`() {
         assertTrue(ConversationQuickReplies.replyFor("¿qué puedes hacer?")?.isNotBlank() == true)
+        assertTrue(ConversationQuickReplies.replyFor("¿qué puede hacer BlackClaw?")?.isNotBlank() == true)
     }
 }

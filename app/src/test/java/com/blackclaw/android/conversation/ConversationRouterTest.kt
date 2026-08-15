@@ -54,6 +54,12 @@ class ConversationRouterTest {
         assertEquals(ConversationRouter.Mode.ACT, ConversationRouter.decide("¿puedes programar una tarea para mañana a las 9?").mode)
     }
 
+    @Test fun `explanations stay conversation while device reads remain actions`() {
+        assertEquals(ConversationRouter.Mode.CONVERSE, ConversationRouter.decide("¿cómo puedo programar tareas?").mode)
+        assertEquals(ConversationRouter.Mode.CONVERSE, ConversationRouter.decide("¿para qué sirve abrir WhatsApp?").mode)
+        assertEquals(ConversationRouter.Mode.ACT, ConversationRouter.decide("¿qué batería tengo?").mode)
+    }
+
     @Test fun `delete all requires confirmation`() {
         val decision = ConversationRouter.decide("Borra todo")
         assertEquals(ConversationRouter.Confirmation.REQUIRED, decision.confirmation)

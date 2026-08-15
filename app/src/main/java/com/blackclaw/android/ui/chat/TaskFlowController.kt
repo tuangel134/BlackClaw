@@ -65,9 +65,12 @@ class TaskFlowController(
         // The user can leave the composer in Tarea mode after a previous action
         // and then ask a capability question. Keep that question conversational
         // even in that mode; concrete requests still pass through the task agent.
-        if (originOverride == null &&
-            com.blackclaw.android.conversation.ConversationQuickReplies.replyFor(text) != null
-        ) {
+        val shouldStayConversationally =
+            com.blackclaw.android.conversation.ConversationQuickReplies.replyFor(text) != null ||
+                com.blackclaw.android.conversation.CapabilityQuestionDetector.isInformationalQuestion(text) ||
+                com.blackclaw.android.conversation.CapabilityQuestionDetector.isTopicStatement(text) ||
+                com.blackclaw.android.conversation.CapabilityQuestionDetector.isContentGenerationRequest(text)
+        if (originOverride == null && shouldStayConversationally) {
             chatSessionController.sendChat(text)
             return
         }

@@ -34,13 +34,16 @@ object TaskClassifier {
         // so it does not enter the slow agent loop. Concrete requests such as
         // "¿puedes programar una tarea para mañana?" remain tasks.
         if (com.blackclaw.android.conversation.CapabilityQuestionDetector.isCapabilityQuestion(raw) ||
-            com.blackclaw.android.conversation.CapabilityQuestionDetector.isGeneralCapabilityQuestion(raw)
+            com.blackclaw.android.conversation.CapabilityQuestionDetector.isGeneralCapabilityQuestion(raw) ||
+            com.blackclaw.android.conversation.CapabilityQuestionDetector.isInformationalQuestion(raw) ||
+            com.blackclaw.android.conversation.CapabilityQuestionDetector.isTopicStatement(raw) ||
+            com.blackclaw.android.conversation.CapabilityQuestionDetector.isContentGenerationRequest(raw)
         ) {
             return false
         }
 
         // 1. Strong signals — any hit ⇒ task.
-        if (hasActionVerb(words)) return true
+        if (hasActionVerb(words) || hasStopCommand(words) || hasExplicitEnglishCommand(words, t)) return true
         if (hasIndirectRequest(t)) return true
         if (hasActionObject(t)) return true
         if (hasAppName(t)) return true
@@ -80,8 +83,8 @@ object TaskClassifier {
         // call
         "llama", "llamame", "llamar", "marca", "marcar", "call", "dial", "telefonea", "videollamada",
         // set / create / schedule
-        "set", "crea", "crear", "agrega", "agregar", "anade", "anadir", "programa", "programar", "agenda",
-        "agendar", "configura", "configurar", "create", "add", "schedule", "make",
+        "crea", "crear", "agrega", "agregar", "anade", "anadir", "programa", "programar", "agenda",
+        "agendar", "configura", "configurar", "create", "add", "schedule",
         // remind / alarm
         "recuerda", "recuerdame", "recordar", "avisa", "avisame", "avisar", "despiertame", "remind",
         // notes
@@ -104,12 +107,12 @@ object TaskClassifier {
         // capture
         "captura", "capturar", "graba", "grabar", "record", "escanea", "escanear", "scan", "screenshot",
         // generic do/help (with object)
-        "haz", "hazme", "hacer", "ejecuta", "ejecutar", "run", "do", "ponme", "quitame", "quita", "quitar",
+        "haz", "hazme", "hacer", "ejecuta", "ejecutar", "ponme", "quitame", "quita", "quitar",
         // check / read device data
         "checa", "chequea", "revisa", "revisar", "lee", "leeme", "leer", "muestra", "muestrame", "ensename",
         "dime", "check", "read", "show", "list", "lista", "listar",
         // stop / cancel
-        "deten", "detener", "para", "parar", "cancela", "cancelar", "stop", "cancel", "termina",
+        "deten", "detener", "parar", "cancela", "cancelar", "stop", "cancel", "termina",
         // move / rename
         "mueve", "mover", "renombra", "renombrar", "move", "rename",
         // alarms specific
@@ -138,6 +141,28 @@ object TaskClassifier {
         // Match as whole words (any position) — covers "pon una alarma",
         // "quiero abrir x" (abrir is a verb), etc.
         return words.any { it in ACTION_VERBS }
+    }
+
+    /** "para" is also one of the most common Spanish prepositions. */
+    private fun hasStopCommand(words: List<String>): Boolean {
+        if (words.firstOrNull() != "para") return false
+        val next = words.getOrNull(1)
+        return next == null || next in setOf(
+            "la", "el", "las", "los", "esto", "eso", "todo", "ahora", "ya",
+            "musica", "video", "cancion", "proceso", "descarga", "tarea",
+        )
+    }
+
+    /** English words such as set/make/run/do are too common to be global signals. */
+    private fun hasExplicitEnglishCommand(words: List<String>, text: String): Boolean {
+        return when (words.firstOrNull()) {
+            "do" -> words.getOrNull(1) !in setOf(null, "you", "i", "we", "they")
+            "run" -> words.size > 1 && words.getOrNull(1) !in setOf("out", "late", "away")
+            "set" -> hasActionObject(text) || hasDeviceState(text)
+            "make" -> hasActionObject(text) || hasDeviceState(text) ||
+                words.drop(1).any { it in setOf("call", "appointment", "task", "automation") }
+            else -> false
+        }
     }
 
     // ── 2. Indirect / polite request patterns ──
@@ -189,8 +214,10 @@ object TaskClassifier {
         Regex("""\b(una?\s+)?cita\b"""),
         Regex("""\b(un\s+)?gasto\b"""),
         Regex("""\b(una?\s+)?rutina\b"""),
+        Regex("""\b(una?\s+)?tareas?\b"""),
+        Regex("""\b(una?\s+)?automatizaciones?\b"""),
         // English
-        Regex("""\ban?\s+(alarm|reminder|timer|note|event|meeting|message)\b"""),
+        Regex("""\ban?\s+(alarm|reminder|timer|note|event|meeting|message|task|automation|routine)\b"""),
     )
 
     private fun hasActionObject(t: String): Boolean = ACTION_OBJECTS.any { it.containsMatchIn(t) }
