@@ -62,6 +62,15 @@ class TaskFlowController(
         text: String,
         originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin? = null,
     ) {
+        // The user can leave the composer in Tarea mode after a previous action
+        // and then ask a capability question. Keep that question conversational
+        // even in that mode; concrete requests still pass through the task agent.
+        if (originOverride == null &&
+            com.blackclaw.android.conversation.ConversationQuickReplies.replyFor(text) != null
+        ) {
+            chatSessionController.sendChat(text)
+            return
+        }
         if (appViewModel.isTaskRunning()) {
             addSystem("Another task is still running. Stop it first.")
             onTaskTerminal?.invoke(TaskEvent.Failed("Another task is still running. Stop it first."))

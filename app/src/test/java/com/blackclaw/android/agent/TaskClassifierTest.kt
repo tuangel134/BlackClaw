@@ -122,8 +122,22 @@ class TaskClassifierTest {
     // ── Tricky: questions that ARE requests ──
     @Test fun trickyRequests() {
         task("¿puedes apagar la linterna?")
+        task("¿puedes apagar la linterna, cierto?")
         task("¿me pones una alarma?")
+        task("¿puedes crear una nota?")
+        task("¿puedes programar una tarea para mañana a las 9?")
         task("oye, abre la cámara")
+    }
+
+    @Test fun capabilityQuestionsStayInChat() {
+        chat("¿puedes programar tareas cierto?")
+        chat("¿puedes programar una tarea?")
+        chat("¿puedes crear automatizaciones?")
+        chat("¿puedes usar la terminal?")
+        chat("¿puedes hacer esto?")
+        chat("¿qué puedes hacer?")
+        chat("what can you do")
+        chat("can you schedule tasks?")
     }
 
     // ── Tricky: chat that mentions verbs-as-topics should stay chat ──

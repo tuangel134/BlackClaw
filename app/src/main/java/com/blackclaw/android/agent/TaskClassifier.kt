@@ -9,6 +9,8 @@ package com.blackclaw.android.agent
  * were sent to chat and the model only *described* doing them.
  *
  * This uses layered signals (all normalized, accent-insensitive):
+ *   0. Capability-question guard — broad questions stay in conversation even
+ *      when they contain an action verb ("¿puedes programar tareas?").
  *   1. Action verbs — explicit imperative + infinitive forms, ES & EN.
  *   2. Indirect/polite requests — "puedes…", "podrías…", "necesito que…",
  *      "me gustaría que…", "can you…", "could you…".
@@ -26,6 +28,16 @@ object TaskClassifier {
         if (raw.isEmpty()) return false
         val t = normalize(raw)
         val words = t.split(' ').filter { it.isNotBlank() }
+
+        // "¿Puedes programar tareas?" is a capability question, not an
+        // executable task. Check this before action verbs ("programar" is one)
+        // so it does not enter the slow agent loop. Concrete requests such as
+        // "¿puedes programar una tarea para mañana?" remain tasks.
+        if (com.blackclaw.android.conversation.CapabilityQuestionDetector.isCapabilityQuestion(raw) ||
+            com.blackclaw.android.conversation.CapabilityQuestionDetector.isGeneralCapabilityQuestion(raw)
+        ) {
+            return false
+        }
 
         // 1. Strong signals — any hit ⇒ task.
         if (hasActionVerb(words)) return true

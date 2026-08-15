@@ -354,6 +354,28 @@ class ChatSessionController(
             com.blackclaw.android.conversation.ConversationRepository.Role.USER, text,
             com.blackclaw.android.conversation.ConversationRouter.Mode.CONVERSE.name)
         addUser(text)
+
+        // Capability questions have a deterministic answer and must not wake a
+        // local model or wait on a cloud round-trip. Keep the turn in both the
+        // visible transcript and the shared/cloud histories so the next real
+        // message still has correct context.
+        val quickReply = com.blackclaw.android.conversation.ConversationQuickReplies.replyFor(text)
+        if (quickReply != null) {
+            uiState.messages.add(
+                ChatMessage(ChatMessage.Role.ASSISTANT, quickReply, modelName = "Respuesta rápida")
+            )
+            if (cloudClient != null && cloudHistory.isNotEmpty()) {
+                cloudHistory.add(UserMessage.from(text))
+                cloudHistory.add(AiMessage.from(quickReply))
+            }
+            recordSharedAssistant(quickReply)
+            uiState.isAwaitingReply.value = false
+            onPersistConversation()
+            onChatReply?.invoke(quickReply)
+            XLog.i(TAG, "sendChat: answered capability question locally")
+            return
+        }
+
         uiState.isAwaitingReply.value = true
         uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, ChatMessage.PENDING))
 

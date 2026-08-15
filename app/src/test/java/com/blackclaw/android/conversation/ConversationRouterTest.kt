@@ -49,6 +49,11 @@ class ConversationRouterTest {
         assertEquals(ConversationRouter.Mode.CONVERSE, ConversationRouter.decide("Hola, ¿cómo estás?").mode)
     }
 
+    @Test fun `capability question is conversation not an action`() {
+        assertEquals(ConversationRouter.Mode.CONVERSE, ConversationRouter.decide("¿puedes programar tareas cierto?").mode)
+        assertEquals(ConversationRouter.Mode.ACT, ConversationRouter.decide("¿puedes programar una tarea para mañana a las 9?").mode)
+    }
+
     @Test fun `delete all requires confirmation`() {
         val decision = ConversationRouter.decide("Borra todo")
         assertEquals(ConversationRouter.Confirmation.REQUIRED, decision.confirmation)
