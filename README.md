@@ -503,6 +503,19 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.15
+
+- Fixed the Android default-assistant flow used by the power-button gesture.
+  Quick Assist now launches through Android's assistant-activity layer instead
+  of the voice-activity layer, opens without a timing delay, and falls back to
+  a direct lock-screen-safe launch if an OEM cannot create the voice session.
+- Added regression-safe handling for failed assistant sessions so the power
+  button no longer appears to do nothing when the OEM voice service rejects the
+  session.
+- Kept the existing capability-question routing fix: confirmation questions
+  using any action verb stay conversational instead of entering the slow agent
+  loop.
+
 ### v1.2.14
 
 - Added an interactive task-creation sheet in **Automatizaciones → Horarios**:
