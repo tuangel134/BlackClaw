@@ -503,6 +503,15 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.16
+
+- Fixed repeated power-button assistant invocations. The voice session no
+  longer hides itself immediately after launching Quick Assist, so Android can
+  reuse it safely and deliver subsequent assistant presses.
+- Every new assistant show still resets its panel-launch guard, while the
+  direct lock-screen fallback remains available for OEMs that reject the voice
+  session.
+
 ### v1.2.15
 
 - Fixed the Android default-assistant flow used by the power-button gesture.

@@ -43,6 +43,7 @@ class BlackClawVoiceInteractionSession(context: Context) : VoiceInteractionSessi
         // AssistStructure/screenshot callbacks are independent of the activity
         // launch. Open immediately so a power-button invocation cannot be lost
         // while the session is waiting on a timer or gets hidden by the system.
+        // onPrepareShow resets launchedPanel for every new system invocation.
         launchPanel()
     }
 
@@ -76,14 +77,12 @@ class BlackClawVoiceInteractionSession(context: Context) : VoiceInteractionSessi
             // voice child activities, which can leave an assistant panel blank
             // or hidden on newer Android/OEM builds.
             startAssistantActivity(intent)
-            hide()
         }.onFailure { error ->
             XLog.w(TAG, "Assistant activity launch failed: ${error.message}; trying direct fallback")
             runCatching {
                 getContext().startActivity(intent.apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
-                hide()
             }.onFailure { fallback ->
                 XLog.w(TAG, "Direct assistant fallback failed: ${fallback.message}")
             }
