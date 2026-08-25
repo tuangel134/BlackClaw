@@ -407,9 +407,23 @@ object KVUtils {
         return model.isNotEmpty() && (apiKey.isNotEmpty() || provider.equals("OPENCODE_ZEN", ignoreCase = true))
     }
 
-    /** Returns true if LLM is configured (API key, base URL, or local model path is non-empty) */
-    fun hasLlmConfig(): Boolean =
-        getLlmApiKey().isNotEmpty() || getLlmBaseUrl().isNotEmpty() || getLocalModelPath().isNotEmpty()
+    /**
+     * Returns true if an LLM can be resolved. AUTO is valid when either side of
+     * its cloud/local pair is configured; OpenCode Zen is intentionally counted
+     * by hasDefaultCloudModel() even though its public free key is implicit.
+     */
+    fun hasLlmConfig(): Boolean {
+        val provider = getLlmProvider().uppercase()
+        if (provider == "AUTO" || provider == "AUTOMATIC") {
+            // BlackClaw Free (OpenCode Zen) is anonymous and ships with a seed
+            // catalog, so AUTO remains usable even before a paid key/default is
+            // saved. A downloaded local model or paid cloud default still wins
+            // whenever one is present.
+            return hasDefaultLocalModel() || hasDefaultCloudModel() ||
+                com.blackclaw.android.agent.OpenCodeZenModels.models().isNotEmpty()
+        }
+        return getLlmApiKey().isNotEmpty() || getLlmBaseUrl().isNotEmpty() || getLocalModelPath().isNotEmpty()
+    }
 
     // ==================== Global Prompt (#45) ====================
     // User-defined persistent instructions prepended to every system prompt.

@@ -441,13 +441,23 @@ private fun ModernSettingsScreen(
                 Divider(colors)
                 val voiceOn = com.blackclaw.android.assistant.VoiceInputManager.wakeEnabled
                 val voiceReady = com.blackclaw.android.assistant.VoskModelManager.isReady()
+                val assistantStatus = com.blackclaw.android.ui.assist.AssistantRole.status(
+                    androidx.compose.ui.platform.LocalContext.current
+                )
                 NavRow(
                     icon = Icons.Outlined.Mic,
                     title = "Modo voz (manos libres)",
-                    subtitle = if (voiceReady) "Di 'garra' + tu orden — offline, sin beep"
-                               else "Activación por voz",
-                    trailing = if (voiceOn) "Activado" else "Desactivado",
-                    trailingHighlight = voiceOn,
+                    subtitle = when {
+                        assistantStatus.needsRepair -> "Asistente desincronizado — toca para reparar"
+                        voiceReady -> "Di 'garra' + tu orden — offline, sin beep"
+                        else -> "Activación por voz"
+                    },
+                    trailing = when {
+                        assistantStatus.needsRepair -> "Reparar"
+                        voiceOn -> "Activado"
+                        else -> "Desactivado"
+                    },
+                    trailingHighlight = voiceOn && !assistantStatus.needsRepair,
                     colors = colors,
                     onClick = onOpenVoice,
                 )

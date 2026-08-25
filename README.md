@@ -53,6 +53,11 @@ rather than relying on per-app integrations.
   screen content and messages never leave the phone.
 - **Cloud-optional.** Bring your own key for a frontier model when you want more
   reasoning power. The key is stored only in local app storage.
+- **Automatic model routing.** In Settings → Models, BlackClaw can probe every
+  configured cloud/local model with a minimal request, remember its latency, use
+  the fastest successful model in AUTO mode, and silently fail over when a
+  provider times out, rate-limits, or rejects a model. The probe never sends chat
+  history or screen content (paid providers may charge the tiny probe request).
 - **Hands-free voice.** A wake word ("garra"/"BlackClaw") and an offline speech
   engine let you talk to it; set BlackClaw as the phone's assistant and invoke it
   with the power button — even over the lock screen — with a full-screen animated
@@ -129,6 +134,9 @@ touching the phone.
 - **Set BlackClaw as the phone's assistant** and summon it with the power-button
   gesture — it appears in a **full-screen animated panel** (an audio-reactive
   claw orb) **even over the lock screen**, like Gemini/Assistant.
+- The assistant settings verify both Android's assistant role and the active
+  `VoiceInteractionService`. If an OEM leaves them out of sync, BlackClaw shows
+  a repair prompt instead of falsely claiming that the power button is ready.
 - **Streaming replies:** the answer types out live and is **spoken sentence by
   sentence as it generates** (cloud models); tap the orb to interrupt.
 - **Continuous conversation:** it re-listens after answering so you can go back
@@ -502,6 +510,20 @@ PR guidelines, and conventions.
 ---
 
 ## Changelog
+
+### v1.2.17
+
+- Added configurable **AUTO model routing**. BlackClaw can benchmark every
+  configured cloud/local model with a minimal request, remember latency, use the
+  fastest valid route, and fail over automatically when a provider times out,
+  rate-limits, rejects a model, or returns an empty response.
+- AUTO now uses cloud models while internet is validated and downloaded/local
+  LiteRT-LM models offline. Visible compatible `.litertlm` files in shared
+  storage (including Edge Gallery exports) are included in the model test.
+- Fixed OEM assistant desynchronization: Settings now checks both Android's
+  assistant role and the active `VoiceInteractionService`, and guides users to
+  repair devices where the role says BlackClaw but the power gesture still goes
+  to Google.
 
 ### v1.2.16
 

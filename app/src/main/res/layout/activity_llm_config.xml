@@ -98,6 +98,79 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
+            <!-- Automatic routing + latency benchmark -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:paddingHorizontal="4dp"
+                android:paddingBottom="8dp"
+                android:text="Modo automático"
+                android:textColor="@color/colorTextSecondary"
+                android:textSize="13dp"
+                android:textStyle="bold" />
+
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/colorContainerBrighten"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:id="@+id/tvAutoModeStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="AUTO usa el modelo más rápido medido y cambia si falla."
+                        android:textColor="@color/colorTextTertiary"
+                        android:textSize="12dp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:text="La prueba envía una solicitud mínima a cada modelo; los proveedores de pago pueden cobrarla."
+                        android:textColor="@color/colorTextTertiary"
+                        android:textSize="10dp" />
+
+                    <TextView
+                        android:id="@+id/btnActivateAuto"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_edit_text"
+                        android:gravity="center"
+                        android:text="Activar modo AUTO"
+                        android:textColor="@color/colorBrandPrimary"
+                        android:textSize="13dp" />
+
+                    <TextView
+                        android:id="@+id/btnBenchmarkModels"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_edit_text"
+                        android:gravity="center"
+                        android:text="Probar modelos configurados"
+                        android:textColor="@color/colorInfoPrimary"
+                        android:textSize="13dp" />
+
+                    <TextView
+                        android:id="@+id/tvBenchmarkResults"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textColor="@color/colorTextTertiary"
+                        android:textSize="11dp" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

@@ -2,6 +2,7 @@ package com.blackclaw.android.agent
 
 import com.blackclaw.android.agent.llm.LlmClient
 import com.blackclaw.android.agent.llm.LlmResponse
+import com.blackclaw.android.agent.llm.ModelConfigRepository
 import com.blackclaw.android.agent.llm.StreamingListener
 import com.blackclaw.android.utils.XLog
 import dev.langchain4j.agent.tool.ToolSpecification
@@ -27,11 +28,16 @@ class AgentRetryHandler(
         iteration: Int,
     ): LlmResponse {
         val cfg = config()
+        val automaticMode = ModelConfigRepository.isAutomaticActive()
+        // AUTO owns provider failover. Retrying a dead endpoint here would hide
+        // the exception from AutoFailoverLlmClient and add several seconds before
+        // it can move to the next measured model.
+        val maxApiRetries = if (automaticMode) 1 else MAX_API_RETRIES
         var lastException: Exception? = null
         var attempt = 0
         var rateLimitRetries = 0
 
-        while (attempt < MAX_API_RETRIES) {
+        while (attempt < maxApiRetries) {
             if (isCancelled()) throw RuntimeException("Task cancelled")
             try {
                 return if (cfg.streaming) {
@@ -44,6 +50,7 @@ class AgentRetryHandler(
                             override fun onError(error: Throwable) {}
                         })
                     } catch (se: Exception) {
+                        if (automaticMode) throw se
                         XLog.w(TAG, "Streaming failed, falling back to non-streaming: ${se.message}")
                         llmClient().chat(messages, toolSpecs)
                     }
@@ -66,6 +73,10 @@ class AgentRetryHandler(
 
                 val rateLimitWaitMs = parseRateLimitWaitMs(msg)
                 if (rateLimitWaitMs != null) {
+                    if (automaticMode) {
+                        XLog.w(TAG, "AUTO provider rate-limited; handing off to the next model")
+                        throw e
+                    }
                     rateLimitRetries++
                     if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
                         XLog.w(TAG, "Rate limit retries exhausted ($MAX_RATE_LIMIT_RETRIES)")
@@ -88,9 +99,9 @@ class AgentRetryHandler(
                 }
 
                 attempt++
-                if (attempt >= MAX_API_RETRIES) break
+                if (attempt >= maxApiRetries) break
                 val delay = (Math.pow(2.0, attempt.toDouble()) * 1000).toLong()
-                XLog.w(TAG, "LLM API call failed (attempt $attempt/$MAX_API_RETRIES), retrying in ${delay}ms: $msg")
+                XLog.w(TAG, "LLM API call failed (attempt $attempt/$maxApiRetries), retrying in ${delay}ms: $msg")
                 try {
                     Thread.sleep(delay)
                 } catch (ie: InterruptedException) {

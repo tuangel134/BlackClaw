@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -36,10 +37,27 @@ import com.blackclaw.android.base.BaseActivity
  */
 class VoiceSettingsActivity : BaseActivity() {
 
+    private val assistantStatus = mutableStateOf<com.blackclaw.android.ui.assist.AssistantRole.Status?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        setContent { VoiceSettingsScreen(onBack = { finish() }, onEnable = { ensureMicPermission() }) }
+        assistantStatus.value = com.blackclaw.android.ui.assist.AssistantRole.status(this)
+        setContent {
+            VoiceSettingsScreen(
+                onBack = { finish() },
+                onEnable = { ensureMicPermission() },
+                assistantStatus = assistantStatus.value,
+                onOpenAssistantSettings = {
+                    com.blackclaw.android.ui.assist.AssistantRole.openSettings(this)
+                },
+            )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        assistantStatus.value = com.blackclaw.android.ui.assist.AssistantRole.status(this)
     }
 
     private fun ensureMicPermission() {
@@ -53,7 +71,12 @@ class VoiceSettingsActivity : BaseActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
+private fun VoiceSettingsScreen(
+    onBack: () -> Unit,
+    onEnable: () -> Unit,
+    assistantStatus: com.blackclaw.android.ui.assist.AssistantRole.Status?,
+    onOpenAssistantSettings: () -> Unit,
+) {
     val bg = Color(0xFF0A0A0F)
     val surface = Color(0xFF141420)
     val accent = Color(0xFF00D4FF)
@@ -100,16 +123,11 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             // Set BlackClaw as the phone's default assistant (assist gesture).
-            var isAssistant by remember {
-                mutableStateOf(com.blackclaw.android.ui.assist.AssistantRole.isDefault(ctx))
-            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(surface, RoundedCornerShape(14.dp))
-                    .clickable {
-                        com.blackclaw.android.ui.assist.AssistantRole.openSettings(ctx)
-                    }
+                    .clickable(onClick = onOpenAssistantSettings)
                     .padding(16.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -119,17 +137,24 @@ private fun VoiceSettingsScreen(onBack: () -> Unit, onEnable: () -> Unit) {
                         Text("Asistente del teléfono", color = textPrimary, fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (isAssistant) "BlackClaw es tu asistente por defecto ✓"
-                            else "Ponlo por defecto para invocarlo con el gesto/botón",
-                            color = if (isAssistant) accent else textSecondary, fontSize = 12.sp,
+                            when {
+                                assistantStatus?.isReady == true -> "BlackClaw es tu asistente activo ✓"
+                                assistantStatus?.needsRepair == true -> "BlackClaw está seleccionado, pero Android aún usa otro servicio"
+                                else -> "Ponlo por defecto para invocarlo con el gesto/botón"
+                            },
+                            color = if (assistantStatus?.isReady == true) accent else textSecondary, fontSize = 12.sp,
                             lineHeight = 16.sp)
                     }
                     Text("Configurar", color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Cuando lo invoques (mantén el botón de inicio o desliza desde la esquina), " +
-                    "BlackClaw aparece incluso sobre la pantalla bloqueada y escucha tu orden.",
+                    if (assistantStatus?.needsRepair == true) {
+                        "Android tiene desincronizado el rol y el servicio de voz. Toca aquí y vuelve a elegir BlackClaw en Ajustes."
+                    } else {
+                        "Cuando lo invoques (mantén el botón de inicio o desliza desde la esquina), " +
+                            "BlackClaw aparece incluso sobre la pantalla bloqueada y escucha tu orden."
+                    },
                     color = textSecondary, fontSize = 11.sp, lineHeight = 15.sp)
             }
             Row(

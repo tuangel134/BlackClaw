@@ -25,6 +25,7 @@ import com.blackclaw.android.agent.CloudModel
 import com.blackclaw.android.agent.CloudProvider
 import com.blackclaw.android.agent.ModelPricing
 import com.blackclaw.android.agent.llm.ActiveModelMode
+import com.blackclaw.android.agent.llm.AutomaticModelManager
 import com.blackclaw.android.agent.llm.ExternalModelDiscovery
 import com.blackclaw.android.agent.llm.LocalModelManager
 import com.blackclaw.android.agent.llm.ModelConfigRepository
@@ -452,6 +453,7 @@ class LlmConfigActivity : BaseActivity() {
 
         // Cloud LLM — Provider tabs + model cards
         setupCloudLlm(tc)
+        setupAutomaticModels()
     }
 
     private fun importLocalModel(source: File) {
@@ -810,6 +812,104 @@ class LlmConfigActivity : BaseActivity() {
         }
 
         // Active model card is already set in onCreate based on actual provider
+    }
+
+    private fun setupAutomaticModels() {
+        val statusView = findViewById<TextView>(R.id.tvAutoModeStatus)
+        val activateButton = findViewById<TextView>(R.id.btnActivateAuto)
+        val benchmarkButton = findViewById<TextView>(R.id.btnBenchmarkModels)
+        val resultsView = findViewById<TextView>(R.id.tvBenchmarkResults)
+        val colors = ThemeManager.getColors()
+        statusView.setTextColor(colors.aiText)
+        resultsView.setTextColor(Color.parseColor("#8b949e"))
+
+        fun renderStatus() {
+            val isAuto = ModelConfigRepository.isAutomaticActive()
+            activateButton.text = if (isAuto) "✓ AUTO activo" else "Activar modo AUTO"
+            activateButton.setTextColor(
+                if (isAuto) getColor(R.color.colorSuccessPrimary)
+                else getColor(R.color.colorBrandPrimary)
+            )
+            statusView.text = if (isAuto) {
+                AutomaticModelManager.fastestSummary(this)
+            } else {
+                "AUTO usa el modelo más rápido medido y cambia automáticamente si falla."
+            }
+
+            val results = AutomaticModelManager.readResults()
+                .sortedWith(compareBy<AutomaticModelManager.BenchmarkResult> { !it.success }.thenBy { it.latencyMs })
+            resultsView.text = if (results.isEmpty()) "Aún no hay mediciones." else buildString {
+                append("Resultados guardados:\n")
+                results.take(12).forEach { result ->
+                    append(if (result.success) "✓ " else "✗ ")
+                    append(result.displayName)
+                    append(" · ")
+                    append(result.latencyMs)
+                    append(" ms")
+                    if (!result.success && !result.error.isNullOrBlank()) {
+                        append(" · ").append(result.error.take(60))
+                    }
+                    append('\n')
+                }
+            }.trimEnd()
+        }
+
+        renderStatus()
+        activateButton.setOnClickListener {
+            ModelConfigRepository.activateAutomatic()
+            ClawApplication.appViewModelInstance.updateAgentConfig()
+            ClawApplication.appViewModelInstance.initAgent()
+            renderStatus()
+            Toast.makeText(this, "Modo AUTO activado", Toast.LENGTH_SHORT).show()
+        }
+
+        benchmarkButton.setOnClickListener {
+            if (!benchmarkButton.isEnabled) return@setOnClickListener
+            val candidates = AutomaticModelManager.discover(this)
+            if (candidates.isEmpty()) {
+                Toast.makeText(this, "Configura al menos un modelo cloud o local", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            benchmarkButton.isEnabled = false
+            activateButton.isEnabled = false
+            benchmarkButton.text = "Midiendo 0/${candidates.size}…"
+            resultsView.text = "Probando cada modelo con una solicitud mínima…"
+            val template = ModelConfigRepository.snapshot().toAgentConfig(
+                temperature = 0.0,
+                maxIterations = 1,
+                streaming = false,
+            )
+            executor.submit {
+                try {
+                    val report = AutomaticModelManager.benchmark(this, template) { completed, total, result ->
+                        runOnUiThread {
+                            benchmarkButton.text = "Midiendo $completed/$total…"
+                            resultsView.text = "${if (result.success) "✓" else "✗"} ${result.displayName} · ${result.latencyMs} ms"
+                        }
+                    }
+                    runOnUiThread {
+                        benchmarkButton.isEnabled = true
+                        activateButton.isEnabled = true
+                        benchmarkButton.text = "↻ Volver a probar modelos"
+                        renderStatus()
+                        val fastest = report.fastest
+                        Toast.makeText(
+                            this,
+                            if (fastest == null) "Ningún modelo respondió" else "Más rápido: ${fastest.displayName} (${fastest.latencyMs} ms)",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread {
+                        benchmarkButton.isEnabled = true
+                        activateButton.isEnabled = true
+                        benchmarkButton.text = "↻ Volver a probar modelos"
+                        resultsView.text = "No se pudo completar la medición: ${error.message ?: "error desconocido"}"
+                        Toast.makeText(this, "No se pudo medir los modelos", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
     }
 
     /**
