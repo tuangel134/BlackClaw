@@ -14,12 +14,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blackclaw.android.ui.chat.BlackClawColors
+import com.blackclaw.android.ui.chat.ThemeManager
+import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.design.ClawGlassBackdrop
+import com.blackclaw.android.ui.design.ClawGlassCard
+import com.blackclaw.android.ui.design.ClawReveal
 import com.blackclaw.android.utils.ActivityTracker
 
 /**
@@ -32,27 +37,30 @@ class DashboardActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
 
+        val theme = ThemeManager.getColors()
+        val colors = with(ThemeManager) { theme.toComposeColors() }
+        window.statusBarColor = theme.toolbarBg
         setContent {
-            DashboardScreen(onBack = { finish() })
+            ClawGlassBackdrop(colors = colors) {
+                DashboardScreen(colors = colors, onBack = { finish() })
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(onBack: () -> Unit) {
+fun DashboardScreen(colors: BlackClawColors, onBack: () -> Unit) {
     val today = ActivityTracker.today()
     val week = ActivityTracker.thisWeek()
     val topTools = ActivityTracker.todayTopTools()
 
-    val bgColor = Color(0xFF0A0A0F)
-    val surfaceColor = Color(0xFF141420)
-    val accentColor = Color(0xFF00D4FF)
-    val textPrimary = Color(0xFFC8D0E8)
-    val textSecondary = Color(0xFF7A80A0)
+    val accentColor = colors.accent
+    val textPrimary = colors.textPrimary
+    val textSecondary = colors.textSecondary
 
     Scaffold(
-        containerColor = bgColor,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("📊 Actividad", color = textPrimary) },
@@ -61,7 +69,7 @@ fun DashboardScreen(onBack: () -> Unit) {
                         Icon(Icons.Filled.ArrowBack, "Back", tint = textPrimary)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = surfaceColor)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { padding ->
@@ -73,12 +81,15 @@ fun DashboardScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header summary
-            Text(
-                text = ActivityTracker.todaySummary(),
-                color = textSecondary,
-                fontSize = 14.sp,
-            )
+            ClawReveal {
+                ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), radius = 26.dp) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Tu actividad", color = textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(ActivityTracker.todaySummary(), color = textSecondary, fontSize = 14.sp)
+                        Text("Todo lo que BlackClaw ejecuta queda visible aquí.", color = accentColor, fontSize = 11.sp)
+                    }
+                }
+            }
 
             // Today's stats grid
             Text("Hoy", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -92,10 +103,8 @@ fun DashboardScreen(onBack: () -> Unit) {
                     label = "Tareas",
                     value = "${today.tasksRun}",
                     detail = "${today.tasksSuccess}✓ ${today.tasksFailed}✗",
-                    surfaceColor = surfaceColor,
+                    colors = colors,
                     accentColor = accentColor,
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
                 )
                 StatCard(
                     modifier = Modifier.weight(1f),
@@ -103,10 +112,8 @@ fun DashboardScreen(onBack: () -> Unit) {
                     label = "Proactivo",
                     value = "${today.proactiveActions}",
                     detail = "${today.proactiveIgnored} ignoradas",
-                    surfaceColor = surfaceColor,
+                    colors = colors,
                     accentColor = Color(0xFF4CAF50),
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
                 )
             }
             Row(
@@ -119,10 +126,8 @@ fun DashboardScreen(onBack: () -> Unit) {
                     label = "Alarmas",
                     value = "${today.alarmsSet}",
                     detail = "configuradas hoy",
-                    surfaceColor = surfaceColor,
+                    colors = colors,
                     accentColor = Color(0xFFFF9800),
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
                 )
                 StatCard(
                     modifier = Modifier.weight(1f),
@@ -130,10 +135,8 @@ fun DashboardScreen(onBack: () -> Unit) {
                     label = "Tokens",
                     value = if (today.tokensUsed > 1000) "${today.tokensUsed / 1000}k" else "${today.tokensUsed}",
                     detail = if (today.estimatedCost > 0) "${"$%.3f".format(today.estimatedCost)}" else "local",
-                    surfaceColor = surfaceColor,
+                    colors = colors,
                     accentColor = Color(0xFF9C27B0),
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
                 )
             }
 
@@ -141,20 +144,16 @@ fun DashboardScreen(onBack: () -> Unit) {
             if (topTools.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Herramientas más usadas", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(surfaceColor, RoundedCornerShape(12.dp))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    topTools.forEach { (tool, count) ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(tool, color = textPrimary, fontSize = 14.sp)
-                            Text("×$count", color = accentColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), radius = 20.dp, elevated = false) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        topTools.forEach { (tool, count) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(tool, color = textPrimary, fontSize = 14.sp)
+                                Text("×$count", color = accentColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -167,16 +166,12 @@ fun DashboardScreen(onBack: () -> Unit) {
                 val weekTasks = week.sumOf { it.tasksRun }
                 val weekProactive = week.sumOf { it.proactiveActions }
                 val weekTokens = week.sumOf { it.tokensUsed }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(surfaceColor, RoundedCornerShape(12.dp))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("$weekTasks tareas ejecutadas", color = textPrimary, fontSize = 14.sp)
-                    Text("$weekProactive acciones proactivas", color = textPrimary, fontSize = 14.sp)
-                    Text("${weekTokens / 1000}k tokens consumidos", color = textSecondary, fontSize = 13.sp)
+                ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), radius = 20.dp, elevated = false) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("$weekTasks tareas ejecutadas", color = textPrimary, fontSize = 14.sp)
+                        Text("$weekProactive acciones proactivas", color = textPrimary, fontSize = 14.sp)
+                        Text("${weekTokens / 1000}k tokens consumidos", color = textSecondary, fontSize = 13.sp)
+                    }
                 }
             }
         }
@@ -190,21 +185,16 @@ fun StatCard(
     label: String,
     value: String,
     detail: String,
-    surfaceColor: Color,
+    colors: BlackClawColors,
     accentColor: Color,
-    textPrimary: Color,
-    textSecondary: Color,
 ) {
-    Column(
-        modifier = modifier
-            .background(surfaceColor, RoundedCornerShape(12.dp))
-            .padding(14.dp),
-        horizontalAlignment = Alignment.Start,
-    ) {
-        Icon(icon, label, tint = accentColor, modifier = Modifier.size(20.dp))
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(value, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-        Text(label, color = textSecondary, fontSize = 12.sp)
-        Text(detail, color = textSecondary, fontSize = 11.sp)
+    ClawGlassCard(colors = colors, modifier = modifier, accent = accentColor, radius = 20.dp, elevated = false) {
+        Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.Start) {
+            Icon(icon, label, tint = accentColor, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(value, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+            Text(label, color = colors.textSecondary, fontSize = 12.sp)
+            Text(detail, color = colors.textSecondary, fontSize = 11.sp)
+        }
     }
 }

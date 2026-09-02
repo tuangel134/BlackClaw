@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.blackclaw.android.base.BaseActivity
+import com.blackclaw.android.proactive.ProactiveAppCatalog
 import com.blackclaw.android.proactive.ProactiveAssistantManager
 import com.blackclaw.android.proactive.ProactiveConfig
 import com.blackclaw.android.ui.chat.BlackClawColors
@@ -57,14 +58,25 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var allowCalendar by remember { mutableStateOf(ProactiveConfig.allowCalendar) }
     var allowFinance by remember { mutableStateOf(ProactiveConfig.allowFinance) }
     var watchAll by remember { mutableStateOf(ProactiveConfig.watchAllApps) }
+    var watchedApps by remember { mutableStateOf(ProactiveConfig.watchedAppSet()) }
+    var installedApps by remember { mutableStateOf<List<ProactiveAppCatalog.Entry>>(emptyList()) }
+    var appSearch by remember { mutableStateOf("") }
+    var showSystemApps by remember { mutableStateOf(false) }
     var morningOn by remember { mutableStateOf(ProactiveConfig.morningBriefingEnabled) }
     var nightOn by remember { mutableStateOf(ProactiveConfig.nightBriefingEnabled) }
     var weeklyFinOn by remember { mutableStateOf(ProactiveConfig.weeklyFinanceEnabled) }
     var askUnsure by remember { mutableStateOf(ProactiveConfig.askWhenUnsure) }
     var deepRead by remember { mutableStateOf(ProactiveConfig.deepRead) }
     var speakBriefings by remember { mutableStateOf(ProactiveConfig.speakBriefings) }
+    var autoMorningAlarms by remember { mutableStateOf(ProactiveConfig.autoMorningAlarms) }
     var log by remember { mutableStateOf(ProactiveAssistantManager.recentLog()) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(Unit) {
+        installedApps = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ProactiveAppCatalog.load(ctx.applicationContext)
+        }
+    }
 
     Scaffold(
         containerColor = colors.background,
@@ -168,7 +180,7 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
             Surface(color = colors.surface, shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()) {
                 Column {
-                    ToggleRow("⏰ Poner alarmas", "Crea una alarma si detecta una hora a la que debes estar en un sitio",
+                    ToggleRow("⏰ Poner alarmas", "Solo para compromisos confirmados y con alta certeza; una invitación no basta",
                         allowAlarms, colors) { allowAlarms = it; ProactiveConfig.allowAlarms = it }
                     DividerLine(colors)
                     ToggleRow("🔔 Crear recordatorios", "Programa un aviso para una fecha/hora futura",
@@ -193,11 +205,89 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Surface(color = colors.surface, shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()) {
-                ToggleRow(
-                    "Vigilar todas las apps",
-                    if (watchAll) "Revisa notificaciones de cualquier app"
-                    else "Solo apps de mensajería (WhatsApp, Telegram, SMS)",
-                    watchAll, colors) { watchAll = it; ProactiveConfig.watchAllApps = it }
+                Column {
+                    ToggleRow(
+                        "Vigilar todas las apps",
+                        if (watchAll) "El proactivo puede analizar notificaciones de cualquier app visible"
+                        else "Modo personalizado: tú decides app por app",
+                        watchAll, colors
+                    ) {
+                        watchAll = it
+                        ProactiveConfig.watchAllApps = it
+                    }
+                    if (!watchAll) {
+                        DividerLine(colors)
+                        OutlinedTextField(
+                            value = appSearch,
+                            onValueChange = { appSearch = it },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            singleLine = true,
+                            placeholder = { Text("Buscar aplicación…") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = colors.accent,
+                                unfocusedBorderColor = colors.aiBubbleBorder,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary,
+                                cursorColor = colors.accent,
+                            ),
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(onClick = {
+                                val visible = installedApps.filter { showSystemApps || !it.isSystem }
+                                    .map { it.packageName }.toSet()
+                                val next = watchedApps + visible
+                                watchedApps = next
+                                ProactiveConfig.replaceWatchedApps(next)
+                            }) { Text("Todas", color = colors.accent) }
+                            TextButton(onClick = {
+                                installedApps.forEach { com.blackclaw.android.proactive.NotificationBatcher.discard(it.packageName) }
+                                val next = emptySet<String>()
+                                watchedApps = next
+                                ProactiveConfig.replaceWatchedApps(next)
+                            }) { Text("Ninguna", color = colors.accent) }
+                            Spacer(Modifier.weight(1f))
+                            Text("Sistema", fontSize = 11.sp, color = colors.textSecondary)
+                            Switch(
+                                checked = showSystemApps,
+                                onCheckedChange = { showSystemApps = it },
+                                colors = SwitchDefaults.colors(checkedTrackColor = colors.accent),
+                            )
+                        }
+                        val query = appSearch.trim().lowercase()
+                        val filteredApps = installedApps.filter { entry ->
+                            (showSystemApps || !entry.isSystem) &&
+                                (query.isBlank() || entry.label.lowercase().contains(query) ||
+                                    entry.packageName.lowercase().contains(query))
+                        }
+                        if (filteredApps.isEmpty()) {
+                            Text(
+                                if (installedApps.isEmpty()) "Cargando aplicaciones…" else "No encontré aplicaciones",
+                                fontSize = 12.sp,
+                                color = colors.textSecondary,
+                                modifier = Modifier.padding(14.dp),
+                            )
+                        } else {
+                            filteredApps.forEachIndexed { index, entry ->
+                                if (index > 0) DividerLine(colors)
+                                AppWatchRow(
+                                    entry = entry,
+                                    checked = entry.packageName in watchedApps,
+                                    colors = colors,
+                                ) { checked ->
+                                    watchedApps = if (checked) watchedApps + entry.packageName
+                                    else watchedApps - entry.packageName
+                                    ProactiveConfig.replaceWatchedApps(watchedApps)
+                                    if (!checked) {
+                                        com.blackclaw.android.proactive.NotificationBatcher.discard(entry.packageName)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(18.dp))
@@ -235,6 +325,12 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     DividerLine(colors)
                     ToggleRow("🔊 Leer en voz alta", "Lee el resumen con voz (TTS) al dispararse",
                         speakBriefings, colors) { speakBriefings = it; ProactiveConfig.speakBriefings = it }
+                    DividerLine(colors)
+                    ToggleRow(
+                        "⏰ Preparar alarmas nocturnas",
+                        "Opcional: solo para eventos tuyos o compromisos confirmados. Desactivado por defecto",
+                        autoMorningAlarms, colors
+                    ) { autoMorningAlarms = it; ProactiveConfig.autoMorningAlarms = it }
                     DividerLine(colors)
                     BriefingRow(
                         emoji = "📊", title = "Resumen financiero semanal",
@@ -318,6 +414,52 @@ private fun ProactiveScreen(colors: BlackClawColors, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(40.dp))
         }
+    }
+}
+
+@Composable
+private fun AppWatchRow(
+    entry: ProactiveAppCatalog.Entry,
+    checked: Boolean,
+    colors: BlackClawColors,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable { onChange(!checked) }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(34.dp).clip(CircleShape)
+                .background(colors.accent.copy(alpha = if (checked) 0.18f else 0.07f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                entry.label.firstOrNull()?.uppercaseChar()?.toString() ?: "•",
+                color = if (checked) colors.accent else colors.textSecondary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(entry.label, fontSize = 13.sp, color = colors.textPrimary, fontWeight = FontWeight.Medium)
+            Text(
+                entry.packageName + if (entry.isSystem) " · sistema" else "",
+                fontSize = 10.sp,
+                color = colors.textTertiary,
+                maxLines = 1,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = colors.background,
+                checkedTrackColor = colors.accent,
+            ),
+        )
     }
 }
 

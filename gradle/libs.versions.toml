@@ -17,7 +17,6 @@ constraintlayout = "2.1.4"
 utilcode = "1.31.1"
 lifecycle = "2.8.7"
 mmkv = "2.3.0"
-glide = "5.0.5"
 easyfloat = "2.0.4"
 zxing = "3.5.3"
 nanohttpd = "2.3.1"
@@ -55,7 +54,6 @@ utilcode = { group = "com.blankj", name = "utilcodex", version.ref = "utilcode" 
 lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 mmkv = { module = "com.tencent:mmkv-static", version.ref = "mmkv" }
-glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
 easyfloat = { module = "com.github.princekin-f:EasyFloat", version.ref = "easyfloat" }
 zxing = { module = "com.google.zxing:core", version.ref = "zxing" }
 nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }

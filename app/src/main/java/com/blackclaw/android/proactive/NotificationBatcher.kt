@@ -49,6 +49,12 @@ object NotificationBatcher {
      * The batcher will either start a new batch window or append to an existing one.
      */
     fun submit(pkg: String, title: String, text: String) {
+        // Filter before allocating a batch/timer. The app-by-app preference only affects
+        // Proactive; deterministic automations and AutoReply are separate pipelines.
+        if (!ProactiveConfig.enabled || !ProactiveConfig.isAppWatched(pkg)) {
+            discard(pkg)
+            return
+        }
         val now = System.currentTimeMillis()
         val notification = PendingNotification(pkg, title, text, now)
 
@@ -70,7 +76,16 @@ object NotificationBatcher {
      * Flush all pending notifications for a package: merge and forward to
      * ProactiveAssistantManager.
      */
+    fun discard(pkg: String) {
+        synchronized(pending) { pending.remove(pkg) }
+        timers.remove(pkg)?.cancel(false)
+    }
+
     private fun flush(pkg: String) {
+        if (!ProactiveConfig.enabled || !ProactiveConfig.isAppWatched(pkg)) {
+            discard(pkg)
+            return
+        }
         val batch: List<PendingNotification>
         synchronized(pending) {
             val list = pending.remove(pkg) ?: return

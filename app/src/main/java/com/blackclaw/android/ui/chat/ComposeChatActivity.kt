@@ -129,15 +129,9 @@ class ComposeChatActivity : ComponentActivity() {
         ActiveTaskShellController(appViewModel = appViewModel)
     }
 
-    // Permission polling
-    private val permHandler = Handler(Looper.getMainLooper())
-    private val permPoller = object : Runnable {
-        override fun run() {
-            _needsPermission.value =
-                AppCapabilityCoordinator.accessibilityState(this@ComposeChatActivity) != ServiceBindingState.READY
-            permHandler.postDelayed(this, 1000)
-        }
-    }
+    // Accessibility state is refreshed onResume. Changing the system accessibility
+    // setting necessarily backgrounds this Activity, so polling it every second while
+    // the chat is visible only caused needless wakeups/recompositions.
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -289,8 +283,6 @@ class ComposeChatActivity : ComponentActivity() {
         syncModelModeFromRuntime()
         _isTaskRunning.value = appViewModel.isTaskRunning()
         refreshSidebarHistory()
-        permHandler.removeCallbacks(permPoller)
-        permHandler.postDelayed(permPoller, 1000)
         activeTaskShellController.onResume()
         if (!deferLocalChatBootstrapForAutoTask) {
             chatSessionController.onResume(
@@ -335,7 +327,6 @@ class ComposeChatActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         saveChat()
-        permHandler.removeCallbacks(permPoller)
         activeTaskShellController.onPause()
         chatSessionController.onPause(conversationStore.currentConversationId)
         // Note: do NOT stop the voice wake service here — it intentionally keeps

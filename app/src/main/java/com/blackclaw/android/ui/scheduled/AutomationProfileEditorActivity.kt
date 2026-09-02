@@ -24,8 +24,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -59,6 +57,10 @@ import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
 import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.design.ClawGlassBackdrop
+import com.blackclaw.android.ui.design.ClawGlassCard
+import com.blackclaw.android.ui.design.ClawGlassPill
+import com.blackclaw.android.ui.design.ClawReveal
 import org.json.JSONObject
 
 /** Visual editor for deterministic profiles. JSON remains an import/export detail for the AI. */
@@ -69,13 +71,16 @@ class AutomationProfileEditorActivity : BaseActivity() {
             ?.let { AutomationProfileStore.find(it) }
         val theme = ThemeManager.getColors()
         window.statusBarColor = theme.toolbarBg
+        val colors = with(ThemeManager) { theme.toComposeColors() }
         setContent {
-            AutomationProfileEditorScreen(
-                colors = with(ThemeManager) { theme.toComposeColors() },
-                initial = existing,
-                onBack = { finish() },
-                onSaved = { finish() },
-            )
+            ClawGlassBackdrop(colors = colors) {
+                AutomationProfileEditorScreen(
+                    colors = colors,
+                    initial = existing,
+                    onBack = { finish() },
+                    onSaved = { finish() },
+                )
+            }
         }
     }
 
@@ -135,7 +140,7 @@ private fun AutomationProfileEditorScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     fun save() {
-        val profile = AutomationProfileStore.Profile(
+        val edited = AutomationProfileStore.Profile(
             id = initial?.id.orEmpty(),
             name = name.trim(),
             description = description.trim(),
@@ -151,6 +156,20 @@ private fun AutomationProfileEditorScreen(
             concurrency = concurrency,
             approvedAtMs = initial?.approvedAtMs ?: 0L,
         )
+        // Preserve execution history when the user edits an existing flow. Previously
+        // saving from the visual editor reset runCount/lastStatus/createdAt metadata.
+        val profile = initial?.copy(
+            name = edited.name,
+            description = edited.description,
+            enabled = edited.enabled,
+            triggers = edited.triggers,
+            conditions = edited.conditions,
+            actions = edited.actions,
+            cooldownMs = edited.cooldownMs,
+            maxRunsPerDay = edited.maxRunsPerDay,
+            maxRuntimeMs = edited.maxRuntimeMs,
+            concurrency = edited.concurrency,
+        ) ?: edited
         val errors = AutomationProfileValidator.validate(profile)
         if (errors.isNotEmpty()) {
             error = errors.joinToString(" ")
@@ -166,17 +185,17 @@ private fun AutomationProfileEditorScreen(
     }
 
     Scaffold(
-        containerColor = colors.background,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
-                title = { Text(if (initial == null) "Nuevo perfil" else "Editar perfil", color = colors.textPrimary) },
+                title = { Text(if (initial == null) "Nuevo flujo" else "Editar flujo", color = colors.textPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Atrás", tint = colors.textPrimary) }
                 },
                 actions = {
                     IconButton(onClick = ::save) { Icon(Icons.Default.Save, "Guardar", tint = colors.accent) }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surface),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             )
         },
     ) { padding ->
@@ -186,6 +205,18 @@ private fun AutomationProfileEditorScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
+                ClawReveal {
+                    FlowBuilderOverview(
+                        colors = colors,
+                        triggerCount = triggers.size,
+                        conditionCount = conditions.size,
+                        actionCount = actions.size,
+                        enabled = enabled,
+                    )
+                }
+            }
+            item {
+                ClawReveal(index = 1) {
                 SectionCard(colors, "Identidad") {
                     OutlinedTextField(name, { name = it }, label = { Text("Nombre") }, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
@@ -195,9 +226,10 @@ private fun AutomationProfileEditorScreen(
                         Switch(checked = enabled, onCheckedChange = { enabled = it })
                     }
                 }
+                }
             }
             item {
-                SectionTitle(colors, "Disparadores", "El perfil se activa si coincide cualquiera")
+                SectionTitle(colors, "CUANDO", "El flujo comienza si coincide cualquiera de estos disparadores")
                 if (triggers.isEmpty()) EmptyEditorHint(colors, "Añade al menos un disparador")
             }
             itemsIndexed(triggers, key = { index, item -> "trigger-$index-${item.type}" }) { index, draft ->
@@ -210,7 +242,7 @@ private fun AutomationProfileEditorScreen(
             item { AddBlockButton(colors, "Añadir disparador") { showTriggerPicker = true } }
 
             item {
-                SectionTitle(colors, "Condiciones", "Todas deben cumplirse")
+                SectionTitle(colors, "SI", "Opcional: todas estas condiciones deben cumplirse")
                 if (conditions.isEmpty()) EmptyEditorHint(colors, "Opcional: limita por horario, batería, app o variables")
             }
             itemsIndexed(conditions, key = { index, item -> "condition-$index-${item.type}" }) { index, draft ->
@@ -223,7 +255,7 @@ private fun AutomationProfileEditorScreen(
             item { AddBlockButton(colors, "Añadir condición") { showConditionPicker = true } }
 
             item {
-                SectionTitle(colors, "Acciones", "Se ejecutan en orden")
+                SectionTitle(colors, "HAZ", "BlackClaw ejecuta estas acciones en orden")
                 if (actions.isEmpty()) EmptyEditorHint(colors, "Añade al menos una acción")
             }
             itemsIndexed(actions, key = { index, item -> "action-$index-${item.type}" }) { index, draft ->
@@ -250,7 +282,7 @@ private fun AutomationProfileEditorScreen(
                 Button(onClick = ::save, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Save, null)
                     Spacer(Modifier.width(4.dp))
-                    Text("Guardar perfil")
+                    Text(if (enabled) "Guardar y activar" else "Guardar borrador")
                 }
             }
         }
@@ -271,8 +303,51 @@ private fun AutomationProfileEditorScreen(
 }
 
 @Composable
+private fun FlowBuilderOverview(
+    colors: BlackClawColors,
+    triggerCount: Int,
+    conditionCount: Int,
+    actionCount: Int,
+    enabled: Boolean,
+) {
+    ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), radius = 26.dp) {
+        Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Constructor de flujo", color = colors.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text("Diseña la lógica como una frase: CUANDO ocurra algo, SI se cumplen los filtros, HAZ una o varias acciones.",
+                color = colors.textSecondary, fontSize = 12.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                listOf(
+                    Triple("CUANDO", triggerCount, triggerCount > 0),
+                    Triple("SI", conditionCount, true),
+                    Triple("HAZ", actionCount, actionCount > 0),
+                ).forEach { (label, count, ready) ->
+                    ClawGlassPill(
+                        colors = colors,
+                        selected = ready,
+                        modifier = Modifier.weight(1f),
+                        onClick = {},
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(label, color = if (ready) colors.accent else colors.textSecondary,
+                                fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("$count", color = colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Text(
+                if (enabled) "Se guardará ACTIVO" else "Se guardará como BORRADOR y no se ejecutará",
+                color = if (enabled) colors.accent else colors.textSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SectionCard(colors: BlackClawColors, title: String, content: @Composable () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = colors.surface)) {
+    ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), radius = 20.dp, elevated = false) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Text(title, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- ADB-only entrypoints. These are deliberately absent from release builds. -->
+        <receiver
+            android:name=".debug.DebugTaskReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.blackclaw.android.DEBUG_TASK" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".debug.TaskTriggerReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.blackclaw.android.TASK" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

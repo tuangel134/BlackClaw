@@ -18,21 +18,6 @@
 
     <string name="app_slogan">タスクをこなすAI Agents</string>
 
-    <!-- ガイド -->
-    <string name="guide_page_title">権限の設定</string>
-    <string name="guide_page_subtitle">アプリを正常に動作させるため、以下の権限を有効にしてください</string>
-    <string name="guide_skip">スキップ</string>
-    <string name="guide_start">はじめる</string>
-    <string name="guide_title_accessibility">ユーザー補助サービス</string>
-    <string name="guide_desc_accessibility">AIがデバイスを操作するための基本権限です。\n\n1. 設定 → ユーザー補助 → ダウンロード済みアプリを開く\n2. リストから「BlackClaw」を見つける\n3. スイッチをオンにする\n4. システムダイアログで確認する</string>
-    <string name="guide_title_notification">タスク通知</string>
-    <string name="guide_desc_notification">タスクや監視が動作中のときだけ進行状況を表示します。\n\nホーム画面のカードをタップして有効にしてください。Android 13以降は通知権限が先に求められます。</string>
-    <string name="guide_title_overlay">システムオーバーレイ</string>
-    <string name="guide_desc_overlay">AI実行状態を表示するフローティングパネルです。\n\n1. 設定 → アプリ → BlackClawを開く\n2.「他のアプリの上に重ねて表示」を見つける\n3. スイッチをオンにする</string>
-    <string name="guide_title_battery">バッテリーホワイトリスト</string>
-    <string name="guide_desc_battery">システムがバックグラウンドでアプリを停止するのを防ぎます。\n\nホーム画面のカードをタップし、システムダイアログで「許可」を確認してください。(一部の端末では「制限なし」に変更が必要です)</string>
-    <string name="guide_title_storage">ファイルアクセス</string>
-    <string name="guide_desc_storage">AIがデバイス上のファイルを読み書きできるようにします。\n\nAndroid 11以降: 設定で「すべてのファイルへのアクセス」を有効にする\nAndroid 10以前: ポップアップで権限を許可する</string>
 
     <!-- ホーム -->
     <string name="home_need_notification_permission">通知権限が必要です</string>

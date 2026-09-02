@@ -7,7 +7,6 @@ import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.MessageCallback
-import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
 import dev.langchain4j.agent.tool.ToolExecutionRequest
@@ -565,48 +564,5 @@ Rules:
 
         // Pattern 4: Legacy functioncall/function_call prefix format
         private val FUNCTION_CALL_PATTERN = Regex("""(?:functioncall|function_call|tool_call)\s*:\s*(\{.*?\})""", RegexOption.DOT_MATCHES_ALL)
-    }
-}
-
-/**
- * Wraps a LangChain4j ToolSpecification as a LiteRT-LM OpenApiTool.
- * Only declares the schema — execution is handled by the agent loop.
- */
-private class DynamicOpenApiTool(private val spec: ToolSpecification) : OpenApiTool {
-
-    override fun getToolDescriptionJsonString(): String {
-        val json = buildMap {
-            put("name", spec.name())
-            put("description", spec.description() ?: "")
-            spec.parameters()?.let { params ->
-                put("parameters", buildMap {
-                    put("type", "object")
-                    val properties = mutableMapOf<String, Any>()
-                    val required = mutableListOf<String>()
-
-                    // Extract properties from JsonObjectSchema
-                    params.properties()?.forEach { (name, schema) ->
-                        val prop = mutableMapOf<String, Any>()
-                        prop["description"] = schema.description() ?: ""
-                        prop["type"] = when (schema.javaClass.simpleName) {
-                            "JsonIntegerSchema" -> "integer"
-                            "JsonNumberSchema" -> "number"
-                            "JsonBooleanSchema" -> "boolean"
-                            else -> "string"
-                        }
-                        properties[name] = prop
-                    }
-                    put("properties", properties)
-
-                    params.required()?.let { put("required", it) }
-                })
-            }
-        }
-        return Gson().toJson(json)
-    }
-
-    override fun execute(paramsJsonString: String): String {
-        // Not called with automaticToolCalling = false
-        return """{"result": "ok"}"""
     }
 }

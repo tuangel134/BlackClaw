@@ -3,6 +3,7 @@ package com.blackclaw.android.proactive
 import com.blackclaw.android.agent.llm.LlmSessionManager
 import com.blackclaw.android.assistant.AssistantItemType
 import com.blackclaw.android.assistant.AssistantReceiver
+import com.blackclaw.android.assistant.AssistantScheduler
 import com.blackclaw.android.assistant.AssistantStore
 import com.blackclaw.android.assistant.AssistantTime
 import com.blackclaw.android.assistant.Speaker
@@ -49,8 +50,11 @@ object ProactiveBriefing {
             if (ProactiveConfig.speakBriefings) {
                 Speaker.speak("$title. $text")
             }
-            // Night briefing: auto-set alarms for early morning events without alarms
-            if (kind == Kind.NIGHT) runCatching { autoSetMorningAlarms() }
+            // Surprise alarms are opt-in. Even when enabled, autoSetMorningAlarms only
+            // considers user-created items or AI items linked to a confirmed commitment.
+            if (kind == Kind.NIGHT && ProactiveConfig.autoMorningAlarms) {
+                runCatching { autoSetMorningAlarms() }
+            }
             // After the morning briefing, auto-create detected habits
             if (kind == Kind.MORNING) runCatching { surfaceHabitSuggestion() }
             // Periodic profile learning from interaction patterns
@@ -75,10 +79,13 @@ object ProactiveBriefing {
             set(Calendar.HOUR_OF_DAY, 10); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
         }.timeInMillis
 
-        // Find events/reminders tomorrow morning
+        // Find trustworthy events/reminders tomorrow morning. A generic AI-created item
+        // is not enough evidence: it must be linked to a commitment that is still confirmed.
         val earlyItems = AssistantStore.all().filter {
             it.triggerAtMs in tomorrowStart until tomorrowMorning && !it.done &&
-            it.type in setOf(AssistantItemType.EVENT, AssistantItemType.REMINDER)
+                it.type in setOf(AssistantItemType.EVENT, AssistantItemType.REMINDER) &&
+                (it.source == "user" ||
+                    (it.originRef.isNotBlank() && ProactiveCommitmentStore.isConfirmed(it.originRef)))
         }
         if (earlyItems.isEmpty()) return
 
@@ -94,13 +101,19 @@ object ProactiveBriefing {
             val hasAlarm = existingAlarms.any { kotlin.math.abs(it - alarmTime) < 15 * 60_000L }
             if (hasAlarm) continue
 
-            val alarmCal = Calendar.getInstance().apply { timeInMillis = alarmTime }
-            val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(alarmTime))
-            ToolRegistry.getInstance().executeTool("assistant_alarm", mapOf(
-                "when" to timeStr,
-                "label" to "Despierta: ${item.title}",
-            ))
-            XLog.i(TAG, "Auto-set morning alarm at $timeStr for '${item.title}'")
+            if (alarmTime <= System.currentTimeMillis()) continue
+            val alarm = AssistantStore.create(
+                type = AssistantItemType.ALARM,
+                title = "Despierta: ${item.title}",
+                body = "Preparado por el resumen nocturno para ${AssistantTime.format(item.triggerAtMs)}",
+                triggerAtMs = alarmTime,
+                ring = true,
+                category = "proactive_briefing_alarm",
+                source = "ai",
+                originRef = item.originRef,
+            )
+            AssistantScheduler.arm(ClawApplication.instance, alarm)
+            XLog.i(TAG, "Auto-set confirmed morning alarm at ${AssistantTime.format(alarmTime)} for '${item.title}'")
         }
     }
 
@@ -361,11 +374,10 @@ object ProactiveBriefing {
         val prompt = buildString {
             appendLine(if (kind == Kind.MORNING)
                 "Eres el asistente personal del usuario. Dale un briefing matutino breve, cálido y útil. " +
-                "Si ves algo que necesita acción (reunión sin alarma, deadline sin recordatorio), " +
-                "DILE que ya lo hiciste (porque YA actuaste), no preguntes si quiere que lo hagas."
+                    "Resume únicamente lo que aparece en los datos; no afirmes que creaste una alarma o acción si no está registrada ahí."
             else
                 "Eres el asistente personal del usuario. Dale un resumen nocturno breve para preparar mañana. " +
-                "Si mañana hay algo temprano y no hay alarma, dile que ya la pusiste.")
+                    "No conviertas planes dudosos en compromisos ni afirmes que pusiste alarmas salvo que los datos lo demuestren.")
             appendLine()
             appendLine("Datos disponibles:")
             appendLine(state)
@@ -374,7 +386,7 @@ object ProactiveBriefing {
             appendLine("Instrucciones:")
             appendLine("- Máximo 4-5 líneas, en español, tono natural y directo (no preguntas retóricas).")
             appendLine("- Menciona lo importante del día/mañana.")
-            appendLine("- NO preguntes '¿quieres que ponga alarma?' — si hay algo accionable, YA actuaste.")
+            appendLine("- No inventes acciones. Si algo parece útil pero todavía no está confirmado, preséntalo como pendiente/sugerencia, no como hecho.")
             appendLine("- Si no hay nada relevante, dilo en una línea amable.")
             appendLine("- No inventes datos que no estén arriba.")
         }

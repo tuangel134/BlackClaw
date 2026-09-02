@@ -18,21 +18,6 @@
 
     <string name="app_slogan">El agente de IA que controla tu teléfono</string>
 
-    <!-- Guía -->
-    <string name="guide_page_title">Configuración de permisos</string>
-    <string name="guide_page_subtitle">Activa los siguientes permisos para que la app funcione correctamente</string>
-    <string name="guide_skip">Saltar</string>
-    <string name="guide_start">Empezar</string>
-    <string name="guide_title_accessibility">Servicio de accesibilidad</string>
-    <string name="guide_desc_accessibility">Permite a BlackClaw leer la pantalla y pulsar botones por ti. Pulsa para activar.</string>
-    <string name="guide_title_notification">Notificaciones de tareas</string>
-    <string name="guide_desc_notification">Permite a BlackClaw mostrar el progreso mientras hay una tarea o monitor activo. Pulsa para activar.</string>
-    <string name="guide_title_overlay">Ventana flotante</string>
-    <string name="guide_desc_overlay">Muestra un panel flotante con el estado mientras se ejecutan tareas. Pulsa para activar.</string>
-    <string name="guide_title_battery">Lista blanca de batería</string>
-    <string name="guide_desc_battery">Evita que el sistema cierre BlackClaw en segundo plano. Pulsa para permitir.</string>
-    <string name="guide_title_storage">Acceso a archivos</string>
-    <string name="guide_desc_storage">Permite a BlackClaw leer y escribir archivos en tu dispositivo. Pulsa para activar.</string>
 
     <!-- Inicio -->
     <string name="home_need_notification_permission">Se necesita permiso para notificaciones</string>

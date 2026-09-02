@@ -286,7 +286,7 @@ class QuickAssistActivity : ComponentActivity() {
         progress.value = null
         recovery.value = null
         // End-of-conversation phrases close the panel politely.
-        if (isFarewell(command)) {
+        if (QuickAssistTextPolicy.isFarewell(command)) {
             turns.add(Turn(true, command))
             phase.value = Phase.SPEAKING
             status.value = "Hasta luego, jefe."
@@ -294,7 +294,7 @@ class QuickAssistActivity : ComponentActivity() {
             window.decorView.postDelayed({ if (!isFinishing) finish() }, 1400)
             return
         }
-        if (isScreenQuery(command)) {
+        if (QuickAssistTextPolicy.isScreenQuery(command)) {
             handleScreenQuery(command)
             return
         }
@@ -317,7 +317,7 @@ class QuickAssistActivity : ComponentActivity() {
                     when (event) {
                         is TaskEvent.ToolAction -> {
                             toolUsed = true
-                            if (isAppLaunchTool(event.toolName)) leftApp = true
+                            if (QuickAssistTextPolicy.isAppLaunchTool(event.toolName)) leftApp = true
                             if (busy) {
                                 phase.value = Phase.THINKING
                                 status.value = QuickAssistTaskReducer.toolLabel(event.toolName) + "…"
@@ -349,8 +349,8 @@ class QuickAssistActivity : ComponentActivity() {
                         }
                         is TaskEvent.Completed -> answerStreamed(event.answer)
                         is TaskEvent.Failed -> {
-                            recovery.value = recoveryFor(event.error)
-                            answerStreamed(friendlyError(event.error))
+                            recovery.value = QuickAssistTextPolicy.recoveryFor(event.error)
+                            answerStreamed(QuickAssistTextPolicy.friendlyError(event.error))
                         }
                         is TaskEvent.Cancelled, is TaskEvent.Blocked -> {
                             busy = false
@@ -427,39 +427,6 @@ class QuickAssistActivity : ComponentActivity() {
             append("El usuario ahora dice: \"").append(command).append("\". ")
             append("Si es continuación de lo anterior, tenlo en cuenta. Actúa o responde.")
         }
-    }
-
-    /** True for phrases that should end the conversation. */
-    private fun isFarewell(cmd: String): Boolean {
-        val c = cmd.lowercase().trim()
-        val phrases = listOf(
-            "gracias", "muchas gracias", "adiós", "adios", "hasta luego", "nos vemos",
-            "eso es todo", "nada más", "nada mas", "ya está", "ya esta", "listo gracias",
-            "chao", "bye", "thanks", "thank you", "that's all", "cállate", "callate", "ya no",
-        )
-        return c.split(' ').size <= 3 && phrases.any { c == it || c.startsWith(it) }
-    }
-
-    private fun isGreeting(cmd: String): Boolean {
-        val c = cmd.lowercase().trim().replace(Regex("[¿?!,.]"), "").trim()
-        val greetings = listOf(
-            "hola", "hey", "buenas", "buenos dias", "buenos días", "buenas tardes",
-            "buenas noches", "que tal", "qué tal", "hello", "hi", "hey blackclaw",
-            "hola blackclaw", "oye", "oye blackclaw", "garra",
-        )
-        return c.split(' ').size <= 3 && greetings.any { c == it || c.startsWith(it) }
-    }
-
-    private fun isScreenQuery(cmd: String): Boolean {
-        val c = cmd.lowercase().trim()
-        return c.contains("que hay en mi pantalla") || c.contains("qué hay en mi pantalla") ||
-            c.contains("que ves en pantalla") || c.contains("qué ves en pantalla") ||
-            c.contains("que estoy viendo") || c.contains("qué estoy viendo") ||
-            c.contains("lee mi pantalla") || c.contains("leeme la pantalla") ||
-            c.contains("que dice la pantalla") || c.contains("qué dice la pantalla") ||
-            c.contains("what's on my screen") || c.contains("read my screen") ||
-            c.contains("que app estoy usando") || c.contains("dónde estoy") ||
-            c.contains("donde estoy")
     }
 
     private fun handleScreenQuery(command: String) {
@@ -555,39 +522,6 @@ class QuickAssistActivity : ComponentActivity() {
     /** Friendly Spanish status for a tool the agent is running. */
     private fun friendlyTool(tool: String): String = QuickAssistTaskReducer.toolLabel(tool) + "…"
 
-    /** Turn a raw failure into a helpful spoken reason instead of a generic error. */
-    private fun friendlyError(raw: String): String {
-        val e = raw.lowercase()
-        return when {
-            e.contains("no está instalada") || e.contains("not installed") || e.contains("no instalada") ->
-                "Esa app no está instalada, jefe. ¿La instalo desde Play Store?"
-            e.contains("permiso") || e.contains("permission") || e.contains("accesibilidad") ||
-                e.contains("accessibility") -> "Me falta un permiso para eso. Revísalo en Ajustes."
-            e.contains("not_found") || e.contains("no encontr") || e.contains("not found") ->
-                "No encontré el elemento en pantalla. ¿Intento de otra forma?"
-            e.contains("network") || e.contains("timeout") || e.contains("conexión") || e.contains("conexion") ->
-                "Hubo un problema de conexión, jefe."
-            e.contains("rate") || e.contains("límite") || e.contains("limite") || e.contains("429") ->
-                "El modelo está saturado ahora mismo. Prueba en unos segundos."
-            e.contains("401") || e.contains("403") || e.contains("unauthor") ->
-                "Ese modelo dejó de estar disponible; cambié a otro gratis, reintenta."
-            e.isBlank() -> "No pude completarlo, jefe."
-            else -> "No pude completarlo: ${raw.take(120)}"
-        }
-    }
-
-    private fun recoveryFor(raw: String): QuickAssistRecovery? {
-        val error = raw.lowercase()
-        return when {
-            error.contains("permiso") || error.contains("permission") ||
-                error.contains("accesibilidad") || error.contains("accessibility") -> QuickAssistRecovery.ACCESSIBILITY
-            error.contains("network") || error.contains("timeout") || error.contains("conexión") ||
-                error.contains("conexion") -> QuickAssistRecovery.CONNECTION
-            error.isNotBlank() -> QuickAssistRecovery.RETRY
-            else -> null
-        }
-    }
-
     private fun runRecoveryAction() {
         when (recovery.value) {
             QuickAssistRecovery.MICROPHONE -> ensureMicThenListen()
@@ -610,7 +544,7 @@ class QuickAssistActivity : ComponentActivity() {
         phase.value = Phase.SPEAKING
         status.value = full.replace(Regex("\\s+"), " ").trim().take(400)
         if (toolUsed) return   // don't speak tool-planning aloud; that's a task, not a Q&A
-        val boundary = sentenceBoundary(full, spokenLen)
+        val boundary = QuickAssistTextPolicy.sentenceBoundary(full, spokenLen)
         if (boundary > spokenLen) {
             val speech = full.substring(spokenLen, boundary)
                 .replace(URL_REGEX, " ").replace(Regex("[*_#`>]+"), " ")
@@ -620,23 +554,11 @@ class QuickAssistActivity : ComponentActivity() {
         }
     }
 
-    /** Index just past the last sentence-ending punctuation after [from] (min chunk 12 chars). */
-    private fun sentenceBoundary(text: String, from: Int): Int {
-        var last = -1
-        var i = from
-        while (i < text.length) {
-            val c = text[i]
-            if (c == '.' || c == '!' || c == '?' || c == '\n' || c == '。') last = i + 1
-            i++
-        }
-        return if (last - from >= 12) last else from
-    }
-
     /** Finalize the answer: add the rich bubble, speak any remainder, then re-listen. */
     private fun answerStreamed(raw: String) {
         busy = false
         progress.value = null
-        val display = stripReasoning(raw)
+        val display = QuickAssistTextPolicy.stripReasoning(raw)
             .replace(Regex("[*_#`>]+"), " ")
             .replace(Regex("[ \\t]+"), " ")
             .replace(Regex("\\n{3,}"), "\n\n")
@@ -712,14 +634,6 @@ class QuickAssistActivity : ComponentActivity() {
         dv.postDelayed(poll, 900)
     }
 
-    /** Tools that launch/hand off to another app → the panel should close after. */
-    private fun isAppLaunchTool(tool: String): Boolean {
-        val t = tool.lowercase()
-        return t.contains("open_app") || t.contains("open_url") || t.contains("play_music") ||
-            t.contains("make_call") || t.contains("send_message") || t.contains("send_sms") ||
-            t.contains("open_app_action")
-    }
-
     /** Tap the orb: cancel a running task, or interrupt TTS to talk. */
     private fun bargeIn() {
         when {
@@ -749,23 +663,6 @@ class QuickAssistActivity : ComponentActivity() {
             window.decorView.performHapticFeedback(
                 android.view.HapticFeedbackConstants.CONTEXT_CLICK)
         }
-    }
-
-    private fun stripReasoning(text: String): String {
-        val reasoningPatterns = listOf(
-            Regex("""(?i)^(respond[ií]|contest[eé]|ofrec[ií]|ayud[oé]|salud[oé]|pregunt[oé])\s+(al|a la|el|la)\s+usuario.*"""),
-            Regex("""(?i)^(debo|voy a|necesito|tengo que|puedo|quiero)\s+(responder|contestar|ayudar|saludar|preguntar|decir).*"""),
-            Regex("""(?i)^el usuario (quiere|pide|dice|necesita|solicita).*"""),
-            Regex("""(?i)^(i should|i will|i need to|i can|the user wants|the user is).*"""),
-            Regex("""(?i)^(let me|first,? i|now i|then i|ok,? so).*"""),
-        )
-        val lines = text.lines()
-        val cleaned = lines.filter { line ->
-            val trimmed = line.trim()
-            trimmed.isEmpty() || !reasoningPatterns.any { it.containsMatchIn(trimmed) }
-        }
-        val result = cleaned.joinToString("\n").trim()
-        return result.ifBlank { text }
     }
 
     private fun updateLiveNotif(phaseLabel: String, detail: String) {

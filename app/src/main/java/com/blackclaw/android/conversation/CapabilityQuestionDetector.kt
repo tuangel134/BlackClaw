@@ -112,7 +112,7 @@ object CapabilityQuestionDetector {
     private val BROAD_TASK_CAPABILITY = Regex(
         """\b(programa(?:r)?|crea(?:r)?|hace(?:r)?|automatiza(?:r)?|ejecuta(?:r)?|agenda(?:r)?|schedule|create|make|automate|run)\s+""" +
             """(?:una?\s+|las?\s+|mis\s+|varias\s+)?""" +
-            """(tareas?|automatizaciones?|rutinas?)\b"""
+            """(tareas?|automatizaciones?|rutinas?|tasks?|automations?|routines?)\b"""
     )
 
     private val GENERIC_CAPABILITY = Regex(
@@ -133,7 +133,7 @@ object CapabilityQuestionDetector {
 
     private val CAPABILITY_ONLY_OBJECT = Regex(
         """\b(terminal|telefono|android|imagen|imagenes|image|images|""" +
-            """tareas?|automatizaciones?|rutinas?|capacidad|capacidades|esto|eso|algo|todo)\b"""
+            """tareas?|automatizaciones?|rutinas?|tasks?|automations?|routines?|capacidad|capacidades|esto|eso|algo|todo)\b"""
     )
 
     private val CAPABILITY_CONFIRMATION_TAIL = Regex(

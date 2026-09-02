@@ -191,18 +191,22 @@ object AutomationProfileStore {
 
     /** Compact context so the assistant can edit/test existing profiles without guessing. */
     fun asPromptSnippet(): String {
-        val enabled = list().filter { it.enabled && AutomationProfileValidator.validate(it).isEmpty() }
-        if (enabled.isEmpty()) return ""
+        val profiles = list()
+            .filter { AutomationProfileValidator.validate(it).isEmpty() }
+            .takeLast(20)
+        if (profiles.isEmpty()) return ""
         return buildString {
-            append("\n\n## Automatizaciones activas\n")
-            enabled.forEach { profile ->
-                append("- [${profile.id}] ${profile.name}: ")
+            append("\n\n## Automatizaciones BlackClaw\n")
+            profiles.forEach { profile ->
+                append("- [${profile.id}] ${if (profile.enabled) "ACTIVA" else "BORRADOR"} · ${profile.name}: ")
                 append(profile.triggers.joinToString { it.type.name.lowercase() })
                 append(" → ")
                 append(profile.actions.joinToString { it.type.name.lowercase() })
+                if (profile.conditions.isNotEmpty()) append(" · ${profile.conditions.size} condición(es)")
                 append("\n")
             }
-            append("Usa automation_profile para listar, probar, actualizar o desactivar un perfil.\n")
+            append("Usa automation_profile capabilities para conocer el catálogo real; ")
+            append("update con el id para cambios parciales, draft para guardar una propuesta desactivada y run/test para probarla.\n")
         }
     }
 

@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import androidx.activity.compose.setContent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -47,6 +45,8 @@ import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
 import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.design.ClawGlassBackdrop
+import com.blackclaw.android.ui.design.ClawGlassCard
 import com.blackclaw.android.ui.scheduled.ScheduledTasksActivity
 import com.blackclaw.android.ui.skills.SkillsActivity
 import com.blackclaw.android.ui.tools.ToolBrowserActivity
@@ -58,14 +58,10 @@ import com.blackclaw.android.utils.KVUtils
  */
 class SettingsActivity : BaseActivity() {
 
-    private val tickHandler = Handler(Looper.getMainLooper())
+    // Capability/configuration state is refreshed when this screen becomes visible
+    // or when an in-screen action changes it. A permanent 1.5 s polling loop used to
+    // recompose the entire settings tree even while the phone was idle on this screen.
     private val tick = mutableStateOf(0L)
-    private val ticker = object : Runnable {
-        override fun run() {
-            tick.value = System.currentTimeMillis()
-            tickHandler.postDelayed(this, 1500L)
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,69 +72,66 @@ class SettingsActivity : BaseActivity() {
         val colors = with(ThemeManager) { tc.toComposeColors() }
 
         setContent {
-            // Re-evaluate capability state on every tick
+            // Re-evaluate capability state on every tick.
             val tickValue by tick
-            val ctx = this
+            val activity = this@SettingsActivity
             val caps by remember(tickValue) {
-                mutableStateOf(AppCapabilityCoordinator.snapshot(ctx))
+                mutableStateOf(AppCapabilityCoordinator.snapshot(activity))
             }
-            ModernSettingsScreen(
-                colors = colors,
-                caps = caps,
-                onBack = { finish() },
-                onOpenOnboarding = { startActivity(Intent(this, com.blackclaw.android.ui.onboarding.OnboardingActivity::class.java)) },
-                onOpenAccessibility = { AppCapabilityCoordinator.openSystemSettings(this, AppRequirement.ACCESSIBILITY) },
-                onRequestNotifications = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                        && !AppCapabilityCoordinator.isNotificationPermissionGranted(this)) {
-                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
-                    }
-                },
-                onOpenNotificationAccess = { AppCapabilityCoordinator.openSystemSettings(this, AppRequirement.NOTIFICATION_ACCESS) },
-                onOpenOverlay = { AppCapabilityCoordinator.openSystemSettings(this, AppRequirement.OVERLAY) },
-                onOpenBattery = { AppCapabilityCoordinator.openSystemSettings(this, AppRequirement.BATTERY_OPTIMIZATION) },
-                onOpenStorage = { AppCapabilityCoordinator.openSystemSettings(this, AppRequirement.STORAGE) },
-                onOpenLlmConfig = { startActivity(Intent(this, LlmConfigActivity::class.java)) },
-                onOpenTheme = { startActivity(Intent(this, ThemeActivity::class.java)) },
-                onOpenSkills = { startActivity(Intent(this, SkillsActivity::class.java)) },
-                onOpenScheduled = { startActivity(Intent(this, ScheduledTasksActivity::class.java)) },
-                onOpenToolBrowser = { startActivity(Intent(this, ToolBrowserActivity::class.java)) },
-                onOpenAutoReplies = { startActivity(Intent(this, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
-                onOpenVoice = { startActivity(Intent(this, VoiceSettingsActivity::class.java)) },
-                onOpenGuide = { startActivity(Intent(this, com.blackclaw.android.ui.guide.FeaturesGuideActivity::class.java)) },
-                onOpenProactive = { startActivity(Intent(this, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
-                onOpenShizuku = { startActivity(Intent(this, com.blackclaw.android.ui.shizuku.ShizukuSetupActivity::class.java)) },
-                onOpenAdbPro = { startActivity(Intent(this, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
-                onOpenTerminal = { startActivity(Intent(this, com.blackclaw.android.ui.terminal.TerminalActivity::class.java)) },
-                onOpenSecurity = { startActivity(Intent(this, com.blackclaw.android.ui.security.SecurityActivity::class.java)) },
-                onOpenMemoryPrivacy = { startActivity(Intent(this, MemoryPrivacyActivity::class.java)) },
-                onOpenEmergency = { startActivity(Intent(this, EmergencySettingsActivity::class.java)) },
-                onOpenZimLibrary = { startActivity(Intent(this, com.blackclaw.android.knowledge.ZimLibraryActivity::class.java)) },
-                onOpenTelegram = { ChannelConfigActivity.start(this, ChannelConfigActivity.ChannelType.TELEGRAM) },
-                onToggleExternalAutomation = {
-                    val newState = !KVUtils.isExternalAutomationEnabled()
-                    KVUtils.setExternalAutomationEnabled(newState)
-                    tick.value = System.currentTimeMillis()
-                },
-                onReportBug = { SettingsActions.reportBug(this) },
-                onShareDebugReport = { SettingsActions.shareDebugReport(this) },
-                onOpenGitHub = {
-                    startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/tuangel134/BlackClaw")))
-                },
-                onEditGlobalPrompt = { showGlobalPromptDialog() },
-            )
+            ClawGlassBackdrop(colors = colors) {
+                ModernSettingsScreen(
+                    colors = colors,
+                    caps = caps,
+                    onBack = { activity.finish() },
+                    onOpenOnboarding = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.onboarding.OnboardingActivity::class.java)) },
+                    onOpenAccessibility = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.ACCESSIBILITY) },
+                    onRequestNotifications = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                            && !AppCapabilityCoordinator.isNotificationPermissionGranted(activity)) {
+                            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+                        }
+                    },
+                    onOpenNotificationAccess = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.NOTIFICATION_ACCESS) },
+                    onOpenOverlay = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.OVERLAY) },
+                    onOpenBattery = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.BATTERY_OPTIMIZATION) },
+                    onOpenStorage = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.STORAGE) },
+                    onOpenLlmConfig = { activity.startActivity(Intent(activity, LlmConfigActivity::class.java)) },
+                    onOpenTheme = { activity.startActivity(Intent(activity, ThemeActivity::class.java)) },
+                    onOpenSkills = { activity.startActivity(Intent(activity, SkillsActivity::class.java)) },
+                    onOpenScheduled = { activity.startActivity(Intent(activity, ScheduledTasksActivity::class.java)) },
+                    onOpenDashboard = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.dashboard.DashboardActivity::class.java)) },
+                    onOpenToolBrowser = { activity.startActivity(Intent(activity, ToolBrowserActivity::class.java)) },
+                    onOpenAutoReplies = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.autoreply.AutoRepliesActivity::class.java)) },
+                    onOpenVoice = { activity.startActivity(Intent(activity, VoiceSettingsActivity::class.java)) },
+                    onOpenGuide = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.guide.FeaturesGuideActivity::class.java)) },
+                    onOpenProactive = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.assistant.AssistantActivity::class.java)) },
+                    onOpenShizuku = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.shizuku.ShizukuSetupActivity::class.java)) },
+                    onOpenAdbPro = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.adb.AdbProActivity::class.java)) },
+                    onOpenTerminal = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.terminal.TerminalActivity::class.java)) },
+                    onOpenSecurity = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.security.SecurityActivity::class.java)) },
+                    onOpenMemoryPrivacy = { activity.startActivity(Intent(activity, MemoryPrivacyActivity::class.java)) },
+                    onOpenEmergency = { activity.startActivity(Intent(activity, EmergencySettingsActivity::class.java)) },
+                    onOpenZimLibrary = { activity.startActivity(Intent(activity, com.blackclaw.android.knowledge.ZimLibraryActivity::class.java)) },
+                    onOpenTelegram = { ChannelConfigActivity.start(activity, ChannelConfigActivity.ChannelType.TELEGRAM) },
+                    onToggleExternalAutomation = {
+                        val newState = !KVUtils.isExternalAutomationEnabled()
+                        KVUtils.setExternalAutomationEnabled(newState)
+                        tick.value = System.currentTimeMillis()
+                    },
+                    onReportBug = { SettingsActions.reportBug(activity) },
+                    onShareDebugReport = { SettingsActions.shareDebugReport(activity) },
+                    onOpenGitHub = {
+                        activity.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/tuangel134/BlackClaw")))
+                    },
+                    onEditGlobalPrompt = { activity.showGlobalPromptDialog() },
+                )
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        tickHandler.removeCallbacks(ticker)
-        tickHandler.post(ticker)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        tickHandler.removeCallbacks(ticker)
+        tick.value = System.currentTimeMillis()
     }
 
     private fun showGlobalPromptDialog() {
@@ -177,6 +170,7 @@ private fun ModernSettingsScreen(
     onOpenTheme: () -> Unit,
     onOpenSkills: () -> Unit,
     onOpenScheduled: () -> Unit,
+    onOpenDashboard: () -> Unit,
     onOpenToolBrowser: () -> Unit,
     onOpenAutoReplies: () -> Unit,
     onOpenVoice: () -> Unit,
@@ -221,7 +215,7 @@ private fun ModernSettingsScreen(
     }
 
     Scaffold(
-        containerColor = colors.background,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
@@ -237,7 +231,7 @@ private fun ModernSettingsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = colors.surface,
+                    containerColor = Color.Transparent,
                     titleContentColor = colors.textPrimary,
                 ),
             )
@@ -401,12 +395,21 @@ private fun ModernSettingsScreen(
                 Divider(colors)
                 NavRow(
                     icon = Icons.Outlined.Schedule,
-                    title = "Tareas programadas",
-                    subtitle = "Horarios, reglas y perfiles tipo Tasker",
+                    title = "Automatizaciones",
+                    subtitle = "Agenda, reglas y flujos creados contigo o con BlackClaw",
                     trailing = if (scheduledCount == 0) "Ninguna" else "$scheduledCount",
                     trailingHighlight = scheduledCount > 0,
                     colors = colors,
                     onClick = onOpenScheduled,
+                )
+                Divider(colors)
+                NavRow(
+                    icon = Icons.Outlined.Insights,
+                    title = "Actividad del agente",
+                    subtitle = "Tareas, herramientas y uso reciente",
+                    trailing = "Ver",
+                    colors = colors,
+                    onClick = onOpenDashboard,
                 )
                 Divider(colors)
                 NavRow(
@@ -773,10 +776,11 @@ private fun SettingsSection(
             letterSpacing = 0.8.sp,
             modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
         )
-        Surface(
-            color = colors.surface,
-            shape = RoundedCornerShape(16.dp),
+        ClawGlassCard(
+            colors = colors,
             modifier = Modifier.fillMaxWidth(),
+            radius = 20.dp,
+            elevated = false,
         ) {
             Column(content = content)
         }

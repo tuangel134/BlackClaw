@@ -29,6 +29,12 @@ object TaskClassifier {
         val t = normalize(raw)
         val words = t.split(' ').filter { it.isNotBlank() }
 
+        // Keep explicit reads of the user's real notifications aligned with the
+        // deterministic fast path. DirectDeviceDataGuard already distinguishes
+        // actual data requests from conceptual/how-to/negated mentions, so using
+        // it here avoids the two classifiers drifting apart.
+        if (DirectDeviceDataGuard.matchesNotificationDataRequest(raw)) return true
+
         // "¿Puedes programar tareas?" is a capability question, not an
         // executable task. Check this before action verbs ("programar" is one)
         // so it does not enter the slow agent loop. Concrete requests such as

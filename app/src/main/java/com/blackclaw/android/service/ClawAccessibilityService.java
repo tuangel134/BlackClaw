@@ -248,6 +248,17 @@ public class ClawAccessibilityService extends AccessibilityService {
         lastExternalPackage = packageName;
         long now = System.currentTimeMillis();
         if (now - lastExternalScreenTreeAtMs < EXTERNAL_SNAPSHOT_DEBOUNCE_MS) return;
+        // If the user is already inside a messaging app, passively remember the visible
+        // conversation before building the generic tree. This is event-driven (no polling)
+        // and lets the proactive assistant see the user's own accept/decline reply later.
+        try {
+            AccessibilityNodeInfo conversationRoot = getRootInActiveWindow();
+            if (conversationRoot != null) {
+                com.blackclaw.android.proactive.MessagingConversationContext.capture(packageName, conversationRoot);
+                conversationRoot.recycle();
+            }
+        } catch (Throwable ignored) { }
+
         // Capture while the external app still owns the active window. We store only
         // its compact accessibility text, never pixels, and expire it on read.
         String snapshot = getScreenTree();

@@ -18,21 +18,6 @@
 
     <string name="app_slogan">一款能做事的AI Agents</string>
 
-    <!-- 引导页 -->
-    <string name="guide_page_title">权限设置</string>
-    <string name="guide_page_subtitle">请开启以下权限，以确保应用正常运行</string>
-    <string name="guide_skip">跳过</string>
-    <string name="guide_start">开始使用</string>
-    <string name="guide_title_accessibility">无障碍服务</string>
-    <string name="guide_desc_accessibility">这是 AI 自动操控设备的核心权限。\n\n1. 前往系统设置 → 无障碍 → 已下载的应用\n2. 在列表中找到「BlackClaw」\n3. 开启开关\n4. 在系统弹窗中确认</string>
-    <string name="guide_title_notification">任务通知</string>
-    <string name="guide_desc_notification">只在任务执行或监控开启时显示进度通知。\n\n在首页点击对应卡片即可开启。Android 13 及以上会先请求通知权限。</string>
-    <string name="guide_title_overlay">悬浮窗</string>
-    <string name="guide_desc_overlay">显示 AI 执行状态的浮动面板。\n\n1. 前往系统设置 → 应用 → BlackClaw\n2. 找到「显示在其他应用上方」\n3. 开启开关</string>
-    <string name="guide_title_battery">电池白名单</string>
-    <string name="guide_desc_battery">防止系统在后台关闭应用。\n\n在首页点击对应卡片，然后在系统弹窗中确认「允许」。(部分品牌手机需要修改为"无限制")</string>
-    <string name="guide_title_storage">文件访问</string>
-    <string name="guide_desc_storage">允许 AI 读写设备上的文件。\n\nAndroid 11 及以上：前往设置开启「所有文件访问」\nAndroid 10 及以下：在弹窗中授予权限</string>
 
     <!-- 首页 -->
     <string name="home_need_notification_permission">需要通知权限才能显示常驻通知</string>

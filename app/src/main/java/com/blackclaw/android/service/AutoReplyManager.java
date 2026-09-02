@@ -452,7 +452,7 @@ public class AutoReplyManager {
                     boolean inChat = false;
                     boolean hasContactInToolbar = false;
                     List<AccessibilityNodeInfo> topNodes = new ArrayList<>();
-                    collectTopBarNodes(root, topNodes);
+                    AccessibilityNodeUtils.collectTopBarNodes(root, topNodes);
                     for (AccessibilityNodeInfo node : topNodes) {
                         if (ContactMatchUtils.matchesTarget(node.getText(), node.getContentDescription(), normalizedAliases, digitAliases)) {
                             hasContactInToolbar = true;
@@ -463,7 +463,7 @@ public class AutoReplyManager {
                         // Also check for EditText (message input) — contact info page has
                         // the name in toolbar too but no EditText
                         List<AccessibilityNodeInfo> editTexts = new ArrayList<>();
-                        collectEditTexts(root, editTexts);
+                        AccessibilityNodeUtils.collectEditTexts(root, editTexts);
                         inChat = !editTexts.isEmpty();
                         if (!inChat) {
                             // We're on contact info or similar — press back to get to chat
@@ -474,7 +474,7 @@ public class AutoReplyManager {
                             // Re-check
                             if (root != null) {
                                 editTexts.clear();
-                                collectEditTexts(root, editTexts);
+                                AccessibilityNodeUtils.collectEditTexts(root, editTexts);
                                 inChat = !editTexts.isEmpty();
                             }
                         }
@@ -700,7 +700,7 @@ public class AutoReplyManager {
     private String findContactNameInToolbar(AccessibilityNodeInfo root) {
         // Look for clickable container near top with a text child (contact name)
         List<AccessibilityNodeInfo> candidates = new ArrayList<>();
-        collectTextNodesInRegion(root, 0, 300, candidates); // top 300px = toolbar area
+        AccessibilityNodeUtils.collectTextNodesInRegion(root, 0, 300, candidates); // top 300px = toolbar area
 
         android.graphics.Rect rootBounds = new android.graphics.Rect();
         root.getBoundsInScreen(rootBounds);
@@ -724,7 +724,7 @@ public class AutoReplyManager {
      */
     private String findLastIncomingMessage(AccessibilityNodeInfo root) {
         List<AccessibilityNodeInfo> allText = new ArrayList<>();
-        collectAllTextNodes(root, allText);
+        AccessibilityNodeUtils.collectAllTextNodes(root, allText);
 
         // Screen midpoint — incoming messages are on the left
         android.graphics.Rect rootBounds = new android.graphics.Rect();
@@ -750,19 +750,6 @@ public class AutoReplyManager {
             }
         }
         return lastIncoming;
-    }
-
-    private void collectTextNodesInRegion(AccessibilityNodeInfo node, int minY, int maxY, List<AccessibilityNodeInfo> result) {
-        if (node == null) return;
-        android.graphics.Rect bounds = new android.graphics.Rect();
-        node.getBoundsInScreen(bounds);
-        if (bounds.top >= minY && bounds.bottom <= maxY && node.getText() != null) {
-            result.add(node);
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) collectTextNodesInRegion(child, minY, maxY, result);
-        }
     }
 
     /**
@@ -829,7 +816,7 @@ public class AutoReplyManager {
 
             // Step 1: Find input field — generic (bottom-most EditText)
             java.util.List<AccessibilityNodeInfo> editables = new java.util.ArrayList<>();
-            collectEditTexts(root, editables);
+            AccessibilityNodeUtils.collectEditTexts(root, editables);
 
             AccessibilityNodeInfo inputField = null;
             int bestY = -1;
@@ -860,7 +847,7 @@ public class AutoReplyManager {
             root = service.getRootInActiveWindow();
             if (root == null) root = service.getRootInActiveWindow();
 
-            android.graphics.Rect inputBounds = getBottomEditTextBounds(root);
+            android.graphics.Rect inputBounds = AccessibilityNodeUtils.getBottomEditTextBounds(root);
             AccessibilityNodeInfo sendBtn = UiActionMatchUtils.findBestSendAction(root, inputBounds);
 
             if (sendBtn != null) {
@@ -1014,7 +1001,7 @@ public class AutoReplyManager {
                         AccessibilityNodeInfo root = service.getRootInActiveWindow();
                         if (root != null) {
                             java.util.List<AccessibilityNodeInfo> editables = new java.util.ArrayList<>();
-                            collectEditTexts(root, editables);
+                            AccessibilityNodeUtils.collectEditTexts(root, editables);
                             if (!editables.isEmpty()) {
                                 AccessibilityNodeInfo field = editables.get(editables.size() - 1);
                                 android.os.Bundle args = new android.os.Bundle();
@@ -1043,70 +1030,6 @@ public class AutoReplyManager {
         return com.blackclaw.android.agent.llm.LlmSessionManager.INSTANCE.singleShot(prompt, 0.3);
     }
 
-    private android.graphics.Rect getBottomEditTextBounds(AccessibilityNodeInfo root) {
-        java.util.List<AccessibilityNodeInfo> editables = new java.util.ArrayList<>();
-        collectEditTexts(root, editables);
-        AccessibilityNodeInfo bottom = null;
-        int bestY = Integer.MIN_VALUE;
-        for (AccessibilityNodeInfo node : editables) {
-            android.graphics.Rect bounds = new android.graphics.Rect();
-            node.getBoundsInScreen(bounds);
-            if (bounds.centerY() > bestY) {
-                bestY = bounds.centerY();
-                bottom = node;
-            }
-        }
-        if (bottom == null) return null;
-        android.graphics.Rect bounds = new android.graphics.Rect();
-        bottom.getBoundsInScreen(bounds);
-        return bounds;
-    }
-
-    /** Collect text nodes in top 300px (toolbar area) */
-    private void collectTopBarNodes(AccessibilityNodeInfo node, List<AccessibilityNodeInfo> result) {
-        if (node == null) return;
-        android.graphics.Rect bounds = new android.graphics.Rect();
-        node.getBoundsInScreen(bounds);
-        if (bounds.top < 300 && (node.getText() != null || node.getContentDescription() != null)) {
-            result.add(node);
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) collectTopBarNodes(child, result);
-        }
-    }
-
-    /** Recursively find nodes whose text or contentDescription contains target */
-    private void findNodesContainingText(
-        AccessibilityNodeInfo node,
-        Set<String> normalizedAliases,
-        Set<String> digitAliases,
-        List<AccessibilityNodeInfo> results
-    ) {
-        if (node == null) return;
-        CharSequence text = node.getText();
-        CharSequence desc = node.getContentDescription();
-        if (ContactMatchUtils.matchesTarget(text, desc, normalizedAliases, digitAliases)) {
-            results.add(node);
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) findNodesContainingText(child, normalizedAliases, digitAliases, results);
-        }
-    }
-
-    private void collectEditTexts(AccessibilityNodeInfo node, java.util.List<AccessibilityNodeInfo> result) {
-        if (node == null) return;
-        CharSequence cn = node.getClassName();
-        if (node.isEditable() || (cn != null && cn.toString().contains("EditText"))) {
-            result.add(node);
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) collectEditTexts(child, result);
-        }
-    }
-
     /**
      * Read the last N messages visible on screen for conversation context.
      * Returns formatted string like:
@@ -1122,7 +1045,7 @@ public class AutoReplyManager {
         if (root == null) return "";
 
         List<AccessibilityNodeInfo> allText = new ArrayList<>();
-        collectAllTextNodes(root, allText);
+        AccessibilityNodeUtils.collectAllTextNodes(root, allText);
 
         android.graphics.Rect rootBounds = new android.graphics.Rect();
         root.getBoundsInScreen(rootBounds);
@@ -1161,15 +1084,6 @@ public class AutoReplyManager {
             return trimmed.toString();
         }
         return context.toString();
-    }
-
-    private void collectAllTextNodes(AccessibilityNodeInfo node, List<AccessibilityNodeInfo> result) {
-        if (node == null) return;
-        if (node.getText() != null && node.getText().length() > 0) result.add(node);
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) collectAllTextNodes(child, result);
-        }
     }
 
     private String resolveAppName(String packageName) {

@@ -47,26 +47,25 @@ object ProactiveConfig {
     private const val KEY_NIGHT_HOUR = "proactive_night_hour"
     private const val KEY_NIGHT_MIN = "proactive_night_min"
     private const val KEY_SPEAK_BRIEFINGS = "proactive_speak_briefings"
+    private const val KEY_AUTO_MORNING_ALARMS = "proactive_auto_morning_alarms"
     // ── Weekly finance summary ──
     private const val KEY_WEEKLY_ENABLED = "proactive_weekly_finance_enabled"
     private const val KEY_WEEKLY_DAY = "proactive_weekly_finance_day"   // Calendar.DAY_OF_WEEK (1=Sun..7=Sat)
     private const val KEY_WEEKLY_HOUR = "proactive_weekly_finance_hour"
     private const val KEY_WEEKLY_MIN = "proactive_weekly_finance_min"
 
-    /** Default guidance the user can edit — sets the assistant's judgment. */
+    /** Default guidance the user can edit — conservative about intrusive timed actions. */
     const val DEFAULT_INSTRUCTIONS =
-        "Actúa siempre que puedas. No preguntes para confirmar — toma la decisión tú. " +
-        "Si un mensaje menciona una hora, reunión, vuelo, cita, clase, turno, evento, " +
-        "o cualquier cosa con hora → PON LA ALARMA directamente (30 min antes si no dicen " +
-        "otra cosa). Si alguien dice 'mañana a las 7', 'el lunes a las 9', 'a las 15:00' " +
-        "→ alarma. Si yo prometo algo ('te llamo mañana', 'el lunes te paso eso', " +
-        "'luego te escribo') → recordatorio de seguimiento automático. " +
-        "Detectas un cargo, factura, pago, cobro, transferencia → regístralo en finanzas. " +
-        "Fechas límite, entregas, deadlines → recordatorio el día antes. " +
-        "Ignora SOLO: promociones de tiendas, spam, publicidad, sorteos, newsletters. " +
-        "Chat casual entre amigos que NO menciona horas ni compromisos → ignora. " +
-        "Pero si un amigo dice 'nos vemos a las 8', 'la fiesta es a las 10', " +
-        "'paso por ti a las 7' → eso SÍ es accionable, pon alarma/recordatorio."
+        "Una hora mencionada NO significa que yo acepté un plan. Trata invitaciones, propuestas y " +
+        "'podríamos vernos' como PENDIENTES hasta tener evidencia de que YO acepté o confirmé. " +
+        "Si mi respuesta dice 'no puedo', 'no voy', 'tal vez', 'te confirmo', 'siempre no' o cancela el plan, " +
+        "NO crees alarma ni evento; cancela o reprograma cualquier elemento proactivo enlazado si corresponde. " +
+        "Crea alarmas automáticamente solo para compromisos realmente confirmados y con alta certeza. " +
+        "Para notificaciones autoritativas como un vuelo ya reservado, una cita confirmada o calendario del usuario, " +
+        "puedes tratarlas como confirmadas si el contenido lo demuestra. " +
+        "Si yo prometo algo ('te llamo mañana', 'el lunes te paso eso') y el contexto muestra que fui yo, " +
+        "puedes crear un recordatorio. Detecta cargos/pagos reales para finanzas y evita duplicados. " +
+        "Cuando falte evidencia de aceptación, espera o sugiere; no inventes un compromiso."
 
     var enabled: Boolean
         get() = KVUtils.getBoolean(KEY_ENABLED, false)
@@ -112,10 +111,25 @@ object ProactiveConfig {
             "com.whatsapp,org.telegram.messenger,com.google.android.apps.messaging")
         set(v) { KVUtils.putString(KEY_WATCHED_APPS, v); KVUtils.sync() }
 
+    fun watchedAppSet(): Set<String> = watchedApps.split(",")
+        .map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+
     fun isAppWatched(pkg: String): Boolean {
         restoreLegacyAutoMutedApps()
+        if (isAppMuted(pkg)) return false
         if (watchAllApps) return true
-        return watchedApps.split(",").map { it.trim() }.any { it.isNotEmpty() && it == pkg }
+        return pkg in watchedAppSet()
+    }
+
+    fun setAppWatched(pkg: String, watched: Boolean) {
+        if (pkg.isBlank()) return
+        val set = watchedAppSet().toMutableSet()
+        if (watched) set.add(pkg) else set.remove(pkg)
+        watchedApps = set.sorted().joinToString(",")
+    }
+
+    fun replaceWatchedApps(packages: Collection<String>) {
+        watchedApps = packages.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted().joinToString(",")
     }
 
     /** Comma-separated packages the assistant auto-muted after learning they're
@@ -186,10 +200,10 @@ object ProactiveConfig {
         get() = KVUtils.getInt(KEY_MAX_ACTIONS_HOUR, 20)
         set(v) { KVUtils.putInt(KEY_MAX_ACTIONS_HOUR, v.coerceIn(1, 100)); KVUtils.sync() }
 
-    /** When unsure, ask the user (notification) instead of acting silently.
-     *  Default false — the assistant acts decisively without asking. */
+    /** When unsure, suggest/ask instead of acting silently.
+     *  Default true: a false-positive alarm is more disruptive than a missed suggestion. */
     var askWhenUnsure: Boolean
-        get() = KVUtils.getBoolean(KEY_ASK_WHEN_UNSURE, false)
+        get() = KVUtils.getBoolean(KEY_ASK_WHEN_UNSURE, true)
         set(v) { KVUtils.putBoolean(KEY_ASK_WHEN_UNSURE, v); KVUtils.sync() }
 
     /** Allow opening the chat to read a truncated/redacted message via a11y.
@@ -224,6 +238,11 @@ object ProactiveConfig {
     var speakBriefings: Boolean
         get() = KVUtils.getBoolean(KEY_SPEAK_BRIEFINGS, false)
         set(v) { KVUtils.putBoolean(KEY_SPEAK_BRIEFINGS, v); KVUtils.sync() }
+
+    /** Night briefing may prepare alarms only for confirmed commitments. Off by default to avoid surprise alarms. */
+    var autoMorningAlarms: Boolean
+        get() = KVUtils.getBoolean(KEY_AUTO_MORNING_ALARMS, false)
+        set(v) { KVUtils.putBoolean(KEY_AUTO_MORNING_ALARMS, v); KVUtils.sync() }
 
     /** Read important proactive alerts aloud when voice mode is on. */
     var speakAlerts: Boolean

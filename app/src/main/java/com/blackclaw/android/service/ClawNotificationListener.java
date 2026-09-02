@@ -91,11 +91,18 @@ public class ClawNotificationListener extends NotificationListenerService {
             XLog.w(TAG, "Automation rule hook failed: " + t.getMessage());
         }
 
-        // Proactive Assistant: route through NotificationBatcher for intelligent
-        // batching (groups rapid-fire messages from same app into one LLM call).
+        // Proactive Assistant: filter at the listener boundary so an app the user
+        // disabled one-by-one never allocates a batch/timer and never wakes the LLM.
+        // AutomationEngine above and AutoReply below remain intentionally independent.
         try {
-            com.blackclaw.android.proactive.NotificationBatcher.INSTANCE
-                    .submit(pkg, title, richText);
+            com.blackclaw.android.proactive.ProactiveConfig cfg =
+                    com.blackclaw.android.proactive.ProactiveConfig.INSTANCE;
+            if (cfg.getEnabled() && cfg.isAppWatched(pkg)) {
+                com.blackclaw.android.proactive.NotificationBatcher.INSTANCE
+                        .submit(pkg, title, richText);
+            } else {
+                com.blackclaw.android.proactive.NotificationBatcher.INSTANCE.discard(pkg);
+            }
         } catch (Throwable t) {
             XLog.w(TAG, "Proactive hook failed: " + t.getMessage());
         }

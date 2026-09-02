@@ -50,6 +50,8 @@ data class AssistantItem(
     val createdAtMs: Long = System.currentTimeMillis(),
     /** Source that created it, e.g. "ai" or "user" or a notification package. */
     val source: String = "user",
+    /** Optional stable origin id (for example a proactive commitment id). */
+    val originRef: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -69,6 +71,7 @@ data class AssistantItem(
         put("geoTrigger", geoTrigger)
         put("createdAtMs", createdAtMs)
         put("source", source)
+        put("originRef", originRef)
     }
 
     companion object {
@@ -91,6 +94,7 @@ data class AssistantItem(
             geoTrigger = o.optString("geoTrigger", "enter"),
             createdAtMs = o.optLong("createdAtMs", System.currentTimeMillis()),
             source = o.optString("source", "user"),
+            originRef = o.optString("originRef", ""),
         )
     }
 }
@@ -198,13 +202,15 @@ object AssistantStore {
         radiusM: Int = 0,
         geoTrigger: String = "enter",
         source: String = "user",
+        originRef: String = "",
     ): AssistantItem {
         val item = AssistantItem(
             id = UUID.randomUUID().toString().take(8),
             type = type, title = title, body = body,
             triggerAtMs = triggerAtMs, repeat = repeat,
             amount = amount, category = category, challenge = challenge, ring = ring,
-            lat = lat, lon = lon, radiusM = radiusM, geoTrigger = geoTrigger, source = source,
+            lat = lat, lon = lon, radiusM = radiusM, geoTrigger = geoTrigger,
+            source = source, originRef = originRef,
         )
         upsert(item)
         // Habit learning: record timed alarm/reminder/event creations so the
@@ -218,16 +224,15 @@ object AssistantStore {
     }
 
     @Synchronized
-    fun delete(id: String): Boolean {
+    fun delete(id: String, recordCorrection: Boolean = true): Boolean {
         val before = all()
         val deleted = before.firstOrNull { it.id == id }
         val after = before.filterNot { it.id == id }
         if (after.size == before.size) return false
         saveAll(after)
-        // Correction learning: if the user deletes something the assistant
-        // created, that's negative feedback. Record it so the proactive
-        // classifier becomes more conservative about that category.
-        if (deleted != null && deleted.source == "ai") {
+        // Correction learning is for an explicit user deletion. Internal reschedule/cancel
+        // housekeeping must not teach the assistant that the user dislikes alarms.
+        if (recordCorrection && deleted != null && deleted.source == "ai") {
             runCatching {
                 val cat = deleted.category.ifBlank { deleted.type.name.lowercase() }
                 val age = System.currentTimeMillis() - deleted.createdAtMs

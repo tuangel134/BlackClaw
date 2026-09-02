@@ -42,7 +42,6 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
-    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -149,10 +148,6 @@
         </activity>
 
 
-        <activity
-            android:name=".ui.guide.GuideActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
         <activity
             android:name=".ui.chat.ComposeChatActivity"
             android:exported="false"
@@ -362,10 +357,6 @@
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".ui.web.WebActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
-        <activity
             android:name=".tool.impl.ClipboardReaderActivity"
             android:exported="false"
             android:excludeFromRecents="true"
@@ -394,13 +385,6 @@
             </intent-filter>
         </activity>
 
-        <receiver
-            android:name=".debug.DebugTaskReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.blackclaw.android.DEBUG_TASK" />
-            </intent-filter>
-        </receiver>
 
         <!-- The broadcast path gets NO per-caller check: a BroadcastReceiver is never
              told who sent the broadcast. The signature permission below is therefore
@@ -526,14 +510,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Debug: trigger tasks via ADB broadcast -->
-        <receiver
-            android:name=".debug.TaskTriggerReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.blackclaw.android.TASK" />
-            </intent-filter>
-        </receiver>
 
         <!-- Scheduled tasks (cron-style) — fired by AlarmManager -->
         <receiver

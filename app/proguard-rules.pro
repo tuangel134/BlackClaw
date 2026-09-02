@@ -98,12 +98,11 @@
 
 # ============================================================
 # OkHttp
+# Its artifact ships okhttp3.pro consumer rules (including PublicSuffixDatabase).
+# Do not blanket-keep the whole client or R8 cannot remove unused internals.
 # ============================================================
 -dontwarn okhttp3.**
 -dontwarn okio.**
--keep class okhttp3.** { *; }
--keep interface okhttp3.** { *; }
--keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
 
 # ============================================================
 # Misc
@@ -121,39 +120,29 @@
 -keep interface dev.langchain4j.** { *; }
 
 # ============================================================
-# Jackson (LangChain4j 内部依赖，序列化需要保留构造器和字段)
-# ============================================================
--dontwarn com.fasterxml.jackson.**
--keep class com.fasterxml.jackson.** { *; }
--keep interface com.fasterxml.jackson.** { *; }
--keepclassmembers class * {
-    @com.fasterxml.jackson.annotation.* <fields>;
-    @com.fasterxml.jackson.annotation.* <init>(...);
-}
-
-# ============================================================
-# Jackson（LangChain4j OpenAI 内部 JSON 序列化依赖）
-# 缺少此规则会导致 R8 混淆 Jackson 内部类，运行时报
-# "Class xxx has no default (no arg) constructor"
+# Jackson — LangChain4j serializes/deserializes its request/response models
+# reflectively. Keep the union of the annotation/name rules that used to be
+# duplicated in two separate blocks so release behavior stays unchanged.
 # ============================================================
 -dontwarn com.fasterxml.jackson.**
 -keep class com.fasterxml.jackson.** { *; }
 -keep interface com.fasterxml.jackson.** { *; }
 -keepnames class com.fasterxml.jackson.** { *; }
-# 保留带 Jackson 注解的类成员（字段/方法）
 -keepclassmembers class * {
+    @com.fasterxml.jackson.annotation.* <fields>;
+    @com.fasterxml.jackson.annotation.* <init>(...);
     @com.fasterxml.jackson.annotation.* *;
     @com.fasterxml.jackson.databind.annotation.* *;
 }
-# 保留 Jackson 需要通过反射创建的类的无参构造函数
 -keepclassmembers,allowobfuscation class * {
     @com.fasterxml.jackson.annotation.JsonCreator <init>(...);
 }
 
 # ============================================================
 # MMKV
+# mmkv-static ships official JNI consumer rules that keep native entry points,
+# descriptors and callbacks. A package-wide keep would only block shrinking.
 # ============================================================
--keep class com.tencent.mmkv.** { *; }
 
 # ============================================================
 # LiteRT-LM
@@ -170,21 +159,6 @@
 }
 
 # ============================================================
-# Glide
-# ============================================================
--keep public class * implements com.bumptech.glide.module.GlideModule
--keep class * extends com.bumptech.glide.module.AppGlideModule { <init>(...); }
--keep public enum com.bumptech.glide.load.ImageHeaderParser$** {
-    **[] $VALUES;
-    public *;
-}
--keep class com.bumptech.glide.load.data.ParcelFileDescriptorRewinder$InternalRewinder {
-    *** rewind();
-}
--dontwarn com.bumptech.glide.**
-
-
-# ============================================================
 # The Lark (com.larksuite.oapi:oapi-sdk) and DingTalk
 # (com.dingtalk.open:app-stream-client) server-side SDKs had zero imports in
 # the app and were removed from the build, together with everything they
@@ -197,36 +171,37 @@
 
 # ============================================================
 # ZXing
+# Used through direct references; no reflective class-name contract in BlackClaw.
 # ============================================================
 -dontwarn com.google.zxing.**
--keep class com.google.zxing.** { *; }
 
 # ============================================================
 # BlankJ UtilCode
+# utilcodex ships consumer rules for Bus/Api reflection; rely on those instead
+# of retaining every utility class.
 # ============================================================
 -dontwarn com.blankj.**
--keep class com.blankj.utilcode.** { *; }
--keep public class com.blankj.utilcode.util.** { *; }
 
 # ============================================================
 # EasyFloat
+# Its AAR keeps FloatConfig/custom view/provider contracts itself.
 # ============================================================
 -dontwarn com.lzf.easyfloat.**
--keep class com.lzf.easyfloat.** { *; }
 
 # ============================================================
 # Kotlin / Coroutines
+# kotlinx-coroutines ships R8 rules for service loading/debug internals. Keeping
+# the entire package prevents removal of dispatchers/features BlackClaw never uses.
 # ============================================================
 -dontwarn kotlinx.coroutines.**
--keep class kotlinx.coroutines.** { *; }
 -dontwarn kotlin.**
 
 # ============================================================
 # AndroidX
+# AndroidX artifacts provide component-specific consumer rules. AGP also keeps
+# manifest components, so a package-wide keep is unnecessary and very expensive.
 # ============================================================
 -dontwarn androidx.**
--keep class androidx.** { *; }
--keep interface androidx.** { *; }
 
 # ============================================================
 # Vosk (offline speech recognition) + JNA
