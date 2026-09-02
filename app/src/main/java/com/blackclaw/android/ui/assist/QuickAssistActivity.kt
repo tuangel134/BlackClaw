@@ -51,6 +51,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.blackclaw.android.TaskEvent
 import com.blackclaw.android.appViewModel
+import com.blackclaw.android.agent.TaskClassifier
 import com.blackclaw.android.assistant.JarvisVoice
 import com.blackclaw.android.assistant.Speaker
 import com.blackclaw.android.assistant.VoiceInputManager
@@ -117,6 +118,8 @@ class QuickAssistActivity : ComponentActivity() {
     private var didStreamSpeak = false
     private var toolUsed = false
     private var leftApp = false   // an app-launching tool ran → hand off & close
+    private var requestStartedAtMs = 0L
+    private var firstTokenLogged = false
 
     /** Cards collected from tools during the current command, attached when it answers. */
     private val pendingCards = mutableListOf<com.blackclaw.android.cards.AssistCard>()
@@ -280,8 +283,10 @@ class QuickAssistActivity : ComponentActivity() {
         if (command.isBlank()) { onListenError(""); return }
         if (startEmergencyProtection(command)) return
         silentCount = 0
-        // Reset streaming state for this answer.
+        // Reset streaming/latency state for this answer.
         streamBuf.setLength(0); spokenLen = 0; didStreamSpeak = false; toolUsed = false; leftApp = false
+        requestStartedAtMs = android.os.SystemClock.elapsedRealtime()
+        firstTokenLogged = false
         pendingCards.clear()
         progress.value = null
         recovery.value = null
@@ -306,7 +311,12 @@ class QuickAssistActivity : ComponentActivity() {
         status.value = "Pensando…"
         progress.value = QuickAssistProgress("Preparando la respuesta", "Entendiendo tu solicitud")
         updateLiveNotif("PENSANDO", command)
-        Speaker.speak(JarvisVoice.commandAck())
+        // For actions, an immediate acknowledgement reassures the user that the phone
+        // is working. For plain conversation it only queues ahead of the streamed
+        // answer and makes a fast model sound slow, so let the first real sentence speak.
+        if (TaskClassifier.isTask(command)) {
+            Speaker.speak(JarvisVoice.commandAck())
+        }
 
         val override = buildContextPrompt(command)
         val taskId = "assist-" + UUID.randomUUID().toString().take(8)
@@ -539,6 +549,11 @@ class QuickAssistActivity : ComponentActivity() {
     /** A streamed token from the model. Show it live and speak completed sentences. */
     private fun onStreamToken(token: String) {
         if (token.isBlank()) return
+        if (!firstTokenLogged) {
+            firstTokenLogged = true
+            val ttft = (android.os.SystemClock.elapsedRealtime() - requestStartedAtMs).coerceAtLeast(0L)
+            XLog.i(TAG, "QuickAssist TTFT=${ttft}ms command=${lastCommand.take(80)}")
+        }
         streamBuf.append(token)
         val full = streamBuf.toString()
         phase.value = Phase.SPEAKING
@@ -556,6 +571,8 @@ class QuickAssistActivity : ComponentActivity() {
 
     /** Finalize the answer: add the rich bubble, speak any remainder, then re-listen. */
     private fun answerStreamed(raw: String) {
+        val totalMs = (android.os.SystemClock.elapsedRealtime() - requestStartedAtMs).coerceAtLeast(0L)
+        XLog.i(TAG, "QuickAssist completed in ${totalMs}ms streamed=$firstTokenLogged toolUsed=$toolUsed")
         busy = false
         progress.value = null
         val display = QuickAssistTextPolicy.stripReasoning(raw)

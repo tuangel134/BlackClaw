@@ -9,6 +9,7 @@ import com.blackclaw.android.agent.langchain.LangChain4jToolBridge
 import com.blackclaw.android.agent.llm.LlmClient
 import com.blackclaw.android.agent.llm.LlmClientFactory
 import com.blackclaw.android.agent.llm.LlmResponse
+import com.blackclaw.android.agent.llm.ModelConfigRepository
 import com.blackclaw.android.service.ClawAccessibilityService
 import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.tool.impl.GetScreenInfoTool
@@ -45,6 +46,34 @@ class DefaultAgentService : AgentService {
             // Delegate to the robust bilingual classifier (ES/EN, imperatives,
             // infinitives, polite/indirect requests, app names, action objects).
             return TaskClassifier.isTask(prompt)
+        }
+
+        /** Fast mode is intentionally opt-in: both classifiers must agree. */
+        internal fun shouldUseFastChat(prompt: String): Boolean =
+            !isTaskLike(prompt) &&
+                com.blackclaw.android.conversation.ConversationRouter.decide(prompt).mode ==
+                com.blackclaw.android.conversation.ConversationRouter.Mode.CONVERSE
+
+        /**
+         * Reusing a remote client preserves its HTTP connection pool and avoids
+         * rebuilding LangChain/OpenAI clients before every voice turn. Prompt/memory
+         * and iteration changes do not affect the transport client, so they can be
+         * updated live through configRef. Local/AUTO sessions retain their explicit
+         * lifecycle because they may own native engines or switch providers.
+         */
+        internal fun canReuseCloudClient(
+            current: AgentConfig?,
+            incoming: AgentConfig,
+            currentAutomatic: Boolean,
+            incomingAutomatic: Boolean,
+        ): Boolean {
+            if (current == null || currentAutomatic || incomingAutomatic) return false
+            if (current.provider == LlmProvider.LOCAL || incoming.provider == LlmProvider.LOCAL) return false
+            return current.provider == incoming.provider &&
+                current.apiKey == incoming.apiKey &&
+                current.baseUrl == incoming.baseUrl &&
+                current.modelName == incoming.modelName &&
+                current.temperature == incoming.temperature
         }
 
         /** Whether to write raw network request/response data to sandbox cache files for debugging */
@@ -86,6 +115,10 @@ class DefaultAgentService : AgentService {
     /** Replaced by initialize()/updateConfig() from another thread than the reader. */
     @Volatile
     private var executor: ExecutorService? = null
+
+    @Volatile
+    private var automaticClientMode: Boolean = false
+
     private val running = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
 
@@ -103,20 +136,36 @@ class DefaultAgentService : AgentService {
 
     override fun initialize(config: AgentConfig) {
         this.configRef = config
+        this.automaticClientMode = ModelConfigRepository.isAutomaticActive()
         this.llmClientRef = LlmClientFactory.create(config)
         this.allToolSpecs = LangChain4jToolBridge.buildToolSpecifications()
         this.toolSpecs = allToolSpecs
         this.executor = Executors.newSingleThreadExecutor()
-        XLog.i(TAG, "Agent initialized: provider=${config.provider}, model=${config.modelName}, streaming=${config.streaming}")
+        XLog.i(TAG, "Agent initialized: provider=${config.provider}, model=${config.modelName}, streaming=${config.streaming}, automatic=$automaticClientMode")
     }
 
     override fun updateConfig(config: AgentConfig) {
+        val incomingAutomatic = ModelConfigRepository.isAutomaticActive()
+        val pool = executor
+        if (!running.get() &&
+            llmClientRef != null &&
+            pool != null && !pool.isShutdown && !pool.isTerminated &&
+            canReuseCloudClient(configRef, config, automaticClientMode, incomingAutomatic)
+        ) {
+            // System prompt, memory and iteration settings are read from configRef on
+            // every turn, so update them without throwing away the warm HTTP client.
+            configRef = config
+            automaticClientMode = incomingAutomatic
+            XLog.d(TAG, "Agent config unchanged at transport level; reusing warm cloud client (${config.modelName})")
+            return
+        }
+
         if (running.get()) {
             cancel()
             XLog.w(TAG, "Task was running during config update, cancelled")
         }
         executor?.shutdownNow()
-        // Close old LlmClient before reinitializing to free engine memory
+        // Close old LlmClient before reinitializing to free native/AUTO resources.
         llmClientRef?.let { old ->
             try {
                 old.close()
@@ -125,6 +174,7 @@ class DefaultAgentService : AgentService {
                 XLog.w(TAG, "Old LlmClient close error during config update", e)
             }
         }
+        llmClientRef = null
         initialize(config)
         XLog.i(TAG, "Agent config updated, new model: ${config.modelName}")
     }
@@ -187,15 +237,22 @@ class DefaultAgentService : AgentService {
                     }
                 }
             } finally {
-                // Close local engine BEFORE clearing running flag so the chat engine
-                // reload (triggered by onComplete/onError) never overlaps with task engine.
-                llmClientRef?.let { client ->
-                    try {
-                        client.close()
-                        XLog.i(TAG, "LlmClient closed after task completion")
-                    } catch (e: Exception) {
-                        XLog.w(TAG, "LlmClient close error after task", e)
+                // Local/AUTO clients may own native engines or swap to a local fallback,
+                // so release them after every task. Direct cloud clients intentionally
+                // stay alive: their HTTP connection pool is reused by the next voice turn.
+                val shouldCloseAfterTask = configRef?.provider == LlmProvider.LOCAL || automaticClientMode
+                if (shouldCloseAfterTask) {
+                    llmClientRef?.let { client ->
+                        try {
+                            client.close()
+                            XLog.i(TAG, "LlmClient closed after task completion")
+                        } catch (e: Exception) {
+                            XLog.w(TAG, "LlmClient close error after task", e)
+                        }
                     }
+                    llmClientRef = null
+                } else {
+                    XLog.d(TAG, "Keeping cloud LlmClient warm for the next turn")
                 }
                 running.set(false)
                 val terminal = terminalCallback
@@ -281,14 +338,20 @@ class DefaultAgentService : AgentService {
     // ==================== Main Execution Loop ====================
 
     private fun runAgentLoop(userPrompt: String, callback: AgentCallback) {
-        // Pre-flight check
-        preCheck()?.let {
-            callback.onError(0, RuntimeException(it), 0)
-            return
-        }
-
         val parsedPrompt = TaskPromptEnvelope.parse(userPrompt)
         val rawUserRequest = parsedPrompt.currentRequest
+        // Fast chat is deliberately conservative: both routers must agree this is
+        // conversation. Ambiguous requests retain the full tool-capable agent.
+        val looksLikeTask = !shouldUseFastChat(rawUserRequest)
+
+        // Conversational turns do not need Accessibility at all. Avoid both the
+        // permission lookup and a needless failure before a plain cloud response.
+        if (looksLikeTask) {
+            preCheck()?.let {
+                callback.onError(0, RuntimeException(it), 0)
+                return
+            }
+        }
 
         // ── Progressive tool disclosure (token optimization for cloud) ──
         // Sending all ~85 tool schemas costs ~13k tokens/request and blows past
@@ -302,10 +365,15 @@ class DefaultAgentService : AgentService {
         // local Gemma's context window. Instead we preload a generous relevant
         // subset (CORE + keyword matches). The inline "Tool selection guide" in
         // AgentPrompts.LOCAL_TASK keeps the model aware of the broader toolset.
-        val progressiveDisclosure = config.provider != LlmProvider.LOCAL
+        val progressiveDisclosure = looksLikeTask && config.provider != LlmProvider.LOCAL
         val activeToolNames = LinkedHashSet<String>()
         var toolCatalogSection = ""
-        if (progressiveDisclosure) {
+        if (!looksLikeTask) {
+            // Fast chat: no tool schemas and no catalog. A fast model should see
+            // only the conversation, not thousands of tokens of Android controls.
+            toolSpecs = emptyList()
+            XLog.i(TAG, "runAgentLoop: FAST_CHAT — zero tool schemas")
+        } else if (progressiveDisclosure) {
             activeToolNames.addAll(ToolSelector.selectPreloadNames(rawUserRequest))
             toolSpecs = LangChain4jToolBridge.buildToolSpecifications(activeToolNames)
                 .ifEmpty { allToolSpecs }
@@ -322,11 +390,12 @@ class DefaultAgentService : AgentService {
             XLog.i(TAG, "runAgentLoop: LOCAL preloaded ${toolSpecs.size}/${allToolSpecs.size} tools (relevance-filtered)")
         }
 
-        // Build System Prompt — use optimized prompt for local LLM
-        val basePrompt = if (config.provider == LlmProvider.LOCAL) {
-            AgentPrompts.LOCAL_TASK
-        } else {
-            config.systemPrompt
+        // Build System Prompt. Pure conversation gets a deliberately tiny prompt;
+        // actionable tasks keep the full Android-control policy and safeguards.
+        val basePrompt = when {
+            !looksLikeTask -> PromptUtils.applyGlobalPrompt(AgentPrompts.FAST_CHAT)
+            config.provider == LlmProvider.LOCAL -> AgentPrompts.LOCAL_TASK
+            else -> config.systemPrompt
         }
 
         val inAppSearchGuard = InAppSearchGuard.fromTask(rawUserRequest)
@@ -335,7 +404,7 @@ class DefaultAgentService : AgentService {
         val taskCreationGuard = TaskCreationGuard.fromTask(rawUserRequest)
 
         // For local LLM, inject matching playbook into system prompt
-        val playbookSection = if (config.provider == LlmProvider.LOCAL) {
+        val playbookSection = if (looksLikeTask && config.provider == LlmProvider.LOCAL) {
             val matched = PlaybookManager.match(rawUserRequest)
             if (matched != null) {
                 XLog.i(TAG, "Playbook matched: ${matched.id} for '$rawUserRequest'")
@@ -343,7 +412,12 @@ class DefaultAgentService : AgentService {
             } else ""
         } else ""
 
-        val fullSystemPrompt = buildString {
+        val fullSystemPrompt = if (!looksLikeTask) {
+            buildString {
+                append(basePrompt)
+                append(LanguageDetector.getLanguageInstruction(rawUserRequest))
+            }
+        } else buildString {
             append(basePrompt)
             append(playbookSection)
             append(AgentPrompts.IN_APP_EXECUTION)
@@ -361,10 +435,12 @@ class DefaultAgentService : AgentService {
             append(toolCatalogSection)
         }
 
-        // Each task starts with a fresh tool cache so we never serve stale state.
-        ToolRegistry.getInstance().clearCache()
-        // Reset the passive demonstration buffer so "guarda lo último" maps to THIS task.
-        runCatching { com.blackclaw.android.agent.DemonstrationRecorder.noteTaskStart() }
+        if (looksLikeTask) {
+            // Each actionable task starts with a fresh tool cache so we never serve stale state.
+            ToolRegistry.getInstance().clearCache()
+            // Reset the passive demonstration buffer so "guarda lo último" maps to THIS task.
+            runCatching { com.blackclaw.android.agent.DemonstrationRecorder.noteTaskStart() }
+        }
 
         val messages = mutableListOf<ChatMessage>()
         messages.add(SystemMessage.from(fullSystemPrompt))
@@ -391,8 +467,6 @@ class DefaultAgentService : AgentService {
 
         // Opt-2: Pre-warm — only attach screen info for task-like prompts.
         // Chat/questions should NOT see screen data (it confuses the LLM into using tools).
-        val looksLikeTask = isTaskLike(rawUserRequest)
-
         val enrichedPrompt = if (looksLikeTask) {
             try {
                 val screenTool = ToolRegistry.getInstance().getTool("get_screen_info")

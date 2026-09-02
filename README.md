@@ -511,6 +511,12 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.2.19
+
+- Quick Assist now keeps direct cloud LLM clients warm between turns instead of rebuilding the transport before every request.
+- Plain conversational questions use a compact fast-chat prompt with no Android tool schemas or screen pre-warm, reducing time to first token while ambiguous/actionable requests keep the full agent.
+- Voice replies no longer queue a generic acknowledgement ahead of normal chat answers, and Quick Assist now logs time-to-first-token and total response latency for diagnostics.
+
 ### v1.2.17
 
 - Added configurable **AUTO model routing**. BlackClaw can benchmark every
