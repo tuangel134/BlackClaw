@@ -66,7 +66,7 @@ object ConversationMemory {
      * read-modify-write, timestamp-aware capping, no fsync per write, and a log line
      * when a record fails to parse instead of it disappearing silently.
      */
-    private val store = object : JsonListStore<Entry>(KEY, MAX_ENTRIES) {
+    private val store = object : JsonListStore<Entry>(KEY, MAX_ENTRIES, encrypted = true) {
         override val logTag = TAG
         override fun toJson(item: Entry): JSONObject = item.toJson()
         override fun fromJson(json: JSONObject): Entry? =
@@ -91,8 +91,12 @@ object ConversationMemory {
             timestamp = System.currentTimeMillis(),
             topics = topics.take(5),
         )
-        store.upsert(entry) { it.id == conversationId }
-        XLog.d(TAG, "Recorded conversation memory: ${entry.id} (${entry.summary.take(50)}...)")
+        val persisted = store.upsert(entry) { it.id == conversationId }
+        if (persisted.any { it.id == entry.id && it == entry }) {
+            XLog.d(TAG, "Recorded conversation memory: summaryChars=${entry.summary.length} topicCount=${entry.topics.size}")
+        } else {
+            XLog.w(TAG, "Conversation memory write failed; previous data retained")
+        }
     }
 
     /** Drop every stored summary. Returns how many were removed. */

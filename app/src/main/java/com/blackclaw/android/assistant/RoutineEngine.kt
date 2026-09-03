@@ -120,7 +120,7 @@ object RoutineEngine {
      *    routine happened to be stored first, which after any `update` is not the oldest
      *    one. [timestampOf] makes "oldest" mean oldest.
      */
-    private val store = object : JsonListStore<Routine>(KEY_ROUTINES, MAX_ROUTINES) {
+    private val store = object : JsonListStore<Routine>(KEY_ROUTINES, MAX_ROUTINES, encrypted = true) {
         override val logTag = TAG
         override fun toJson(item: Routine): JSONObject = item.toJson()
 
@@ -141,17 +141,23 @@ object RoutineEngine {
         return all().firstOrNull { it.name.lowercase().contains(lower) }
     }
 
-    fun create(routine: Routine): Routine {
+    fun create(routine: Routine): Routine? {
         val withId = if (routine.id.isBlank())
             routine.copy(id = UUID.randomUUID().toString().take(8))
         else routine
-        store.append(withId)
-        XLog.i(TAG, "Created routine: ${withId.name} (${withId.steps.size} steps)")
-        return withId
+        val persisted = store.append(withId)
+        val saved = persisted.firstOrNull { it.id == withId.id && it == withId }
+        if (saved == null) {
+            XLog.e(TAG, "Could not persist routine securely: stepCount=${withId.steps.size}")
+            return null
+        }
+        XLog.i(TAG, "Created routine: stepCount=${withId.steps.size}")
+        return saved
     }
 
-    fun update(routine: Routine) {
-        store.upsert(routine) { it.id == routine.id }
+    fun update(routine: Routine): Boolean {
+        val persisted = store.upsert(routine) { it.id == routine.id }
+        return persisted.any { it.id == routine.id && it == routine }
     }
 
     fun delete(id: String): Boolean = store.removeAll { it.id == id } > 0
@@ -171,7 +177,7 @@ object RoutineEngine {
      * Returns a summary of what happened.
      */
     fun execute(routine: Routine, onProgress: ((Int, Int, String) -> Unit)? = null): ExecutionResult {
-        XLog.i(TAG, "Executing routine '${routine.name}' (${routine.steps.size} steps)")
+        XLog.i(TAG, "Executing routine: steps=${routine.steps.size}")
         val registry = ToolRegistry.getInstance()
         var completed = 0
 
@@ -180,9 +186,12 @@ object RoutineEngine {
 
             val result = registry.executeTool(step.toolName, step.params)
             if (!result.isSuccess) {
-                XLog.w(TAG, "Routine '${routine.name}' step ${index + 1} failed: ${result.error}")
-                // Mark as run even if partially failed
-                update(routine.copy(lastRunAt = System.currentTimeMillis(), runCount = routine.runCount + 1))
+                XLog.w(TAG, "Routine step ${index + 1} failed: tool=${step.toolName} errorChars=${result.error?.length ?: 0}")
+                // Mark as run even if partially failed. A secure-store failure does
+                // not change the execution result, but is surfaced in diagnostics.
+                if (!update(routine.copy(lastRunAt = System.currentTimeMillis(), runCount = routine.runCount + 1))) {
+                    XLog.e(TAG, "Could not persist routine run metadata after failure")
+                }
                 return ExecutionResult(
                     success = false,
                     stepsCompleted = completed,
@@ -203,8 +212,10 @@ object RoutineEngine {
             }
         }
 
-        update(routine.copy(lastRunAt = System.currentTimeMillis(), runCount = routine.runCount + 1))
-        XLog.i(TAG, "Routine '${routine.name}' completed: $completed steps")
+        if (!update(routine.copy(lastRunAt = System.currentTimeMillis(), runCount = routine.runCount + 1))) {
+            XLog.e(TAG, "Could not persist routine run metadata after completion")
+        }
+        XLog.i(TAG, "Routine completed: steps=$completed")
         return ExecutionResult(
             success = true,
             stepsCompleted = completed,

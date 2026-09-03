@@ -9,12 +9,12 @@ import com.blackclaw.android.utils.XLog
 /**
  * Activity entrypoint for external automation.
  *
- * This is the one automation entrypoint where the framework will tell us who the
- * caller is, so it is the only place a per-caller rule can be enforced. The manifest
- * already requires `com.blackclaw.android.permission.AUTOMATION` (signature) before
- * this class runs at all; the check here narrows that further to the packages the
- * user explicitly sanctioned, so that flipping the global "External Automation"
- * switch on for one app does not authorise every app on the device.
+ * This is the one automation entrypoint where the framework may tell us who the
+ * caller is, so it is where third-party authorization is enforced. Unlike the
+ * broadcast receiver, this Activity intentionally cannot require BlackClaw's
+ * signature permission because Tasker/MacroDroid are signed by somebody else.
+ * Therefore this in-process check is the security boundary: self-package, an
+ * identified allowlisted caller, or possession of the Automation Token.
  */
 class ExternalAutomationActivity : Activity() {
 

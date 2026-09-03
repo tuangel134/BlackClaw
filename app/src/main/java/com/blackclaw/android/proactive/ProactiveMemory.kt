@@ -80,7 +80,7 @@ object ProactiveMemory {
      * Stored oldest first — [JsonListStore]'s convention — while [recentEvents] keeps
      * returning newest first, since that is the order the classifier prompt reads them in.
      */
-    private val recentStore = object : JsonListStore<RecentEvent>(KEY_RECENT, MAX_RECENT) {
+    private val recentStore = object : JsonListStore<RecentEvent>(KEY_RECENT, MAX_RECENT, encrypted = true) {
         override val logTag = "ProactiveMemory"
         override fun toJson(item: RecentEvent): JSONObject = JSONObject().apply {
             put("t", item.t)

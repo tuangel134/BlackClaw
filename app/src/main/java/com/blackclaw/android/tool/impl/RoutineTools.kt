@@ -105,7 +105,7 @@ class CreateRoutineTool : BaseTool() {
             steps = steps,
             triggerTime = optionalString(params, "trigger_time", ""),
             triggerDays = optionalString(params, "trigger_days", "daily"),
-        ))
+        )) ?: return ToolResult.error("No pude guardar la rutina de forma segura. Inténtalo de nuevo después de desbloquear el dispositivo.")
 
         val schedule = if (routine.triggerTime.isNotBlank())
             " Programada: ${routine.triggerTime} (${routine.triggerDays})" else " (manual)"
@@ -127,7 +127,9 @@ class DeleteRoutineTool : BaseTool() {
         val query = requireString(params, "name").trim()
         val routine = RoutineEngine.findByName(query) ?: RoutineEngine.find(query)
             ?: return ToolResult.error("No encontré rutina '$query'.")
-        RoutineEngine.delete(routine.id)
+        if (!RoutineEngine.delete(routine.id)) {
+            return ToolResult.error("No pude eliminar la rutina de forma segura.")
+        }
         return ToolResult.success("Rutina '${routine.name}' eliminada.")
     }
 }
@@ -191,7 +193,9 @@ class LearnUserTool : BaseTool() {
                 profile.copy(traits = traits)
             }
         }
-        com.blackclaw.android.memory.UserProfile.save(updated)
+        if (!com.blackclaw.android.memory.UserProfile.save(updated)) {
+            return ToolResult.error("No pude guardar ese aprendizaje de forma segura. Inténtalo de nuevo después de desbloquear el dispositivo.")
+        }
         return ToolResult.success("Aprendido: $category = '$value'. Lo tendré en cuenta.")
     }
 }

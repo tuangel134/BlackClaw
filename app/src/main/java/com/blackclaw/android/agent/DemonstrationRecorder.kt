@@ -55,7 +55,7 @@ object DemonstrationRecorder {
         this.recording = true
         this.label = label
         steps.clear()
-        XLog.i(TAG, "Recording started: $label")
+        XLog.i(TAG, "Recording started: labelChars=${label.length}")
     }
 
     /** Record a successful tool call. Called by the agent loop after execution. */
@@ -108,7 +108,7 @@ object DemonstrationRecorder {
 
     private fun persistRoutine(
         captured: List<RecordedStep>, name: String, icon: String, triggerTime: String,
-    ): String {
+    ): String? {
         val routineSteps = captured.map {
             RoutineEngine.RoutineStep(
                 toolName = it.toolName,
@@ -125,8 +125,8 @@ object DemonstrationRecorder {
             steps = routineSteps,
             triggerTime = triggerTime,
             triggerDays = if (triggerTime.isNotBlank()) "daily" else "",
-        ))
-        XLog.i(TAG, "Saved demonstration as routine '${routine.name}' (${routineSteps.size} steps)")
+        )) ?: return null
+        XLog.i(TAG, "Saved demonstration as routine: steps=${routineSteps.size}")
         return routine.name
     }
 

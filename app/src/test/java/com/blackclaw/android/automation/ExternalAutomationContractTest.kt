@@ -59,4 +59,16 @@ class ExternalAutomationContractTest {
         assertNull(ExternalAutomationContract.parse("other.action") { null })
         assertNull(ExternalAutomationContract.parse(ExternalAutomationContract.ACTION_RUN_TASK) { null })
     }
+
+    @Test
+    fun `callback requires both explicit action and package`() {
+        assertEquals(
+            true,
+            ExternalAutomationContract.hasExplicitCallbackTarget("io.example.RESULT", "io.example.app"),
+        )
+        assertEquals(false, ExternalAutomationContract.hasExplicitCallbackTarget("io.example.RESULT", null))
+        assertEquals(false, ExternalAutomationContract.hasExplicitCallbackTarget(null, "io.example.app"))
+        assertEquals(false, ExternalAutomationContract.hasExplicitCallbackTarget("   ", "io.example.app"))
+        assertEquals(false, ExternalAutomationContract.hasExplicitCallbackTarget("io.example.RESULT", "   "))
+    }
 }

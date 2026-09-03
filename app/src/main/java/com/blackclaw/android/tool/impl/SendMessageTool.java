@@ -72,7 +72,7 @@ public class SendMessageTool extends BaseTool {
         String message = requireString(params, "message");
         String app = params.containsKey("app") ? params.get("app").toString() : "WhatsApp";
 
-        XLog.i(TAG, "Sending '" + message + "' to " + contact + " via " + app);
+        XLog.i(TAG, "Sending message: messageChars=" + message.length() + " contactChars=" + contact.length() + " app=" + app);
 
         try {
             // Step 1: Resolve and open the messaging app
@@ -94,10 +94,10 @@ public class SendMessageTool extends BaseTool {
             // Step 3: Check if we're ALREADY in the correct chatroom
             // (e.g. opened via notification tap — no need to navigate)
             if (isAlreadyInChatWith(service, contact)) {
-                XLog.i(TAG, "Step 3: Already in " + contact + "'s chatroom — skipping navigation");
+                XLog.i(TAG, "Step 3: Already in target chatroom — skipping navigation");
             } else {
                 // Navigate to chat list and find contact
-                XLog.i(TAG, "Step 3: Not in chatroom, navigating to " + contact);
+                XLog.i(TAG, "Step 3: Not in target chatroom; navigating to contact");
                 if (!ContactListUiUtils.prepareForContactLookup(service, packageName, 4, 1200)) {
                     return ToolResult.error("Could not reach a searchable " + app + " chat list.");
                 }
@@ -105,7 +105,7 @@ public class SendMessageTool extends BaseTool {
                 if (!findAndTapContact(service, contact)) {
                     return ToolResult.error("Could not find '" + contact + "' in " + app + " chat list.");
                 }
-                XLog.i(TAG, "Step 3: Tapped " + contact);
+                XLog.i(TAG, "Step 3: Tapped target contact");
                 Thread.sleep(3000);
                 waitForActiveWindow(service, packageName, 5000);
             }
@@ -123,7 +123,7 @@ public class SendMessageTool extends BaseTool {
             if (!typed) {
                 return ToolResult.error("Could not find message input field.");
             }
-            XLog.i(TAG, "Step 4: Typed '" + message + "'");
+            XLog.i(TAG, "Step 4: Typed message chars=" + message.length());
             Thread.sleep(500);
 
             // Step 5: Tap send (by desc) or press Enter as fallback
@@ -157,7 +157,7 @@ public class SendMessageTool extends BaseTool {
         collectTextNodesInRegion(root, 0, 300, topNodes);
         for (AccessibilityNodeInfo node : topNodes) {
             if (ContactMatchUtils.matchesTarget(node.getText(), node.getContentDescription(), normalizedAliases, digitAliases)) {
-                XLog.d(TAG, "isAlreadyInChatWith: matched toolbar target text=" + node.getText() + " desc=" + node.getContentDescription());
+                XLog.d(TAG, "isAlreadyInChatWith: matched toolbar target");
                 return true;
             }
         }
@@ -258,7 +258,7 @@ public class SendMessageTool extends BaseTool {
         for (AccessibilityNodeInfo node : editables) {
             Rect bounds = new Rect();
             node.getBoundsInScreen(bounds);
-            XLog.d(TAG, "  EditText at y=" + bounds.centerY() + " text=" + node.getText() + " hint=" + node.getHintText());
+            XLog.d(TAG, "  EditText at y=" + bounds.centerY() + " textPresent=" + (node.getText() != null) + " hintPresent=" + (node.getHintText() != null));
             if (bounds.centerY() > bestY) {
                 bestY = bounds.centerY();
                 best = node;
@@ -275,7 +275,7 @@ public class SendMessageTool extends BaseTool {
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, message);
         boolean ok = best.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
-        XLog.i(TAG, "typeInBottomEditText: setText='" + message + "' at y=" + bestY + " result=" + ok);
+        XLog.i(TAG, "typeInBottomEditText: setText chars=" + message.length() + " at y=" + bestY + " result=" + ok);
         return ok;
     }
 
@@ -348,7 +348,7 @@ public class SendMessageTool extends BaseTool {
         CharSequence composerText = composer.getText();
         String current = composerText != null ? composerText.toString().trim() : "";
         String expected = expectedMessage != null ? expectedMessage.trim() : "";
-        XLog.i(TAG, "tapSendOrEnter: " + pathLabel + " verification composerText='" + current + "'");
+        XLog.i(TAG, "tapSendOrEnter: " + pathLabel + " verification composerChars=" + current.length());
 
         if (current.isEmpty()) {
             return true;

@@ -175,7 +175,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                 is SystemMessage -> { /* handled in createConversation */ }
                 is UserMessage -> {
                     val conv = conversation ?: throw RuntimeException("LiteRT-LM conversation not initialized — engine may have failed to load the model")
-                    XLog.d(TAG, "chat: sendMessage user (${msg.singleText().take(80)}...) sendCount=$sendCount")
+                    XLog.d(TAG, "chat: sendMessage user chars=${msg.singleText().length} sendCount=$sendCount")
                     try {
                         lastResponse = conv.sendMessage(msg.singleText())
                     } catch (e: Exception) {
@@ -183,7 +183,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                         // Extract raw model output from error message and parse ourselves.
                         val errorMsg = e.message ?: ""
                         if (errorMsg.contains("Failed to parse tool calls") && errorMsg.contains("tool_call")) {
-                            XLog.w(TAG, "SDK tool call parse failed, extracting from error: ${errorMsg.take(200)}")
+                            XLog.w(TAG, "SDK tool call parse failed; extracting from error metadata (chars=${errorMsg.length})")
                             // Extract the raw output between "from response: " and the next error description
                             val rawOutput = errorMsg.substringAfter("from response: ").substringBefore("code block:")
                                 .ifEmpty { errorMsg.substringAfter("from response: ") }
@@ -200,13 +200,13 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                     val truncatedResult = msg.text().take(400)
                     val toolResultText = "[Tool ${msg.toolName()} result]: $truncatedResult"
                     val conv = conversation ?: throw RuntimeException("LiteRT-LM conversation not initialized — engine may have failed to load the model")
-                    XLog.d(TAG, "chat: sendMessage toolResult (${toolResultText.take(80)}...) sendCount=$sendCount")
+                    XLog.d(TAG, "chat: sendMessage toolResult chars=${toolResultText.length} sendCount=$sendCount")
                     try {
                         lastResponse = conv.sendMessage(toolResultText)
                     } catch (e: Exception) {
                         val errorMsg = e.message ?: ""
                         if (errorMsg.contains("Failed to parse tool calls") && errorMsg.contains("tool_call")) {
-                            XLog.w(TAG, "SDK tool call parse failed on toolResult, extracting: ${errorMsg.take(200)}")
+                            XLog.w(TAG, "SDK tool call parse failed on toolResult (errorChars=${errorMsg.length})")
                             val rawOutput = errorMsg.substringAfter("from response: ").substringBefore("code block:")
                                 .ifEmpty { errorMsg.substringAfter("from response: ") }
                             lastResponse = rawOutput.trim()
@@ -331,14 +331,14 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                         repeat(open - close) { fixed += "}" }
                         val args = GSON.fromJson(fixed, Map::class.java) as Map<*, *>
                         val argsStr = GSON.toJson(args)
-                        XLog.d(TAG, "extractToolCalls: parsed name=$name args=$argsStr from tool_name{} format")
+                        XLog.d(TAG, "extractToolCalls: parsed name=$name argChars=${argsStr.length} from tool_name{} format")
                         calls.add(ToolExecutionRequest.builder()
                             .id("local_${System.currentTimeMillis()}")
                             .name(name)
                             .arguments(argsStr)
                             .build())
                     } catch (e: Exception) {
-                        XLog.w(TAG, "extractToolCalls: failed to parse tool_name{} format: $content", e)
+                        XLog.w(TAG, "extractToolCalls: failed to parse tool_name{} format (chars=${content.length})")
                     }
                 }
             }
@@ -401,7 +401,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
     private fun parseGemma4NativeCall(rawContent: String): ToolExecutionRequest? {
         return try {
             val content = rawContent.trim()
-            XLog.d(TAG, "parseGemma4NativeCall: raw=$content")
+            XLog.d(TAG, "parseGemma4NativeCall: chars=${content.length}")
 
             // Extract name and params — supports both call:name{...} and call:name("...")
             val nameMatch = Regex("""^call:(\w+)[\(\{]""").find(content) ?: run {
@@ -421,7 +421,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
             if (openChar == '(' && !paramsRaw.contains(':') && !paramsRaw.contains('=')) {
                 val cleanVal = paramsRaw.trim().removeSurrounding("\"").removeSurrounding("<|\"", "\"|>")
                 val argsJson = GSON.toJson(mapOf("app_name" to cleanVal, "package_name" to cleanVal, "text" to cleanVal, "key" to cleanVal, "summary" to cleanVal))
-                XLog.d(TAG, "parseGemma4NativeCall: name=$name simpleArg=$cleanVal args=$argsJson")
+                XLog.d(TAG, "parseGemma4NativeCall: name=$name simpleArgChars=${cleanVal.length} argChars=${argsJson.length}")
                 return ToolExecutionRequest.builder()
                     .id("local_${System.currentTimeMillis()}")
                     .name(name)
@@ -455,7 +455,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
             }
 
             val argsJson = GSON.toJson(argsMap)
-            XLog.d(TAG, "parseGemma4NativeCall: name=$name args=$argsJson")
+            XLog.d(TAG, "parseGemma4NativeCall: name=$name argChars=${argsJson.length}")
 
             ToolExecutionRequest.builder()
                 .id("local_${System.currentTimeMillis()}")
@@ -463,7 +463,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                 .arguments(argsJson)
                 .build()
         } catch (e: Exception) {
-            XLog.w(TAG, "parseGemma4NativeCall failed: $rawContent", e)
+            XLog.w(TAG, "parseGemma4NativeCall failed (chars=${rawContent.length})")
             null
         }
     }
@@ -500,7 +500,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                 GSON.fromJson(fixedJson, Map::class.java) as Map<*, *>
             } catch (e: Exception) {
                 // Fallback: extract name and arguments with regex
-                XLog.w(TAG, "JSON parse failed, trying regex fallback: $fixedJson")
+                XLog.w(TAG, "JSON parse failed; trying regex fallback (chars=${fixedJson.length})")
                 val nameRegex = Regex(""""name"\s*:\s*"(\w+)"""")
                 val argsRegex = Regex(""""arguments"\s*:\s*\{([^}]*)\}""")
                 val n = nameRegex.find(fixedJson)?.groupValues?.get(1) ?: return null
@@ -522,7 +522,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                 .arguments(argsJson)
                 .build()
         } catch (e: Exception) {
-            XLog.w(TAG, "Failed to parse tool call JSON: $json", e)
+            XLog.w(TAG, "Failed to parse tool call JSON (chars=${json.length})")
             null
         }
     }

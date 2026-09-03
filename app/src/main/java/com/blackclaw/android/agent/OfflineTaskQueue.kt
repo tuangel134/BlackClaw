@@ -1,6 +1,7 @@
 package com.blackclaw.android.agent
 
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -70,8 +71,11 @@ object OfflineTaskQueue {
             list.removeAt(0)
         }
         list.add(task)
-        save(list)
-        XLog.i(TAG, "Queued task: '${text.take(50)}' (${list.size} pending)")
+        if (!save(list)) {
+            XLog.e(TAG, "Could not persist queued task securely")
+            return null
+        }
+        XLog.i(TAG, "Queued task: chars=${task.text.length} pending=${list.size}")
         return task.id
     }
 
@@ -80,7 +84,7 @@ object OfflineTaskQueue {
      */
     @Synchronized
     fun pendingTasks(): List<QueuedTask> {
-        val raw = KVUtils.getString(KEY, "")
+        val raw = readEncryptedOrMigrateLegacy() ?: return emptyList()
         if (raw.isBlank()) return emptyList()
         return runCatching {
             val arr = JSONArray(raw)
@@ -98,9 +102,13 @@ object OfflineTaskQueue {
     fun dequeue(): QueuedTask? {
         val list = pendingTasks().toMutableList()
         if (list.isEmpty()) return null
-        val task = list.removeAt(0)
-        save(list)
-        XLog.i(TAG, "Dequeued task: '${task.text.take(50)}' (${list.size} remaining)")
+        val task = list.first()
+        val remaining = list.drop(1)
+        if (!save(remaining)) {
+            XLog.e(TAG, "Could not persist queue removal securely")
+            return null
+        }
+        XLog.i(TAG, "Dequeued task: chars=${task.text.length} remaining=${remaining.size}")
         return task
     }
 
@@ -111,7 +119,10 @@ object OfflineTaskQueue {
     fun drainAll(): List<QueuedTask> {
         val tasks = pendingTasks()
         if (tasks.isEmpty()) return emptyList()
-        save(emptyList())
+        if (!save(emptyList())) {
+            XLog.e(TAG, "Could not persist queue drain securely")
+            return emptyList()
+        }
         XLog.i(TAG, "Drained ${tasks.size} queued tasks")
         return tasks
     }
@@ -123,8 +134,7 @@ object OfflineTaskQueue {
     fun remove(taskId: String): Boolean {
         val list = pendingTasks().toMutableList()
         val removed = list.removeAll { it.id == taskId }
-        if (removed) save(list)
-        return removed
+        return removed && save(list)
     }
 
     fun isEmpty(): Boolean = pendingTasks().isEmpty()
@@ -132,13 +142,40 @@ object OfflineTaskQueue {
 
     @Synchronized
     fun clear() {
-        save(emptyList())
+        if (!save(emptyList())) XLog.e(TAG, "Could not clear queued tasks securely")
     }
 
-    private fun save(tasks: List<QueuedTask>) {
+    /**
+     * Queue entries are user-authored tasks and may contain message text, contacts,
+     * URLs or other private context. Prefer encrypted storage and migrate the legacy
+     * MMKV document only after an encrypted read-back proves the write succeeded.
+     */
+    private fun readEncryptedOrMigrateLegacy(): String? {
+        if (SecretStore.contains(KEY)) return SecretStore.getString(KEY)
+
+        val legacy = KVUtils.getString(KEY, "")
+        if (legacy.isBlank()) return ""
+        val migrated = SecretStore.putString(KEY, legacy) && SecretStore.getString(KEY) == legacy
+        if (migrated) {
+            KVUtils.remove(KEY)
+            KVUtils.sync()
+            XLog.i(TAG, "Migrated offline task queue to encrypted storage")
+        } else {
+            XLog.w(TAG, "Offline task queue migration deferred; legacy data retained")
+        }
+        return legacy
+    }
+
+    private fun save(tasks: List<QueuedTask>): Boolean {
         val arr = JSONArray()
         tasks.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY, arr.toString())
+        val encoded = arr.toString()
+        if (!SecretStore.putString(KEY, encoded)) return false
+
+        // A successful secure write supersedes any legacy MMKV copy. Removing it only
+        // after commit keeps migration/write failures lossless.
+        KVUtils.remove(KEY)
         KVUtils.sync()
+        return true
     }
 }

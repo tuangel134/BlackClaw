@@ -89,10 +89,10 @@ object KBManager {
                 .sortedByDescending { it.modified }
                 .take(10)
                 .toList()
-            XLog.i(TAG, "kb_search: \"$query\" → ${results.size} results")
+            XLog.i(TAG, "kb_search: queryChars=${query.length} results=${results.size}")
             Result.success(results)
         } catch (e: Exception) {
-            XLog.e(TAG, "kb_search failed: $query", e)
+            XLog.e(TAG, "kb_search failed: queryChars=${query.length} type=${e.javaClass.simpleName}")
             Result.failure(e)
         }
     }
@@ -159,10 +159,10 @@ object KBManager {
                 else -> ""
             }
             file.appendText("- [ ]$priorityPart $text$duePart\n")
-            XLog.i(TAG, "kb_add_todo: \"$text\" → $todoPath")
+            XLog.i(TAG, "kb_add_todo: textChars=${text.length} path=$todoPath")
             Result.success("Added todo to $todoPath")
         } catch (e: Exception) {
-            XLog.e(TAG, "kb_add_todo failed: $text", e)
+            XLog.e(TAG, "kb_add_todo failed: textChars=${text.length} type=${e.javaClass.simpleName}")
             Result.failure(e)
         }
     }

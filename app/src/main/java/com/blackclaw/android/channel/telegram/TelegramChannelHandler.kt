@@ -75,7 +75,7 @@ class TelegramChannelHandler(
 
                     val json = JSONObject(body)
                     if (!json.optBoolean("ok", false)) {
-                        XLog.e(TAG, "Telegram getUpdates failed: code=$code, body=$body")
+                        XLog.e(TAG, "Telegram getUpdates failed: code=$code, bodyLength=${body.length}")
                         if (code == 401 || code == 404) {
                             XLog.e(TAG, "Telegram Bot Token invalid, stopping polling")
                             break
@@ -261,7 +261,7 @@ class TelegramChannelHandler(
         val code = response.code
         if (code !in 200..299) {
             val respBody = response.body?.string()
-            XLog.w(TAG, "Telegram sendMessage failed: code=$code, parseMode=$parseMode, resp=$respBody")
+            XLog.w(TAG, "Telegram sendMessage failed: code=$code, parseMode=$parseMode, responseLength=${respBody?.length ?: 0}")
         } else {
             XLog.i(TAG, "Telegram reply succeeded: code=$code, parseMode=$parseMode")
         }

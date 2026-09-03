@@ -99,23 +99,48 @@ class AutomationCallerPolicyTest {
         }
     }
 
-    @Test fun `an empty allowlist imposes no per-caller restriction`() {
-        // The manifest signature permission is then the only gate. This preserves
-        // the pre-existing behaviour rather than silently breaking same-signature
-        // callers the moment the fix lands.
-        listOf(null, TASKER, EVIL).forEach {
+    @Test fun `an empty allowlist denies every third-party caller without a token`() {
+        assertEquals(
+            Decision.DENY_UNIDENTIFIED_CALLER,
+            AutomationCallerPolicy.decide(null, SELF, emptySet()),
+        )
+        listOf(TASKER, EVIL).forEach {
             assertEquals(
                 "failed for '$it'",
-                Decision.ALLOW,
+                Decision.DENY_NOT_ALLOWLISTED,
                 AutomationCallerPolicy.decide(it, SELF, emptySet()),
             )
         }
     }
 
+    @Test fun `a valid automation token authorizes an unidentified caller`() {
+        assertEquals(
+            Decision.ALLOW,
+            AutomationCallerPolicy.decide(
+                callingPackage = null,
+                selfPackage = SELF,
+                allowlist = emptySet(),
+                tokenPresented = true,
+            ),
+        )
+    }
+
+    @Test fun `a valid automation token also authorizes a non-allowlisted identified caller`() {
+        assertEquals(
+            Decision.ALLOW,
+            AutomationCallerPolicy.decide(
+                callingPackage = EVIL,
+                selfPackage = SELF,
+                allowlist = setOf(TASKER),
+                tokenPresented = true,
+            ),
+        )
+    }
+
     @Test fun `our own package is always permitted`() {
         assertEquals(
             Decision.ALLOW,
-            AutomationCallerPolicy.decide(SELF, SELF, setOf(TASKER)),
+            AutomationCallerPolicy.decide(SELF, SELF, emptySet()),
         )
     }
 

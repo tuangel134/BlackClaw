@@ -7,6 +7,7 @@ import com.blackclaw.android.assistant.RoutineEngine
 import com.blackclaw.android.tool.ToolRegistry
 import com.blackclaw.android.tool.guard.ToolExecutionContext
 import com.blackclaw.android.tool.guard.ToolRiskPolicy
+import com.blackclaw.android.server.ConfigServerPolicy
 import com.blackclaw.android.utils.KVUtils
 import com.blackclaw.android.utils.XLog
 import java.text.SimpleDateFormat
@@ -217,7 +218,9 @@ object AutomationProfileEngine {
             }
             AutomationProfileStore.TriggerType.WEBHOOK ->
                 p["token"]?.toString().orEmpty().let { expected ->
-                    expected.isNotBlank() && expected == a["token"]
+                    // Reuse the hardened secret comparison already shared by other
+                    // authenticated BlackClaw entry points.
+                    expected.isNotBlank() && ConfigServerPolicy.tokensMatch(expected, a["token"])
                 }
         }
     }

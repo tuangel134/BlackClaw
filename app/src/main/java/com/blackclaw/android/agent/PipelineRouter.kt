@@ -57,14 +57,14 @@ class PipelineRouter(private val context: Context) {
         // not be partially handled by Tier 1 deterministic matching.
         val lower = task.lowercase()
         if (lower.contains(" and ") || lower.contains(" then ") || lower.contains(" after ")) {
-            XLog.i(TAG, "Compound task detected, skipping Tier 1: $task")
+            XLog.i(TAG, "Compound task detected; skipping Tier 1 (chars=${task.length})")
             return Route.AgentLoop(task)
         }
 
         // Tier 1: Deterministic regex matching
         val parseResult = TaskParser.parse(task)
         if (parseResult != null) {
-            XLog.i(TAG, "Tier 1 match: ${parseResult.action} → ${parseResult.description}")
+            XLog.i(TAG, "Tier 1 match: ${parseResult.action}")
 
             // Intent-based action (call, alarm, settings, URL)
             if (parseResult.intent != null) {
@@ -85,7 +85,7 @@ class PipelineRouter(private val context: Context) {
         val matchedSkill = SkillRegistry.findByTrigger(task)
         if (matchedSkill != null) {
             val params = extractSkillParams(task, matchedSkill.triggerPatterns)
-            XLog.i(TAG, "Tier 1.5 skill match: ${matchedSkill.id} params=$params")
+            XLog.i(TAG, "Tier 1.5 skill match: ${matchedSkill.id} paramKeys=${params.keys.sorted()}")
             return Route.Skill(matchedSkill.id, params, matchedSkill.description)
         }
 
@@ -97,9 +97,9 @@ class PipelineRouter(private val context: Context) {
         val needsConfirmation = conversationDecision.confirmation ==
             com.blackclaw.android.conversation.ConversationRouter.Confirmation.REQUIRED
         if (needsConfirmation) {
-            XLog.w(TAG, "Destructive intent detected, agent loop will require confirmation: $task")
+            XLog.w(TAG, "Destructive intent detected; agent loop will require confirmation (chars=${task.length})")
         }
-        XLog.i(TAG, "No deterministic match, falling through to agent loop: $task")
+        XLog.i(TAG, "No deterministic match; falling through to agent loop (chars=${task.length})")
         return Route.AgentLoop(task, confirmationRequired = needsConfirmation)
     }
 
@@ -121,7 +121,7 @@ class PipelineRouter(private val context: Context) {
      */
     fun executeTool(toolName: String, params: Map<String, Any>): ToolResult {
         val result = ToolRegistry.getInstance().executeTool(toolName, params)
-        XLog.i(TAG, "Executed tool: $toolName → ${if (result.isSuccess) "success" else result.error}")
+        XLog.i(TAG, "Executed tool: $toolName → ${if (result.isSuccess) "success" else "failed"}")
         return result
     }
 

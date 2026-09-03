@@ -43,7 +43,7 @@ object UserMemoryStore {
      * Supplying [timestampOf] is what stops an actively-maintained fact from being
      * evicted in favour of an untouched one that merely sits later in the list.
      */
-    private val store = object : JsonListStore<Fact>(KEY, MAX_FACTS) {
+    private val store = object : JsonListStore<Fact>(KEY, MAX_FACTS, encrypted = true) {
         override val logTag = "UserMemoryStore"
         override fun toJson(item: Fact): JSONObject = item.toJson()
         override fun fromJson(json: JSONObject): Fact? = runCatching { Fact.fromJson(json) }
@@ -52,10 +52,6 @@ object UserMemoryStore {
     }
 
     fun all(): List<Fact> = store.all()
-
-    private fun saveAll(facts: List<Fact>) {
-        store.replaceAll(facts)
-    }
 
     /**
      * Keep the [max] most recently touched facts.
@@ -82,40 +78,26 @@ object UserMemoryStore {
 
     /** Add or update a fact. If a fact with the same key already exists, replace it. */
     @Synchronized
-    fun remember(key: String, value: String): Fact {
-        val now = System.currentTimeMillis()
-        val current = all().toMutableList()
-        val idx = current.indexOfFirst { it.key.equals(key, ignoreCase = true) }
+    fun remember(key: String, value: String): Fact? {
+        val existing = all().firstOrNull { it.key.equals(key, ignoreCase = true) }
         val fact = Fact(
-            id = if (idx >= 0) current[idx].id else UUID.randomUUID().toString().take(8),
+            id = existing?.id ?: UUID.randomUUID().toString().take(8),
             key = key.trim(),
             value = value.trim(),
-            addedAtMs = now,
+            addedAtMs = System.currentTimeMillis(),
         )
-        if (idx >= 0) current[idx] = fact else current.add(fact)
-        saveAll(current)
-        return fact
+        val persisted = store.upsert(fact) { it.key.equals(fact.key, ignoreCase = true) }
+        return persisted.firstOrNull { it.id == fact.id && it == fact }
     }
 
     @Synchronized
-    fun forget(idOrKey: String): Boolean {
-        val current = all().toMutableList()
-        val before = current.size
-        current.removeAll {
-            it.id.equals(idOrKey, ignoreCase = true) ||
+    fun forget(idOrKey: String): Boolean = store.removeAll {
+        it.id.equals(idOrKey, ignoreCase = true) ||
             it.key.equals(idOrKey, ignoreCase = true)
-        }
-        if (current.size == before) return false
-        saveAll(current)
-        return true
-    }
+    } > 0
 
     @Synchronized
-    fun forgetAll(): Int {
-        val n = all().size
-        saveAll(emptyList())
-        return n
-    }
+    fun forgetAll(): Int = store.clear()
 
     @Synchronized
     fun search(query: String): List<Fact> {

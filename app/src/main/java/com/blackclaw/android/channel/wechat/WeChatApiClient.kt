@@ -129,7 +129,7 @@ class WeChatApiClient(
             val rawText = response.body?.string() ?: ""
             response.close()
             if (code !in 200..299) {
-                XLog.e(TAG, "$label: HTTP $code, body=${rawText.take(200)}")
+                XLog.e(TAG, "$label: HTTP $code, responseLength=${rawText.length}")
                 null
             } else {
                 rawText
@@ -201,7 +201,7 @@ class WeChatApiClient(
         }
         val rawText = apiFetch("ilink/bot/sendmessage", body, apiClient, "sendMessage")
         if (rawText != null && rawText.isNotEmpty() && rawText != "{}") {
-            XLog.i(TAG, "sendMessage response: $rawText")
+            XLog.i(TAG, "sendMessage response received (${rawText.length} chars)")
         }
         return rawText != null
     }
@@ -232,7 +232,7 @@ class WeChatApiClient(
             val json = JSONObject(rawText)
             val ret = json.optInt("ret", 0)
             if (ret != 0) {
-                XLog.w(TAG, "getUploadUrl: ret=$ret, body=$rawText")
+                XLog.w(TAG, "getUploadUrl: ret=$ret, responseLength=${rawText.length}")
                 return null
             }
             json.optString("upload_param", "").ifEmpty { null }

@@ -359,7 +359,13 @@ object ToolRegistry {
             ToolResult.error("Tool '$name' timed out after ${timeoutMs / 1000}s. The action may still be in progress.")
         } catch (e: Exception) {
             val cause = (e as? java.util.concurrent.ExecutionException)?.cause ?: e
-            com.blackclaw.android.utils.XLog.e("ToolRegistry", "Tool '$name' execution failed with params=$params", cause)
+            // Parameter values can contain passwords, message bodies, tokens and other
+            // private data. Keys are enough to diagnose schema/caller mistakes.
+            com.blackclaw.android.utils.XLog.e(
+                "ToolRegistry",
+                "Tool '$name' execution failed (paramKeys=${params.keys.sorted()})",
+                cause,
+            )
             ToolResult.error("Tool execution failed: ${cause.message}")
         }
     }

@@ -38,7 +38,7 @@ object SkillRegistry {
         // Compound tasks with conjunctions should go to agent loop, not skills.
         // Skills are for simple, single-action commands only.
         if (lower.contains(" and ") || lower.contains(" then ") || lower.contains(" after ")) {
-            XLog.d(TAG, "Compound task detected, skipping skill matching: $task")
+            XLog.d(TAG, "Compound task detected; skipping skill matching (chars=${task.length})")
             return null
         }
         return skills.values.find { skill ->

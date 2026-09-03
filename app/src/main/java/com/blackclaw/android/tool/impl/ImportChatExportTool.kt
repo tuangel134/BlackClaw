@@ -80,7 +80,9 @@ class ImportChatExportTool : BaseTool() {
                     conversationContext = rendered,
                 )
             }
-            AutoReplyProfileStore.upsert(updated)
+            if (AutoReplyProfileStore.upsert(updated) == null) {
+                return ToolResult.error("Could not store the imported conversation securely.")
+            }
             return ToolResult.success(
                 "Importadas ${stats.messageCount} mensajes (${sendersStr}). " +
                 "Guardado en perfil de auto-respuesta para '$contactName'."

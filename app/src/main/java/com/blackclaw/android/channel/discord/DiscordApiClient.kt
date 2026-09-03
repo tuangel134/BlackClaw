@@ -135,7 +135,7 @@ class DiscordApiClient private constructor() {
                 if (response.isSuccessful) {
                     callback?.onSuccess(responseBody)
                 } else {
-                    XLog.e(TAG, "Request failed: HTTP ${response.code} $responseBody")
+                    XLog.e(TAG, "Request failed: HTTP ${response.code} bodyChars=${responseBody.length}")
                     callback?.onFailure("HTTP ${response.code}: $responseBody")
                 }
             }

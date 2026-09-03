@@ -1,6 +1,7 @@
 package com.blackclaw.android.automation
 
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -170,8 +171,25 @@ object AutomationProfileStore {
 
     @Synchronized
     fun list(): List<Profile> {
-        val raw = KVUtils.getString(KEY, "")
+        val secure = SecretStore.getString(KEY)
+        val legacy = if (secure == null) KVUtils.getString(KEY, "") else ""
+        val raw = secure ?: legacy
         if (raw.isBlank()) return emptyList()
+
+        // Profiles may contain webhook tokens, notification text and other private
+        // automation data. Migrate the entire document atomically rather than trying
+        // to redact individual fields and accidentally leaving a future secret behind.
+        if (secure == null && legacy.isNotBlank()) {
+            val migrated = SecretStore.putString(KEY, legacy) && SecretStore.getString(KEY) == legacy
+            if (migrated) {
+                KVUtils.remove(KEY)
+                KVUtils.sync()
+                XLog.i(TAG, "Migrated automation profiles to encrypted storage")
+            } else {
+                XLog.w(TAG, "Automation profile migration deferred; legacy data retained")
+            }
+        }
+
         return runCatching {
             val array = JSONArray(raw)
             (0 until array.length()).mapNotNull { index ->
@@ -226,7 +244,9 @@ object AutomationProfileStore {
         val remaining = list().filterNot {
             it.id == stored.id || it.name.equals(stored.name, ignoreCase = true)
         }
-        save((remaining + stored).takeLast(MAX_PROFILES))
+        if (!save((remaining + stored).takeLast(MAX_PROFILES))) {
+            return Result.failure(IllegalStateException("Could not store automation profile securely"))
+        }
         return Result.success(stored)
     }
 
@@ -242,16 +262,15 @@ object AutomationProfileStore {
             updatedAtMs = System.currentTimeMillis(),
             approvedAtMs = if (enabled) current.approvedAtMs.coerceAtLeast(System.currentTimeMillis()) else current.approvedAtMs,
         )
-        save(all)
-        return true
+        return save(all)
     }
 
     @Synchronized
     fun delete(idOrName: String): Boolean {
         val all = list().toMutableList()
         val removed = all.removeAll { it.id == idOrName || it.name.equals(idOrName, true) }
-        if (removed) save(all)
-        return removed
+        if (!removed) return false
+        return save(all)
     }
 
     @Synchronized
@@ -272,8 +291,7 @@ object AutomationProfileStore {
             lastEventType = eventType,
             updatedAtMs = now,
         )
-        save(all)
-        return true
+        return save(all)
     }
 
     @Synchronized
@@ -289,15 +307,20 @@ object AutomationProfileStore {
             lastEventType = eventType,
             updatedAtMs = now,
         )
-        save(all)
-        return true
+        return save(all)
     }
 
-    private fun save(profiles: List<Profile>) {
+    private fun save(profiles: List<Profile>): Boolean {
         val array = JSONArray()
         profiles.forEach { array.put(it.toJson()) }
-        KVUtils.putString(KEY, array.toString())
+        val encoded = array.toString()
+        if (!SecretStore.putString(KEY, encoded)) {
+            XLog.e(TAG, "Could not store automation profiles securely; previous data retained")
+            return false
+        }
+        KVUtils.remove(KEY)
         KVUtils.sync()
+        return true
     }
 
     private fun Trigger.toJson() = JSONObject().apply {

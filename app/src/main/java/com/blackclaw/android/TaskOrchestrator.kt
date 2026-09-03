@@ -162,7 +162,7 @@ class TaskOrchestrator(
         // Acquire task lock if not already held
         if (!isTaskRunning()) {
             if (!tryAcquireTask(messageID, channel, task, autoReturnToChat, originOverride)) {
-                XLog.w(TAG, "Failed to acquire task lock for: $task")
+                XLog.w(TAG, "Failed to acquire task lock (chars=${task.length})")
                 taskEventCallback?.invoke(TaskEvent.Failed("Another task is running"))
                 return
             }
@@ -213,7 +213,7 @@ class TaskOrchestrator(
                         val toolResult = pipelineRouter.executeTool(route.toolName, route.params)
                         if (!toolResult.isSuccess) {
                             val error = toolResult.error ?: "Unknown error"
-                            XLog.w(TAG, "Tier 1 tool failed: $error")
+                            XLog.w(TAG, "Tier 1 tool failed: ${route.toolName} errorChars=${error.length}")
                             taskEventCallback?.invoke(TaskEvent.Completed("Failed: ${route.description}"))
                             ChannelManager.sendMessage(channel, "✗ ${route.description}: $error", messageID)
                             "Failed: ${route.description}: $error"
@@ -239,7 +239,7 @@ class TaskOrchestrator(
                         }
                         onTaskFinished()
                     }
-                    XLog.i(TAG, "onComplete: rounds=0, totalTokens=0, model=direct, answer=$answer")
+                    XLog.i(TAG, "onComplete: rounds=0, totalTokens=0, model=direct, answerChars=${answer.length}")
                 }, "direct-tool-${route.toolName}").start()
                 return
             }
@@ -267,7 +267,7 @@ class TaskOrchestrator(
                             } else {
                                 val fallbackGoal = skill.fallbackGoal
                                     .let { g -> route.params.entries.fold(g) { acc, (k, v) -> acc.replace("{$k}", v) } }
-                                XLog.i(TAG, "Skill ${skill.id} failed, falling back to agent loop: $fallbackGoal")
+                                XLog.i(TAG, "Skill ${skill.id} failed; falling back to agent loop (goalChars=${fallbackGoal.length})")
                                 taskEventCallback?.invoke(TaskEvent.ToolAction("Retrying with AI agent"))
                                 startNewTask(channel, fallbackGoal, messageID, isFallback = true)
                             }
@@ -361,7 +361,10 @@ class TaskOrchestrator(
             }
 
             override fun onToolCall(round: Int, toolId: String, toolName: String, parameters: String) {
-                XLog.d(TAG, "onToolCall: $toolId($toolName), $parameters")
+                // Never log raw tool parameters: remote_connect may contain an SSH
+                // password, messaging tools contain private message bodies, and API
+                // helpers may carry tokens. Length is enough for execution tracing.
+                XLog.d(TAG, "onToolCall: $toolId($toolName), params=${parameters.length} chars")
                 // Don't show floating circle for finish tool (it's just completion, not a real action)
                 val isFinish = toolName == "finish" || toolId == "finish"
                 if (!floatingShown && !isFinish) {
@@ -382,7 +385,7 @@ class TaskOrchestrator(
                 val success = result.isSuccess
                 var data = if (success) result.data else result.error
                 if (data != null && data.length > 300) data = data.substring(0, 300) + "..."
-                if (!success) XLog.e(TAG, "Tool failed: $toolName $data")
+                if (!success) XLog.e(TAG, "Tool failed: $toolName errorChars=${data?.length ?: 0}")
 
                 val displayName = com.blackclaw.android.tool.ToolRegistry.getInstance().getDisplayName(toolName)
                 taskEventCallback?.invoke(TaskEvent.ToolResult(displayName, success, data ?: ""))
@@ -398,13 +401,15 @@ class TaskOrchestrator(
                     ChannelManager.sendMessage(channel, result.data, messageID)
                 } else {
                     if (roundBuffer.isNotEmpty()) roundBuffer.append("\n")
-                    roundBuffer.append(app.getString(R.string.channel_msg_tool_execution, toolName + parameters,
+                    // Do not echo raw parameters into the conversation/channel status.
+                    // Some tools carry credentials or private message bodies.
+                    roundBuffer.append(app.getString(R.string.channel_msg_tool_execution, toolName,
                         if (success) app.getString(R.string.channel_msg_tool_success) else app.getString(R.string.channel_msg_tool_failure)))
                 }
             }
 
             override fun onComplete(round: Int, finalAnswer: String, totalTokens: Int, modelName: String?) {
-                XLog.i(TAG, "onComplete: rounds=$round, totalTokens=$totalTokens, model=$modelName, answer=$finalAnswer")
+                XLog.i(TAG, "onComplete: rounds=$round, totalTokens=$totalTokens, model=$modelName, answerChars=${finalAnswer.length}")
                 // Track activity
                 runCatching { com.blackclaw.android.utils.ActivityTracker.recordTaskCompleted(true, totalTokens) }
                 val cancelAnswers = setOf(
@@ -458,7 +463,7 @@ class TaskOrchestrator(
             }
 
             override fun onError(round: Int, error: Exception, totalTokens: Int) {
-                XLog.e(TAG, "onError: ${error.message}, totalTokens=$totalTokens", error)
+                XLog.e(TAG, "onError: type=${error.javaClass.simpleName}, totalTokens=$totalTokens")
                 runCatching { com.blackclaw.android.utils.ActivityTracker.recordTaskCompleted(false, totalTokens) }
                 taskEventCallback?.invoke(TaskEvent.Failed(error.message ?: "Unknown error"))
                 ForegroundService.resetToIdle(ClawApplication.instance)

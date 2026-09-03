@@ -1,6 +1,7 @@
 package com.blackclaw.android.memory
 
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -44,6 +45,12 @@ import org.json.JSONObject
 abstract class JsonListStore<T>(
     private val storageKey: String,
     private val maxItems: Int,
+    /**
+     * Use AndroidKeyStore-backed persistence for stores containing user content.
+     * Kept opt-in so pure JVM tests and genuinely non-sensitive stores do not need
+     * Android framework state.
+     */
+    private val encrypted: Boolean = false,
 ) {
 
     /** Tag for parse-failure logs. Defaults to the concrete class name. */
@@ -73,7 +80,8 @@ abstract class JsonListStore<T>(
      * hand-rolled copies got wrong.
      */
     fun append(item: T): List<T> = synchronized(lock) {
-        write(read() + item)
+        val current = read()
+        writeOrCurrent(readBeforeWrite = current, desired = current + item)
     }
 
     /**
@@ -85,33 +93,36 @@ abstract class JsonListStore<T>(
      * is exactly what made updated facts get evicted before untouched ones.
      */
     fun upsert(item: T, isSame: (T) -> Boolean): List<T> = synchronized(lock) {
-        val current = read().toMutableList()
-        val idx = current.indexOfFirst(isSame)
-        if (idx >= 0) current[idx] = item else current.add(item)
-        write(current)
+        val persisted = read()
+        val desired = persisted.toMutableList()
+        val idx = desired.indexOfFirst(isSame)
+        if (idx >= 0) desired[idx] = item else desired.add(item)
+        writeOrCurrent(readBeforeWrite = persisted, desired = desired)
     }
 
     fun removeAll(predicate: (T) -> Boolean): Int = synchronized(lock) {
         val current = read()
         val kept = current.filterNot(predicate)
         if (kept.size == current.size) return 0
-        write(kept)
-        current.size - kept.size
+        if (write(kept)) current.size - kept.size else 0
     }
 
     fun clear(): Int = synchronized(lock) {
-        val n = read().size
-        write(emptyList())
-        n
+        val current = read()
+        if (current.isEmpty()) return 0
+        if (write(emptyList())) current.size else 0
     }
 
     /** Overwrite wholesale. Applies the same cap as [append]. */
-    fun replaceAll(items: List<T>): List<T> = synchronized(lock) { write(items) }
+    fun replaceAll(items: List<T>): List<T> = synchronized(lock) {
+        val current = read()
+        writeOrCurrent(readBeforeWrite = current, desired = items)
+    }
 
     // ── Internals. Callers must hold the lock. ────────────────────────────────
 
     private fun read(): List<T> {
-        val raw = KVUtils.getString(storageKey, "")
+        val raw = readRaw()
         if (raw.isBlank()) return emptyList()
         val array = runCatching { JSONArray(raw) }.getOrElse {
             // The whole blob is unreadable, not just one record. Worth an error: it
@@ -132,16 +143,63 @@ abstract class JsonListStore<T>(
         return out
     }
 
-    private fun write(items: List<T>): List<T> {
+    private fun readRaw(): String {
+        if (!encrypted) return KVUtils.getString(storageKey, "")
+
+        if (SecretStore.contains(storageKey)) {
+            return SecretStore.getString(storageKey).orEmpty()
+        }
+
+        val legacy = KVUtils.getString(storageKey, "")
+        if (legacy.isBlank()) return ""
+
+        val written = SecretStore.putString(storageKey, legacy)
+        val verified = written && SecretStore.getString(storageKey) == legacy
+        if (verified) {
+            KVUtils.remove(storageKey)
+            // Migration is a one-time security boundary: make plaintext deletion
+            // durable before reporting the migration complete.
+            KVUtils.sync()
+            XLog.i(logTag, "Migrated '$storageKey' to encrypted storage")
+        } else {
+            // If an envelope was committed but could not be read back, remove it so
+            // the next read can retry from the still-intact legacy copy.
+            if (written) SecretStore.remove(storageKey)
+            XLog.w(logTag, "Encrypted migration deferred for '$storageKey'; legacy data retained")
+        }
+        return legacy
+    }
+
+    /** Persist [items]. False means the previous persisted value is still authoritative. */
+    private fun write(items: List<T>): Boolean {
         val capped = cap(items)
         val array = JSONArray()
         capped.forEach { array.put(toJson(it)) }
-        KVUtils.putString(storageKey, array.toString())
+        val encoded = array.toString()
+
+        if (encrypted) {
+            if (!SecretStore.putString(storageKey, encoded)) {
+                XLog.e(logTag, "Secure write failed for '$storageKey'; previous data retained")
+                return false
+            }
+            // A successful encrypted write supersedes any legacy plaintext copy.
+            if (KVUtils.contains(storageKey)) {
+                KVUtils.remove(storageKey)
+                KVUtils.sync()
+            }
+            return true
+        }
+
         // Deliberately no sync(). MMKV writes through an mmap'd region, so entries
         // already survive process death; sync() only buys durability against a hard
         // power cut, and it is an fsync — the expensive part of a store that appends
         // from UI callbacks.
-        return capped
+        return KVUtils.putString(storageKey, encoded)
+    }
+
+    private fun writeOrCurrent(readBeforeWrite: List<T>, desired: List<T>): List<T> {
+        val capped = cap(desired)
+        return if (write(capped)) capped else readBeforeWrite
     }
 
     /**

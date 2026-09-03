@@ -26,3 +26,7 @@ CLAUDE.local.md
 thoughts/
 .claudeignore
 /.kotlin/
+
+# Local AI/tooling state and scratch captures
+/.opencode/
+/shot-chat.png

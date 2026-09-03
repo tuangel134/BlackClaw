@@ -523,10 +523,12 @@ class LlmConfigActivity : BaseActivity() {
 
         // Clear API key button
         btnClear.setOnClickListener {
-            etApiKey.setText("")
-            KVUtils.setApiKeyForProvider(selectedProvider.name, "")
-            KVUtils.setLlmApiKey("")
-            Toast.makeText(this, "API key cleared", Toast.LENGTH_SHORT).show()
+            if (KVUtils.setCloudApiKey(selectedProvider.name, "")) {
+                etApiKey.setText("")
+                Toast.makeText(this, "API key cleared", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Could not update secure credential storage", Toast.LENGTH_LONG).show()
+            }
         }
 
         // Determine current provider from saved config
@@ -795,8 +797,9 @@ class LlmConfigActivity : BaseActivity() {
                 return@setOnClickListener
             }
 
-            // Save as default cloud model (independent of local config)
-            ModelConfigRepository.saveCloudDefault(
+            // Save as default cloud model (independent of local config). Secret
+            // persistence is intentionally verified before the visible config changes.
+            val saved = ModelConfigRepository.saveCloudDefault(
                 providerName = selectedProvider.name,
                 modelId = modelId,
                 baseUrl = baseUrl,
@@ -804,6 +807,10 @@ class LlmConfigActivity : BaseActivity() {
                 activateNow = !ModelConfigRepository.isAutomaticActive() &&
                     !ModelConfigRepository.isLocalActive()
             )
+            if (!saved) {
+                Toast.makeText(this, "Could not save API key securely. Configuration was not changed.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
             ClawApplication.appViewModelInstance.updateAgentConfig()
             ClawApplication.appViewModelInstance.initAgent()
             ClawApplication.appViewModelInstance.afterInit()

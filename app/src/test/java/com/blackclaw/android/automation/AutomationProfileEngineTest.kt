@@ -41,6 +41,17 @@ class AutomationProfileEngineTest {
             AutomationProfileStore.TriggerType.WEBHOOK, mapOf("token" to "secret-123"))))
         assertFalse(AutomationProfileEngine.matches(trigger, AutomationProfileEngine.Event(
             AutomationProfileStore.TriggerType.WEBHOOK, mapOf("token" to "wrong"))))
+        assertFalse(AutomationProfileEngine.matches(trigger, AutomationProfileEngine.Event(
+            AutomationProfileStore.TriggerType.WEBHOOK, emptyMap())))
+    }
+
+    @Test fun `webhook trigger with no configured secret never matches`() {
+        val trigger = AutomationProfileStore.Trigger(
+            AutomationProfileStore.TriggerType.WEBHOOK,
+            mapOf("token" to ""),
+        )
+        assertFalse(AutomationProfileEngine.matches(trigger, AutomationProfileEngine.Event(
+            AutomationProfileStore.TriggerType.WEBHOOK, mapOf("token" to ""))))
     }
 
     @Test fun `validator rejects unbounded or privileged profiles`() {

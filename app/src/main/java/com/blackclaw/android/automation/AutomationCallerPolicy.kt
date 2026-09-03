@@ -20,10 +20,10 @@ package com.blackclaw.android.automation
  *     turns it on to wire up one automation app has simultaneously opened the door
  *     to every other app on the device, including ones installed later.
  *
- * The manifest now gates both components behind a `signature` permission, which is
- * the real lock. This allowlist is the finer-grained second stage: it names the
- * specific packages the user sanctioned, so "enabled" stops meaning "enabled for
- * everyone".
+ * The broadcast receiver is gated by a `signature` permission. The Activity cannot
+ * use that same gate because Tasker/MacroDroid are third-party apps, so its boundary
+ * is stricter: self-package, an identified allowlisted caller, or a valid secret token.
+ * Unknown callers fail closed even when the allowlist is empty.
  *
  * ## Caller identity is only available to the Activity
  *
@@ -75,9 +75,8 @@ object AutomationCallerPolicy {
      *   it refuses to say.
      * @param selfPackage our own package name, so internal re-dispatch is not
      *   accidentally locked out.
-     * @param allowlist packages the user sanctioned. Empty means "no per-caller
-     *   restriction configured" — the manifest permission is then the only gate,
-     *   which is the pre-existing behaviour for same-signature callers.
+     * @param allowlist packages the user sanctioned. Empty means no third-party
+     *   package is authorized by identity; callers without a valid token fail closed.
      *
      * Comparison is exact, not case-insensitive: Android package names are
      * case-sensitive, so folding case would let `com.Evil` satisfy an allowlist
@@ -107,7 +106,6 @@ object AutomationCallerPolicy {
         if (tokenPresented) return Decision.ALLOW
         val caller = callingPackage?.trim().orEmpty()
         if (caller.isNotEmpty() && caller == selfPackage.trim()) return Decision.ALLOW
-        if (allowlist.isEmpty()) return Decision.ALLOW
         if (caller.isEmpty()) return Decision.DENY_UNIDENTIFIED_CALLER
         return if (caller in allowlist) Decision.ALLOW else Decision.DENY_NOT_ALLOWLISTED
     }
@@ -116,9 +114,9 @@ object AutomationCallerPolicy {
     fun denialMessage(decision: Decision, callingPackage: String?): String = when (decision) {
         Decision.ALLOW -> ""
         Decision.DENY_UNIDENTIFIED_CALLER ->
-            "BlackClaw could not identify the calling app, and an automation allowlist is " +
-                "configured. Launch the request with startActivityForResult so the caller " +
-                "package is visible, or clear the allowlist in BlackClaw Settings."
+            "BlackClaw could not identify the calling app. Supply the Automation Token " +
+                "shown in BlackClaw Settings, or launch with startActivityForResult from " +
+                "an explicitly allowlisted package."
         Decision.DENY_NOT_ALLOWLISTED ->
             "App '${callingPackage.orEmpty()}' is not in BlackClaw's external automation " +
                 "allowlist. Add it in BlackClaw Settings to permit it."

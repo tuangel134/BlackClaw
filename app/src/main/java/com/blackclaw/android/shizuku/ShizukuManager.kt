@@ -140,7 +140,7 @@ object ShizukuManager {
             try { process.destroy() } catch (_: Throwable) {}
             out.toString().trim()
         } catch (e: Throwable) {
-            XLog.w(TAG, "Shizuku sh('$command') failed: ${e.message}")
+            XLog.w(TAG, "Shizuku shell failed: commandChars=${command.length} type=${e.javaClass.simpleName}")
             null
         }
     }

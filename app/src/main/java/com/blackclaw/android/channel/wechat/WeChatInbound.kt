@@ -1,6 +1,7 @@
 package com.blackclaw.android.channel.wechat
 
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -15,18 +16,18 @@ object WeChatInbound {
 
     private const val TAG = "WeChatInbound"
 
-    /** MMKV key prefix for storing contextToken JSON */
+    /** Storage-key prefix for encrypted contextToken JSON. */
     private const val KV_PREFIX = "WECHAT_CONTEXT_TOKENS_"
 
     // ==================== Context Token Store (inbound.ts) ====================
     // contextToken is issued by getupdates, one per message, and must be echoed back when replying.
-    // In-memory map is the primary lookup; MMKV persistence ensures recovery after app restart (corresponds to 2.0.1 disk persistence).
+    // In-memory map is the primary lookup; encrypted persistence ensures recovery after app restart (corresponds to 2.0.1 disk persistence).
 
     private val contextTokenStore = ConcurrentHashMap<String, String>()
 
     private fun contextTokenKey(accountId: String, userId: String): String = "$accountId:$userId"
 
-    /** Store contextToken (memory + MMKV persistence). Corresponds to 2.0.1 inbound.ts setContextToken */
+    /** Store contextToken (memory + encrypted persistence). Corresponds to 2.0.1 inbound.ts setContextToken */
     fun setContextToken(accountId: String, userId: String, token: String) {
         contextTokenStore[contextTokenKey(accountId, userId)] = token
         persistContextTokens(accountId)
@@ -54,7 +55,7 @@ object WeChatInbound {
 
     // ==================== Persistence (added in 2.0.1) ====================
 
-    /** Persist all contextTokens for the specified account to MMKV */
+    /** Persist all contextTokens for the specified account using AndroidKeyStore-backed encryption. */
     private fun persistContextTokens(accountId: String) {
         val prefix = "$accountId:"
         val tokens = JSONObject()
@@ -63,16 +64,36 @@ object WeChatInbound {
                 tokens.put(key.removePrefix(prefix), value)
             }
         }
-        KVUtils.putString(KV_PREFIX + accountId, tokens.toString())
+        val storageKey = KV_PREFIX + accountId
+        if (SecretStore.putString(storageKey, tokens.toString())) {
+            KVUtils.remove(storageKey)
+            KVUtils.sync()
+        } else {
+            XLog.e(TAG, "persistContextTokens: secure persistence failed for account=$accountId")
+        }
     }
 
     /**
-     * Restore contextTokens from MMKV to memory. Call on app start / channel reconnect.
-     * Corresponds to 2.0.1 inbound.ts restoreContextTokens
+     * Restore contextTokens from encrypted storage to memory. Call on app start / channel reconnect.
+     * Corresponds to 2.0.1 inbound.ts restoreContextTokens. Legacy MMKV data is
+     * migrated only after encrypted read-back succeeds.
      */
     fun restoreContextTokens(accountId: String) {
-        val raw = KVUtils.getString(KV_PREFIX + accountId, "")
+        val storageKey = KV_PREFIX + accountId
+        val secure = SecretStore.getString(storageKey)
+        val legacy = if (secure == null) KVUtils.getString(storageKey, "") else ""
+        val raw = secure ?: legacy
         if (raw.isEmpty()) return
+
+        if (secure == null && legacy.isNotEmpty()) {
+            val migrated = SecretStore.putString(storageKey, legacy) && SecretStore.getString(storageKey) == legacy
+            if (migrated) {
+                KVUtils.remove(storageKey)
+                KVUtils.sync()
+            } else {
+                XLog.w(TAG, "restoreContextTokens: secure migration deferred for account=$accountId")
+            }
+        }
         try {
             val json = JSONObject(raw)
             var count = 0
@@ -90,7 +111,7 @@ object WeChatInbound {
     }
 
     /**
-     * Clear all contextTokens for the specified account (memory + MMKV).
+     * Clear all contextTokens for the specified account (memory + encrypted/legacy persistence).
      * Corresponds to 2.0.1 inbound.ts clearContextTokensForAccount
      */
     fun clearContextTokensForAccount(accountId: String) {
@@ -98,7 +119,10 @@ object WeChatInbound {
         contextTokenStore.keys().toList().forEach { key ->
             if (key.startsWith(prefix)) contextTokenStore.remove(key)
         }
-        KVUtils.putString(KV_PREFIX + accountId, "")
+        val storageKey = KV_PREFIX + accountId
+        SecretStore.remove(storageKey)
+        KVUtils.remove(storageKey)
+        KVUtils.sync()
         XLog.i(TAG, "clearContextTokensForAccount: cleared tokens for account=$accountId")
     }
 

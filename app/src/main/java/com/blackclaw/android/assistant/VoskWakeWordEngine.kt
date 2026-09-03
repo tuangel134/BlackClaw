@@ -170,7 +170,7 @@ class VoskWakeWordEngine {
                 awaitingCommand = false
             } else {
                 awaitingCommand = false
-                XLog.i(TAG, "Command (2nd phrase): '$text' whisper=$whisper")
+                XLog.i(TAG, "Command (2nd phrase): chars=${text.length} whisper=$whisper")
                 fire(text, whisper)
                 return
             }
@@ -180,7 +180,7 @@ class VoskWakeWordEngine {
         // reply (continuous conversation, Alexa-style).
         if (System.currentTimeMillis() < followUpUntil) {
             followUpUntil = 0
-            XLog.i(TAG, "Follow-up command: '$text' whisper=$whisper")
+            XLog.i(TAG, "Follow-up command: chars=${text.length} whisper=$whisper")
             fire(text, whisper)
             return
         }
@@ -197,7 +197,7 @@ class VoskWakeWordEngine {
         val command = rest.joinToString(" ").trim()
 
         if (command.isNotEmpty()) {
-            XLog.i(TAG, "Wake + command (1 breath): '$command' whisper=$whisper")
+            XLog.i(TAG, "Wake + command (1 breath): chars=${command.length} whisper=$whisper")
             fire(command, whisper)
         } else {
             XLog.i(TAG, "Wake only → awaiting command")

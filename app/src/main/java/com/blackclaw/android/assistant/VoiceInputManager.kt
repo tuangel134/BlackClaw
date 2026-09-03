@@ -302,7 +302,7 @@ object VoiceInputManager {
             return
         }
         BeepSuppressor.mute()   // silence the per-cycle recognition beep
-        XLog.i(TAG, "Wake loop: using SpeechRecognizer (word='$wakeWord')")
+        XLog.i(TAG, "Wake loop: using SpeechRecognizer (wakeWordChars=${wakeWord.length})")
         // SpeechRecognizer path can't measure amplitude → whisper=false.
         main.post { listenForWake { cmd -> onCommand(cmd, false) } }
     }
@@ -389,7 +389,7 @@ object VoiceInputManager {
                     val m = WakeWordMatcher.match(c, wakeWord)
                     if (m != null && m.command.isNotEmpty()) {
                         fired = true
-                        XLog.i(TAG, "Wake (partial) '${m.matchedVariant}' → '${m.command}'")
+                        XLog.i(TAG, "Wake (partial) matched; commandChars=${m.command.length}")
                         BeepSuppressor.restore()  // let TTS reply be heard
                         main.post { onCommand(m.command) }
                         restartWakeAfterDelay(onCommand, delayMs = 3000)
@@ -415,7 +415,7 @@ object VoiceInputManager {
     private fun handleWakeResult(candidates: List<String>, onCommand: (String) -> Unit) {
         for (text in candidates) {
             val m = WakeWordMatcher.match(text, wakeWord) ?: continue
-            XLog.i(TAG, "Wake word '${m.matchedVariant}' detected, command='${m.command}'")
+            XLog.i(TAG, "Wake word detected; commandChars=${m.command.length}")
             BeepSuppressor.restore()  // audible TTS / command
             if (m.command.isNotEmpty()) {
                 main.post { onCommand(m.command) }

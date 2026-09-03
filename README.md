@@ -411,6 +411,8 @@ Then:
 ```
 
 See [`RELEASING.md`](RELEASING.md) for the full release process.
+For the complete route map, Android entry points, ADB recipes and GitHub commands,
+see [`MAPA_PROYECTO_Y_COMANDOS.md`](MAPA_PROYECTO_Y_COMANDOS.md).
 
 ---
 
@@ -510,6 +512,13 @@ PR guidelines, and conventions.
 ---
 
 ## Changelog
+
+### v1.2.20
+
+- Sensitive BlackClaw data now moves to Android Keystore-backed AES-GCM storage, including cloud/channel credentials, SSH connections, memories, routines, scheduled/offline tasks, automation profiles, auto-reply profiles and WeChat context tokens; legacy MMKV values are removed only after verified encrypted migration.
+- External automation is hardened with fail-closed caller/token checks, explicit callback destinations, constant-time webhook token comparison, safer boot/assistant component exposure and encrypted automation tokens.
+- Agent, channel, ADB, Shizuku, SSH, messaging and local-model diagnostics no longer copy prompts, message bodies, tool parameters, commands, credentials or API responses into logcat.
+- Secure-storage failures are surfaced to the UI/tools without crashing, and reboot schedule normalization avoids replaying expired one-shot tasks while advancing recurring schedules to their next valid slot.
 
 ### v1.2.19
 

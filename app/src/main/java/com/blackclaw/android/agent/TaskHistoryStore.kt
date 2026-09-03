@@ -36,7 +36,7 @@ object TaskHistoryStore {
      * see [all] — so the two views are reversed exactly at this boundary rather than
      * leaving each caller to guess.
      */
-    private val store = object : JsonListStore<Entry>(KEY, MAX_ENTRIES) {
+    private val store = object : JsonListStore<Entry>(KEY, MAX_ENTRIES, encrypted = true) {
         override val logTag = "TaskHistoryStore"
         override fun toJson(item: Entry): JSONObject = JSONObject().apply {
             put("task", item.task)

@@ -20,8 +20,8 @@ class DiscordChannelHandler(
     private var lastChannelId: String? = null
 
     private val callback = object : DiscordCallback<String> {
-        override fun onSuccess(result: String) { XLog.i(TAG, "Discord reply succeeded: ${result.take(120)}") }
-        override fun onFailure(error: String) { XLog.e(TAG, "Discord reply failed: $error") }
+        override fun onSuccess(result: String) { XLog.i(TAG, "Discord reply succeeded: resultChars=${result.length}") }
+        override fun onFailure(error: String) { XLog.e(TAG, "Discord reply failed: errorChars=${error.length}") }
     }
 
     override fun isConnected(): Boolean = DiscordGatewayClient.getInstance().isConnected()

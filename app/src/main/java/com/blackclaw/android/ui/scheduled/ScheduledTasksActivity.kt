@@ -781,14 +781,18 @@ private fun CreateTaskSheet(
                     } else if (triggerAtMs <= System.currentTimeMillis()) {
                         error = "Elige una hora futura."
                     } else {
-                        ScheduledTaskManager.schedule(
+                        val saved = ScheduledTaskManager.schedule(
                             context = context,
                             mode = mode,
                             text = text.trim(),
                             triggerAtMs = triggerAtMs,
                             recurrence = recurrence,
                         )
-                        onSaved()
+                        if (saved != null) {
+                            onSaved()
+                        } else {
+                            error = "No se pudo guardar la tarea de forma segura. Desbloquea el dispositivo e inténtalo de nuevo."
+                        }
                     }
                 },
                 enabled = canSave,

@@ -175,25 +175,19 @@ class ConfigServer(
             )
         }
 
-        var reinitDiscord = false
-        var reinitTelegram = false
+        val discordToken = json.get("discordBotToken")?.asString
+            ?.takeUnless(ConfigServerPolicy::isMaskedValue)
+        val telegramToken = json.get("telegramBotToken")?.asString
+            ?.takeUnless(ConfigServerPolicy::isMaskedValue)
+        val reinitDiscord = discordToken != null
+        val reinitTelegram = telegramToken != null
 
-        // Discord config
-        if (json.has("discordBotToken")) {
-            val value = json.get("discordBotToken").asString
-            if (!ConfigServerPolicy.isMaskedValue(value)) {
-                KVUtils.setDiscordBotToken(value)
-                reinitDiscord = true
-            }
-        }
-
-        // Telegram config
-        if (json.has("telegramBotToken")) {
-            val value = json.get("telegramBotToken").asString
-            if (!ConfigServerPolicy.isMaskedValue(value)) {
-                KVUtils.setTelegramBotToken(value)
-                reinitTelegram = true
-            }
+        // One encrypted SharedPreferences transaction prevents a two-channel update
+        // from committing only one token if secure storage fails mid-request.
+        if ((reinitDiscord || reinitTelegram) &&
+            !KVUtils.setChannelBotTokens(discord = discordToken, telegram = telegramToken)
+        ) {
+            return secureStorageError()
         }
 
         // Re-initialize the corresponding channel
@@ -248,7 +242,7 @@ class ConfigServer(
         if (json.has("llmApiKey")) {
             val value = json.get("llmApiKey").asString
             if (!ConfigServerPolicy.isMaskedValue(value)) {
-                KVUtils.setLlmApiKey(value)
+                if (!KVUtils.setLlmApiKey(value)) return secureStorageError()
             }
         }
         if (json.has("llmBaseUrl")) {
@@ -282,6 +276,15 @@ class ConfigServer(
             addProperty("message", "ok")
         }
         return newFixedLengthResponse(Response.Status.OK, MIME_JSON, result.toString())
+    }
+
+    private fun secureStorageError(): Response {
+        XLog.e(TAG, "Secure credential persistence failed")
+        return newFixedLengthResponse(
+            Response.Status.INTERNAL_ERROR,
+            MIME_JSON,
+            """{"code":-1,"message":"secure credential storage unavailable"}""",
+        )
     }
 
     // ==================== Debug (DEBUG builds only) ====================
@@ -372,7 +375,7 @@ class ConfigServer(
             XLog.e(TAG, "Debug param parse error: ${e.message}")
         }
 
-        XLog.d(TAG, "Debug execute: $toolName params=$params")
+        XLog.d(TAG, "Debug execute: $toolName paramKeys=${params.keys.sorted()}")
 
         val toolResult = try {
             ToolRegistry.executeTool(toolName, params)

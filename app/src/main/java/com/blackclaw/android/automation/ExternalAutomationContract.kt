@@ -84,10 +84,13 @@ object ExternalAutomationContract {
         returnPackage: String? = null,
         mode: Mode? = null,
     ) {
-        if (returnAction.isNullOrBlank()) return
+        // Never emit an implicit result broadcast. Task results can contain screen,
+        // notification, clipboard or model output; without an explicit destination
+        // any installed receiver matching returnAction could observe that data.
+        if (!hasExplicitCallbackTarget(returnAction, returnPackage)) return
         try {
             val callback = Intent(returnAction).apply {
-                returnPackage?.takeIf { it.isNotBlank() }?.let { setPackage(it) }
+                setPackage(returnPackage!!.trim())
                 requestId?.let { putExtra(EXTRA_REQUEST_ID, it) }
                 putExtra(EXTRA_STATUS, status)
                 mode?.let { putExtra(EXTRA_MODE, it.name.lowercase()) }
@@ -99,6 +102,9 @@ object ExternalAutomationContract {
             XLog.w(TAG, "Failed to send automation callback", e)
         }
     }
+
+    internal fun hasExplicitCallbackTarget(returnAction: String?, returnPackage: String?): Boolean =
+        !returnAction.isNullOrBlank() && !returnPackage.isNullOrBlank()
 
     private fun decodeBase64(value: String?): String? {
         val encoded = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null

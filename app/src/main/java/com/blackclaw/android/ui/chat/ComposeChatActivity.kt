@@ -356,7 +356,7 @@ class ComposeChatActivity : ComponentActivity() {
         // route it to the agent (which has tools) instead of plain chat — otherwise
         // the chat model just *describes* doing it instead of actually doing it.
         if (com.blackclaw.android.agent.DefaultAgentService.isTaskLike(text)) {
-            XLog.i(TAG, "sendChat: task-like message → routing to agent: $text")
+            XLog.i(TAG, "sendChat: task-like message → routing to agent (chars=${text.length})")
             taskFlowController.sendTask(text)
             return
         }
@@ -372,7 +372,7 @@ class ComposeChatActivity : ComponentActivity() {
 
         XLog.i(
             TAG,
-            if (isTask) "Auto-task from intent: $automationText" else "Auto-chat from intent: $automationText"
+            "Intent automation mode=${if (isTask) "task" else "chat"} chars=${automationText.length}"
         )
 
         val handler = Handler(Looper.getMainLooper())

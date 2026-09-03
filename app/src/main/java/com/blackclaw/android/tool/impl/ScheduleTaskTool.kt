@@ -89,7 +89,7 @@ class ScheduleTaskTool : BaseTool() {
             triggerAtMs = triggerMs,
             recurrence = recurrence,
             intervalMs = intervalMinutes.toLong() * 60_000L,
-        )
+        ) ?: return ToolResult.error("Could not store the schedule securely. Try again after unlocking the device.")
 
         return ToolResult.success(
             "Scheduled $modeStr [${task.id}] for ${formatTime(triggerMs)} ($recurStr): \"$text\""

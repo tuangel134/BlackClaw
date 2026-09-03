@@ -30,7 +30,7 @@ class SkillExecutor {
         params: Map<String, String>,
         onProgress: ((step: Int, total: Int, description: String) -> Unit)? = null
     ): SkillResult {
-        XLog.i(TAG, "Executing skill: ${skill.id} with params: $params")
+        XLog.i(TAG, "Executing skill: ${skill.id} paramKeys=${params.keys.sorted()}")
         val totalSteps = skill.steps.size
         var stepsUsed = 0
 
@@ -51,11 +51,11 @@ class SkillExecutor {
                     val result = ToolRegistry.getInstance().executeTool(step.toolName, toolParams)
 
                     if (result.isSuccess) {
-                        XLog.d(TAG, "Step $stepNum OK: ${result.data?.take(100)}")
+                        XLog.d(TAG, "Step $stepNum OK: resultChars=${result.data?.length ?: 0}")
                         succeeded = true
                         break
                     } else {
-                        XLog.w(TAG, "Step $stepNum failed (attempt $attempt/${step.retries}): ${result.error}")
+                        XLog.w(TAG, "Step $stepNum failed (attempt $attempt/${step.retries}), errorChars=${result.error?.length ?: 0}")
                         if (attempt < step.retries) {
                             Thread.sleep(500) // brief pause before retry
                         }

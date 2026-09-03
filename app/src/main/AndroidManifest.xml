@@ -50,27 +50,12 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
-    <!-- Custom permission guarding the external automation entrypoints.
-
-         WHY: .automation.ExternalAutomationActivity and
-         .automation.ExternalAutomationReceiver were exported with no permission at
-         all. Reaching them starts an arbitrary agent task, and an agent task can
-         read the screen, notifications, SMS and clipboard and then call tools — so
-         an unguarded export is a full remote-control channel for any installed app
-         holding zero permissions of its own.
-
-         ExternalAutomationEntrypoint.isTargetedToBlackClaw() looked like a gate but
-         is not one: it inspects where the intent is going, not where it came from,
-         so any app satisfies it with intent.setPackage("com.blackclaw.android").
-         And the user-facing enable switch is a single global boolean, so turning it
-         on for one automation app turned it on for all of them.
-
-         protectionLevel="signature" means the system only grants this to apps signed
-         with the same key, and it enforces that before our process is even woken —
-         which is the property no in-app check can provide. Cost is stated in the
-         report: third-party automation apps (Tasker, MacroDroid) cannot hold a
-         signature permission, so they are blocked at this layer. The per-caller
-         allowlist in KVUtils narrows callers that DO hold it. -->
+    <!-- Signature permission for the BROADCAST automation entrypoint. A receiver
+         has no trustworthy caller identity, so Android must reject non-BlackClaw-
+         signed senders before our process is entered. The Activity path is different:
+         Tasker/MacroDroid must be able to reach it, so it intentionally does not use
+         this permission and instead requires a valid AutomationToken or an identified
+         package explicitly present in the user allowlist. -->
     <permission
         android:name="com.blackclaw.android.permission.AUTOMATION"
         android:protectionLevel="signature"
@@ -249,9 +234,14 @@
             android:name=".ui.assistant.CalendarActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+        <!-- Exported because Android/OEM assist dispatch may resolve ACTION_ASSIST
+             directly, but protected by the platform signature permission used by
+             VoiceInteractionService. System and our own UID can enter; arbitrary
+             installed apps cannot inject EXTRA_COMMAND into the local agent path. -->
         <activity
             android:name=".ui.assist.QuickAssistActivity"
             android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:theme="@style/Theme.BlackClaw.Assist"
             android:launchMode="singleTask"
             android:excludeFromRecents="true"
@@ -361,17 +351,12 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@style/Theme.Transparent" />
-        <!-- Caller must hold com.blackclaw.android.permission.AUTOMATION (signature).
-             The activity deliberately does NOT carry that permission. A signature
-             permission is enforced by the system before our code runs, so a
-             third-party automation app (Tasker, MacroDroid) could never reach us at
-             all — and driving BlackClaw from Tasker is a documented feature, not an
-             oversight to close. Instead the activity enforces consent in code, in
-             AutomationCallerPolicy: a valid AutomationToken (a secret the user copies
-             out of Settings), or a caller package on the user's allowlist. Both are
-             things an attacking app cannot produce. Note getCallingPackage() is null
-             for the plain startActivity that Tasker uses, which is exactly why the
-             token exists and why an origin-only rule was not sufficient. -->
+        <!-- Third-party automation Activity. It intentionally does NOT require the
+             signature permission used by the receiver: Tasker/MacroDroid would never
+             hold it. Authorization is therefore fail-closed in AutomationCallerPolicy:
+             own package, an identified allowlisted caller, or a valid AutomationToken.
+             Plain startActivity usually yields no callingPackage, so that path requires
+             the token shown in BlackClaw Settings. -->
         <activity
             android:name=".automation.ExternalAutomationActivity"
             android:exported="true"
@@ -458,10 +443,13 @@
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <!-- 开机自启动 -->
+        <!-- Boot broadcasts come from Android itself; no third-party app needs to
+             address this receiver. Keeping it non-exported prevents fabricated OEM
+             quick-boot actions from forcing schedule/automation re-arming. -->
         <receiver
             android:name=".service.BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />

@@ -86,7 +86,7 @@ object RemoteAdb {
             }
             out.toString().trim()
         } catch (e: Throwable) {
-            XLog.w(TAG, "remote shell('$command') failed: ${e.message}")
+            XLog.w(TAG, "remote shell failed: commandChars=${command.length} type=${e.javaClass.simpleName}")
             null
         }
     }

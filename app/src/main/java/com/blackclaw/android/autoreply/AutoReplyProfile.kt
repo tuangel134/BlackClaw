@@ -1,6 +1,8 @@
 package com.blackclaw.android.autoreply
 
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
+import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -91,11 +93,12 @@ data class AutoReplyProfile(
 }
 
 object AutoReplyProfileStore {
+    private const val TAG = "AutoReplyProfileStore"
     private const val KEY = "KEY_AUTO_REPLY_PROFILES_V1"
 
     @Synchronized
     fun all(): List<AutoReplyProfile> {
-        val raw = KVUtils.getString(KEY, "")
+        val raw = readEncryptedOrMigrateLegacy() ?: return emptyList()
         if (raw.isBlank()) return emptyList()
         return runCatching {
             val arr = JSONArray(raw)
@@ -109,21 +112,47 @@ object AutoReplyProfileStore {
     fun find(id: String): AutoReplyProfile? = all().firstOrNull { it.id == id }
 
     @Synchronized
-    private fun saveAll(profiles: List<AutoReplyProfile>) {
+    private fun saveAll(profiles: List<AutoReplyProfile>): Boolean {
         val arr = JSONArray()
         profiles.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY, arr.toString())
+        if (!SecretStore.putString(KEY, arr.toString())) return false
+        KVUtils.remove(KEY)
         KVUtils.sync()
+        return true
+    }
+
+    /**
+     * Profiles may contain an entire imported conversation, contact identity and
+     * personal writing instructions. Migrate the document as one encrypted unit so
+     * future fields cannot accidentally remain in plaintext.
+     */
+    private fun readEncryptedOrMigrateLegacy(): String? {
+        if (SecretStore.contains(KEY)) return SecretStore.getString(KEY)
+
+        val legacy = KVUtils.getString(KEY, "")
+        if (legacy.isBlank()) return ""
+        val migrated = SecretStore.putString(KEY, legacy) && SecretStore.getString(KEY) == legacy
+        if (migrated) {
+            KVUtils.remove(KEY)
+            KVUtils.sync()
+            XLog.i(TAG, "Migrated auto-reply profiles to encrypted storage")
+        } else {
+            XLog.w(TAG, "Auto-reply profile migration deferred; legacy data retained")
+        }
+        return legacy
     }
 
     @Synchronized
-    fun upsert(profile: AutoReplyProfile): AutoReplyProfile {
+    fun upsert(profile: AutoReplyProfile): AutoReplyProfile? {
         val now = System.currentTimeMillis()
         val current = all().toMutableList()
         val idx = current.indexOfFirst { it.id == profile.id }
         val final = if (idx >= 0) profile.copy(updatedAtMs = now) else profile
         if (idx >= 0) current[idx] = final else current.add(final)
-        saveAll(current)
+        if (!saveAll(current)) {
+            XLog.e(TAG, "Could not persist auto-reply profile securely")
+            return null
+        }
         return final
     }
 
@@ -132,8 +161,9 @@ object AutoReplyProfileStore {
         val before = all()
         val after = before.filterNot { it.id == id }
         if (after.size == before.size) return false
-        saveAll(after)
-        return true
+        return saveAll(after).also { saved ->
+            if (!saved) XLog.e(TAG, "Could not persist auto-reply profile deletion")
+        }
     }
 
     @Synchronized

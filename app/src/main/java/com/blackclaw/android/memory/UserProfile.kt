@@ -149,15 +149,16 @@ object UserProfile {
 
     @Synchronized
     fun get(): Profile {
-        val raw = KVUtils.getString(KEY_PROFILE, "")
+        val raw = KVUtils.getEncryptedString(KEY_PROFILE, "")
         if (raw.isBlank()) return Profile()
         return runCatching { Profile.fromJson(JSONObject(raw)) }.getOrDefault(Profile())
     }
 
     @Synchronized
-    fun save(profile: Profile) {
-        KVUtils.putString(KEY_PROFILE, profile.toJson().toString())
-        KVUtils.sync()
+    fun save(profile: Profile): Boolean {
+        val saved = KVUtils.putEncryptedString(KEY_PROFILE, profile.toJson().toString())
+        if (!saved) XLog.e(TAG, "Could not persist learned profile securely")
+        return saved
     }
 
     /**
@@ -175,21 +176,21 @@ object UserProfile {
     @Synchronized
     fun forgetEverything(): Int {
         val removed = runCatching { snippetLines(get()).size }.getOrDefault(0)
+        if (!KVUtils.removeEncrypted(KEY_PROFILE, KEY_PATTERNS, KEY_INTERACTIONS)) {
+            XLog.e(TAG, "Could not erase learned profile securely")
+            return 0
+        }
         pending.clear()
         lastWriteMs = 0L
-        KVUtils.putString(KEY_PROFILE, "")
-        KVUtils.putString(KEY_PATTERNS, "")
-        KVUtils.putString(KEY_INTERACTIONS, "")
-        KVUtils.sync()   // a deletion the user asked for is worth the fsync
         return removed
     }
 
     /** Update a single trait without replacing the whole profile. */
-    fun setTrait(key: String, value: String) {
+    fun setTrait(key: String, value: String): Boolean {
         val p = get()
         val traits = p.traits.toMutableMap()
         traits[key] = value
-        save(p.copy(traits = traits))
+        return save(p.copy(traits = traits))
     }
 
     fun getTrait(key: String): String = get().traits[key] ?: ""
@@ -236,15 +237,16 @@ object UserProfile {
     /** Caller must hold the monitor. */
     private fun flushPending(now: Long) {
         val merged = (storedInteractions() + pending).takeLast(MAX_INTERACTIONS)
-        pending.clear()
-        lastWriteMs = now
         val arr = JSONArray()
         merged.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY_INTERACTIONS, arr.toString())
-        // No sync() here on purpose. MMKV writes through an mmap'd region, so entries
-        // already survive process death; sync() only adds fsync durability against a
-        // hard power cut. Losing the last few seconds of an interaction log to that is
-        // fine, and the fsync was the expensive part of this method.
+        if (KVUtils.putEncryptedString(KEY_INTERACTIONS, arr.toString())) {
+            // Clear only after the encrypted commit succeeds. A Keystore failure must
+            // not turn a transient persistence problem into lost learning data.
+            pending.clear()
+            lastWriteMs = now
+        } else {
+            XLog.w(TAG, "Interaction flush deferred; pending data retained")
+        }
     }
 
     /**
@@ -287,7 +289,7 @@ object UserProfile {
 
     /** Caller must hold the monitor. */
     private fun storedInteractions(): List<Interaction> {
-        val raw = KVUtils.getString(KEY_INTERACTIONS, "")
+        val raw = KVUtils.getEncryptedString(KEY_INTERACTIONS, "")
         if (raw.isBlank()) return emptyList()
         return runCatching {
             val arr = JSONArray(raw)
@@ -367,8 +369,7 @@ object UserProfile {
             updated = updated.copy(topContacts = contactCounts)
         }
 
-        if (updated != profile) {
-            save(updated)
+        if (updated != profile && save(updated)) {
             XLog.i(TAG, "Profile updated from interactions: wake=${updated.wakeUpHour}, sleep=${updated.sleepHour}")
         }
     }

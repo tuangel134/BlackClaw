@@ -407,7 +407,7 @@ class DefaultAgentService : AgentService {
         val playbookSection = if (looksLikeTask && config.provider == LlmProvider.LOCAL) {
             val matched = PlaybookManager.match(rawUserRequest)
             if (matched != null) {
-                XLog.i(TAG, "Playbook matched: ${matched.id} for '$rawUserRequest'")
+                XLog.i(TAG, "Playbook matched: ${matched.id} requestChars=${rawUserRequest.length}")
                 "\n\n## Playbook: ${matched.name}\nFollow these steps exactly:\n\n${matched.body}"
             } else ""
         } else ""
@@ -565,8 +565,9 @@ class DefaultAgentService : AgentService {
                 TaskBudget.Status.OK -> { /* continue normally */ }
             }
 
-            // DEBUG: log raw LLM response for tool calling diagnosis
-            XLog.i(TAG, "runAgentLoop iter=$iterations response.text=${llmResponse.text?.take(500)}")
+            // Keep response diagnostics structural: model output may contain private
+            // screen/message context and must not be copied into logcat.
+            XLog.i(TAG, "runAgentLoop iter=$iterations responseChars=${llmResponse.text?.length ?: 0}")
             XLog.i(TAG, "runAgentLoop iter=$iterations hasToolCalls=${llmResponse.hasToolExecutionRequests()} toolCallCount=${llmResponse.toolExecutionRequests?.size ?: 0}")
 
             // Add AI message to history (must construct AiMessage)
@@ -600,26 +601,26 @@ class DefaultAgentService : AgentService {
                 if (responseText.isNotEmpty()) {
                     if (inAppSearchGuard.shouldBlockTextOnlyCompletion()) {
                         val correction = inAppSearchGuard.buildCompletionCorrection()
-                        XLog.i(TAG, "InAppSearchGuard blocked text-only completion for '$userPrompt'")
+                        XLog.i(TAG, "InAppSearchGuard blocked text-only completion (promptChars=${userPrompt.length})")
                         messages.add(UserMessage.from(correction))
                         continue
                     }
                     if (directDeviceDataGuard.shouldBlockTextOnlyCompletion()) {
                         val correction = directDeviceDataGuard.buildCompletionCorrection()
-                        XLog.i(TAG, "DirectDeviceDataGuard blocked text-only completion for '$userPrompt'")
+                        XLog.i(TAG, "DirectDeviceDataGuard blocked text-only completion (promptChars=${userPrompt.length})")
                         messages.add(UserMessage.from(correction))
                         continue
                     }
                     if (emailComposeGuard.shouldBlockTextOnlyCompletion()) {
                         val correction = emailComposeGuard.buildCompletionCorrection()
-                        XLog.i(TAG, "EmailComposeGuard blocked text-only completion for '$userPrompt'")
+                        XLog.i(TAG, "EmailComposeGuard blocked text-only completion (promptChars=${userPrompt.length})")
                         messages.add(UserMessage.from(correction))
                         continue
                     }
                     if (taskCreationGuard.shouldBlockTextOnlyCompletion(responseText)) {
                         val correction = taskCreationGuard.maybeBlockFinish()
                             ?: "[System Guard] Create the requested task with a native BlackClaw tool before answering."
-                        XLog.i(TAG, "TaskCreationGuard blocked text-only completion for '$userPrompt'")
+                        XLog.i(TAG, "TaskCreationGuard blocked text-only completion (promptChars=${userPrompt.length})")
                         messages.add(UserMessage.from(correction))
                         continue
                     }
@@ -658,7 +659,7 @@ class DefaultAgentService : AgentService {
                 var params: Map<String, Any>? = try {
                     GSON.fromJson(toolArgs, mapType)
                 } catch (e: Exception) {
-                    XLog.w(TAG, "Failed to parse tool args for $toolName: $toolArgs", e)
+                    XLog.w(TAG, "Failed to parse tool args for $toolName (argChars=${toolArgs.length})")
                     HashMap()
                 }
                 if (params == null) params = HashMap()
@@ -680,7 +681,7 @@ class DefaultAgentService : AgentService {
                 } else null
                 if (blockedFinish != null) {
                     val blockedResult = ToolResult.error(blockedFinish)
-                    XLog.i(TAG, "Task guard blocked premature finish for '$userPrompt'")
+                    XLog.i(TAG, "Task guard blocked premature finish (promptChars=${userPrompt.length})")
                     callback.onToolCall(iterations, toolName, displayName, toolArgs)
                     callback.onToolResult(iterations, toolName, displayName, params.toString(), blockedResult)
                     messages.add(ToolExecutionResultMessage.from(toolRequest, GSON.toJson(blockedResult)))

@@ -214,20 +214,28 @@ object ModelConfigRepository {
         }
     }
 
+    /**
+     * Persist a cloud model configuration. Credentials are committed first so a
+     * Keystore failure can never leave the UI/model selection pointing at a newly
+     * saved provider whose key was silently lost.
+     *
+     * @return false when secure credential persistence failed; in that case no
+     * non-secret model/provider settings are changed.
+     */
     fun saveCloudDefault(
         providerName: String,
         modelId: String,
         baseUrl: String,
         apiKey: String,
         activateNow: Boolean
-    ) {
+    ): Boolean {
         val normalizedProvider = normalizeCloudProvider(providerName)
         val resolvedBaseUrl = resolveCloudBaseUrl(normalizedProvider, baseUrl)
+        if (!KVUtils.setCloudApiKey(normalizedProvider, apiKey)) return false
+
         KVUtils.setDefaultCloudModel(modelId)
         KVUtils.setDefaultCloudProvider(normalizedProvider)
         KVUtils.setDefaultCloudBaseUrl(resolvedBaseUrl)
-        KVUtils.setLlmApiKey(apiKey)
-        KVUtils.setApiKeyForProvider(normalizedProvider, apiKey)
         if (activateNow) {
             activateCloudSelection(
                 modelId = modelId,
@@ -235,6 +243,7 @@ object ModelConfigRepository {
                 explicitBaseUrl = resolvedBaseUrl
             )
         }
+        return true
     }
 
     fun activateCloudSelection(

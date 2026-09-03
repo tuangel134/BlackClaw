@@ -40,6 +40,7 @@ object KVUtils {
     fun init(context: Context) {
         MMKV.initialize(context)
         mmkv = MMKV.defaultMMKV()
+        SecretStore.init(context)
     }
 
     // ==================== String ====================
@@ -120,6 +121,7 @@ object KVUtils {
 
     fun clear() {
         mmkv.clearAll()
+        SecretStore.clear()
     }
 
     fun getAllKeys(): Array<String> {
@@ -133,6 +135,64 @@ object KVUtils {
         mmkv.sync()
     }
 
+    /**
+     * Read a credential from [SecretStore], lazily migrating an old plaintext MMKV
+     * value if this install predates encrypted storage. The plaintext is deleted only
+     * after a write + read-back verification succeeds, so a transient Keystore issue
+     * cannot destroy an existing credential.
+     */
+    private fun getSecretString(key: String, defaultValue: String = ""): String {
+        SecretStore.getString(key)?.let { return it }
+        val legacy = getString(key, "")
+        if (legacy.isEmpty()) return defaultValue
+
+        val migrated = SecretStore.putString(key, legacy) && SecretStore.getString(key) == legacy
+        if (migrated) {
+            remove(key)
+            sync()
+            XLog.i("KVUtils", "Migrated legacy secret '$key' to AndroidKeyStore-backed storage")
+        } else {
+            // Availability beats destructive migration: keep using the old value for
+            // this run and retry migration next time instead of erasing it.
+            XLog.w("KVUtils", "Could not migrate legacy secret '$key'; plaintext value retained")
+        }
+        return legacy
+    }
+
+    /** New encrypted writes never fall back to plaintext. */
+    private fun putSecretString(key: String, value: String): Boolean =
+        putSecretStrings(mapOf(key to value))
+
+    /** Atomically update a related group of encrypted values and then remove legacy copies. */
+    private fun putSecretStrings(values: Map<String, String>): Boolean {
+        if (!SecretStore.putStrings(values)) return false
+        values.keys.forEach(::remove)
+        sync()
+        return true
+    }
+
+    /**
+     * Generic encrypted storage for private user data (memories, schedules, profile
+     * summaries, etc.). Uses the same lossless legacy migration as credentials.
+     */
+    fun getEncryptedString(key: String, defaultValue: String = ""): String =
+        getSecretString(key, defaultValue)
+
+    fun putEncryptedString(key: String, value: String): Boolean =
+        putSecretString(key, value)
+
+    fun putEncryptedStrings(values: Map<String, String>): Boolean =
+        putSecretStrings(values)
+
+    /** Remove both encrypted and any legacy plaintext copies in one user-visible delete. */
+    fun removeEncrypted(vararg keys: String): Boolean {
+        val cleared = SecretStore.putStrings(keys.associateWith { "" })
+        if (!cleared) return false
+        remove(*keys)
+        sync()
+        return true
+    }
+
 
     // ==================== Onboarding ====================
     private const val KEY_GUIDE_SHOWN = "KEY_GUIDE_SHOWN"
@@ -142,16 +202,28 @@ object KVUtils {
     fun setGuideShown(shown: Boolean) = putBoolean(KEY_GUIDE_SHOWN, shown)
 
     // ==================== Discord Bot Config ====================
-    fun getDiscordBotToken(): String = getString(KEY_DISCORD_BOT_TOKEN, "")
-    fun setDiscordBotToken(value: String) = putString(KEY_DISCORD_BOT_TOKEN, value)
+    fun getDiscordBotToken(): String = getSecretString(KEY_DISCORD_BOT_TOKEN)
+    fun setDiscordBotToken(value: String) = putSecretString(KEY_DISCORD_BOT_TOKEN, value)
 
     // ==================== Telegram Bot Config ====================
-    fun getTelegramBotToken(): String = getString(KEY_TELEGRAM_BOT_TOKEN, "")
-    fun setTelegramBotToken(value: String) = putString(KEY_TELEGRAM_BOT_TOKEN, value)
+    fun getTelegramBotToken(): String = getSecretString(KEY_TELEGRAM_BOT_TOKEN)
+    fun setTelegramBotToken(value: String) = putSecretString(KEY_TELEGRAM_BOT_TOKEN, value)
+
+    /**
+     * Atomically update any channel tokens supplied by the config server. Null means
+     * "leave unchanged"; an empty string means "clear this token".
+     */
+    fun setChannelBotTokens(discord: String? = null, telegram: String? = null): Boolean {
+        val values = buildMap {
+            discord?.let { put(KEY_DISCORD_BOT_TOKEN, it) }
+            telegram?.let { put(KEY_TELEGRAM_BOT_TOKEN, it) }
+        }
+        return putSecretStrings(values)
+    }
 
     // ==================== WeChat iLink Bot Config ====================
-    fun getWechatBotToken(): String = getString(KEY_WECHAT_BOT_TOKEN, "")
-    fun setWechatBotToken(value: String) = putString(KEY_WECHAT_BOT_TOKEN, value)
+    fun getWechatBotToken(): String = getSecretString(KEY_WECHAT_BOT_TOKEN)
+    fun setWechatBotToken(value: String) = putSecretString(KEY_WECHAT_BOT_TOKEN, value)
     fun getWechatApiBaseUrl(): String = getString(KEY_WECHAT_API_BASE_URL, "")
     fun setWechatApiBaseUrl(value: String) = putString(KEY_WECHAT_API_BASE_URL, value)
     fun getWechatUpdatesCursor(): String = getString(KEY_WECHAT_UPDATES_CURSOR, "")
@@ -176,9 +248,9 @@ object KVUtils {
     // without a per-caller list there is no origin check anywhere on this path.
     //
     // Stored as a comma-separated list of package names. Empty (the default) means
-    // no per-caller narrowing is configured, in which case the manifest's
-    // signature-level permission remains the only gate — see
-    // com.blackclaw.android.automation.AutomationCallerPolicy.
+    // no third-party package is authorized by identity. A caller whose identity is
+    // unavailable can still use the explicit AutomationToken; otherwise it fails
+    // closed — see com.blackclaw.android.automation.AutomationCallerPolicy.
     private const val KEY_EXTERNAL_AUTOMATION_ALLOWED_CALLERS =
         "KEY_EXTERNAL_AUTOMATION_ALLOWED_CALLERS"
 
@@ -325,14 +397,22 @@ object KVUtils {
     private const val KEY_PENDING_LOCAL_GPU_INIT_AT = "KEY_PENDING_LOCAL_GPU_INIT_AT"
     private const val KEY_PENDING_LOCAL_GPU_INIT_PID = "KEY_PENDING_LOCAL_GPU_INIT_PID"
 
-    fun getLlmApiKey(): String = getString(KEY_LLM_API_KEY, "")
-    fun setLlmApiKey(value: String) = putString(KEY_LLM_API_KEY, value)
+    fun getLlmApiKey(): String = getSecretString(KEY_LLM_API_KEY)
+    fun setLlmApiKey(value: String) = putSecretString(KEY_LLM_API_KEY, value)
 
     /** Per-provider API key storage — allows users to save keys for multiple providers simultaneously. */
     fun getApiKeyForProvider(provider: String): String =
-        getString("KEY_LLM_API_KEY_${provider.uppercase()}", "")
+        getSecretString("KEY_LLM_API_KEY_${provider.uppercase()}")
     fun setApiKeyForProvider(provider: String, key: String) =
-        putString("KEY_LLM_API_KEY_${provider.uppercase()}", key)
+        putSecretString("KEY_LLM_API_KEY_${provider.uppercase()}", key)
+
+    /** Keep the global fallback and provider-specific credential in one transaction. */
+    fun setCloudApiKey(provider: String, key: String): Boolean = putSecretStrings(
+        mapOf(
+            KEY_LLM_API_KEY to key,
+            "KEY_LLM_API_KEY_${provider.uppercase()}" to key,
+        )
+    )
     fun getLlmBaseUrl(): String = getString(KEY_LLM_BASE_URL, "")
     fun setLlmBaseUrl(value: String) = putString(KEY_LLM_BASE_URL, value)
     fun getLlmModelName(): String = getString(KEY_LLM_MODEL_NAME, "")

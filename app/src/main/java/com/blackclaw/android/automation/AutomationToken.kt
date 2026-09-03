@@ -2,6 +2,7 @@ package com.blackclaw.android.automation
 
 import com.blackclaw.android.server.ConfigServerPolicy
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import java.security.SecureRandom
 
@@ -42,7 +43,11 @@ object AutomationToken {
     /** Issue (or re-issue) the token, invalidating any previously shared copy. */
     fun regenerate(): String {
         val token = ConfigServerPolicy.generateToken { bound -> random.nextInt(bound) }
-        KVUtils.putString(KEY_TOKEN, token)
+        if (!SecretStore.putString(KEY_TOKEN, token)) {
+            XLog.e(TAG, "Could not persist external automation token securely")
+            return ""
+        }
+        KVUtils.remove(KEY_TOKEN)
         KVUtils.sync()
         XLog.i(TAG, "External automation token re-issued")
         return token
@@ -50,7 +55,8 @@ object AutomationToken {
 
     /** Revoke it, so no third-party app can drive automation any more. */
     fun revoke() {
-        KVUtils.putString(KEY_TOKEN, "")
+        SecretStore.remove(KEY_TOKEN)
+        KVUtils.remove(KEY_TOKEN)
         KVUtils.sync()
         XLog.i(TAG, "External automation token revoked")
     }
@@ -76,5 +82,19 @@ object AutomationToken {
         return ConfigServerPolicy.tokensMatch(expected, presented)
     }
 
-    private fun stored(): String = KVUtils.getString(KEY_TOKEN, "").trim()
+    private fun stored(): String {
+        SecretStore.getString(KEY_TOKEN)?.let { return it.trim() }
+
+        val legacy = KVUtils.getString(KEY_TOKEN, "").trim()
+        if (legacy.isEmpty()) return ""
+        val migrated = SecretStore.putString(KEY_TOKEN, legacy) && SecretStore.getString(KEY_TOKEN) == legacy
+        if (migrated) {
+            KVUtils.remove(KEY_TOKEN)
+            KVUtils.sync()
+            XLog.i(TAG, "Migrated legacy automation token to encrypted storage")
+        } else {
+            XLog.w(TAG, "Automation token migration deferred; legacy token retained")
+        }
+        return legacy
+    }
 }

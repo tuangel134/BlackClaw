@@ -67,7 +67,7 @@ class WeChatChannelHandler(
         var nextTimeoutMs = DEFAULT_LONG_POLL_TIMEOUT_MS
         var consecutiveFailures = 0
 
-        XLog.i(TAG, "monitor started: baseUrl=$apiBaseUrl, cursor=${if (getUpdatesBuf.isEmpty()) "(empty)" else "...${getUpdatesBuf.takeLast(20)}"}")
+        XLog.i(TAG, "monitor started: endpointConfigured=${apiBaseUrl.isNotBlank()} cursorPresent=${getUpdatesBuf.isNotEmpty()}")
 
         while (pollingActive) {
             try {
@@ -107,7 +107,7 @@ class WeChatChannelHandler(
                     }
 
                     consecutiveFailures++
-                    XLog.e(TAG, "getUpdates error: ret=${resp.ret}, errcode=${resp.errcode}, errmsg=${resp.errmsg} ($consecutiveFailures/$MAX_CONSECUTIVE_FAILURES)")
+                    XLog.e(TAG, "getUpdates error: ret=${resp.ret}, errcode=${resp.errcode} ($consecutiveFailures/$MAX_CONSECUTIVE_FAILURES)")
                     handleConsecutiveFailures(consecutiveFailures)
                     continue
                 }
@@ -177,31 +177,25 @@ class WeChatChannelHandler(
                 else -> "UNKNOWN(${item.type})"
             }
             XLog.i(TAG, "  item[$index] type=$typeStr")
-            item.textItem?.let { XLog.i(TAG, "    text_item: text=${it.text?.take(80)}") }
+            item.textItem?.let { XLog.i(TAG, "    text_item: textChars=${it.text?.length ?: 0}") }
             item.imageItem?.let { img ->
-                XLog.i(TAG, "    image_item:")
-                XLog.i(TAG, "      media.encrypt_query_param=${img.media?.encryptQueryParam?.take(60)}...")
-                XLog.i(TAG, "      media.aes_key=${img.media?.aesKey?.take(30)}...")
-                XLog.i(TAG, "      media.encrypt_type=${img.media?.encryptType}")
-                XLog.i(TAG, "      aeskey(hex)=${img.aeskey?.take(30)}")
-                XLog.i(TAG, "      mid_size=${img.midSize}, hd_size=${img.hdSize}, thumb_size=${img.thumbSize}")
-                XLog.i(TAG, "      thumb_media.encrypt_query_param=${img.thumbMedia?.encryptQueryParam?.take(40)}...")
-                XLog.i(TAG, "      url=${img.url}")
+                XLog.i(
+                    TAG,
+                    "    image_item: mediaPresent=${img.media != null} encryptType=${img.media?.encryptType} " +
+                        "midSize=${img.midSize} hdSize=${img.hdSize} thumbSize=${img.thumbSize} thumbMediaPresent=${img.thumbMedia != null}"
+                )
             }
             item.voiceItem?.let { v ->
-                XLog.i(TAG, "    voice_item: text=${v.text}, playtime=${v.playtime}, encode_type=${v.encodeType}")
-                XLog.i(TAG, "      media.encrypt_query_param=${v.media?.encryptQueryParam?.take(40)}...")
+                XLog.i(TAG, "    voice_item: textChars=${v.text?.length ?: 0} playtime=${v.playtime} encodeType=${v.encodeType} mediaPresent=${v.media != null}")
             }
             item.fileItem?.let { f ->
-                XLog.i(TAG, "    file_item: file_name=${f.fileName}, len=${f.len}")
-                XLog.i(TAG, "      media.encrypt_query_param=${f.media?.encryptQueryParam?.take(40)}...")
+                XLog.i(TAG, "    file_item: fileNameChars=${f.fileName?.length ?: 0} len=${f.len} mediaPresent=${f.media != null}")
             }
             item.videoItem?.let { v ->
-                XLog.i(TAG, "    video_item: video_size=${v.videoSize}")
-                XLog.i(TAG, "      media.encrypt_query_param=${v.media?.encryptQueryParam?.take(40)}...")
+                XLog.i(TAG, "    video_item: videoSize=${v.videoSize} mediaPresent=${v.media != null}")
             }
             item.refMsg?.let { ref ->
-                XLog.i(TAG, "    ref_msg: title=${ref.title}, item_type=${ref.messageItem?.type}")
+                XLog.i(TAG, "    ref_msg: titleChars=${ref.title?.length ?: 0} itemType=${ref.messageItem?.type}")
             }
         }
 

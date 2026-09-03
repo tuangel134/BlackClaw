@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,7 +18,8 @@ import java.util.UUID
 /**
  * Persistent scheduler for AI tasks and chats.
  *
- * Each scheduled entry is stored in MMKV as a JSON record under KEY_SCHEDULED_TASKS.
+ * Each scheduled entry is stored as one encrypted JSON document. Legacy MMKV data
+ * is migrated only after a verified encrypted write, so upgrades are lossless.
  * AlarmManager wakes the app at the requested time and broadcasts to
  * [ScheduledTaskReceiver] which launches ComposeChatActivity with the task/chat extra.
  *
@@ -88,7 +90,7 @@ object ScheduledTaskManager {
 
     @Synchronized
     fun listAll(): List<ScheduledTask> {
-        val raw = KVUtils.getString(KEY_SCHEDULED_TASKS, "")
+        val raw = readEncryptedOrMigrateLegacy() ?: return emptyList()
         if (raw.isBlank()) return emptyList()
         return try {
             val arr = JSONArray(raw)
@@ -105,15 +107,37 @@ object ScheduledTaskManager {
     fun find(id: String): ScheduledTask? = listAll().firstOrNull { it.id == id }
 
     @Synchronized
-    private fun saveAll(tasks: List<ScheduledTask>) {
+    private fun saveAll(tasks: List<ScheduledTask>): Boolean {
         val arr = JSONArray()
         tasks.forEach { arr.put(it.toJson()) }
-        KVUtils.putString(KEY_SCHEDULED_TASKS, arr.toString())
+        if (!SecretStore.putString(KEY_SCHEDULED_TASKS, arr.toString())) return false
+        KVUtils.remove(KEY_SCHEDULED_TASKS)
         KVUtils.sync()
+        return true
+    }
+
+    private fun readEncryptedOrMigrateLegacy(): String? {
+        if (SecretStore.contains(KEY_SCHEDULED_TASKS)) {
+            return SecretStore.getString(KEY_SCHEDULED_TASKS)
+        }
+
+        val legacy = KVUtils.getString(KEY_SCHEDULED_TASKS, "")
+        if (legacy.isBlank()) return ""
+        val migrated = SecretStore.putString(KEY_SCHEDULED_TASKS, legacy) &&
+            SecretStore.getString(KEY_SCHEDULED_TASKS) == legacy
+        if (migrated) {
+            KVUtils.remove(KEY_SCHEDULED_TASKS)
+            KVUtils.sync()
+            XLog.i(TAG, "Migrated scheduled tasks to encrypted storage")
+        } else {
+            XLog.w(TAG, "Scheduled-task migration deferred; legacy data retained")
+        }
+        return legacy
     }
 
     /**
-     * Add a new scheduled task. Returns the generated id.
+     * Add and arm a scheduled task. Returns null when encrypted persistence fails;
+     * no AlarmManager entry is created in that case.
      */
     @Synchronized
     fun schedule(
@@ -123,7 +147,7 @@ object ScheduledTaskManager {
         triggerAtMs: Long,
         recurrence: Recurrence = Recurrence.ONCE,
         intervalMs: Long = 0L,
-    ): ScheduledTask {
+    ): ScheduledTask? {
         val id = UUID.randomUUID().toString().take(8)
         val task = ScheduledTask(
             id = id,
@@ -136,9 +160,12 @@ object ScheduledTaskManager {
         )
         val all = listAll().toMutableList()
         all.add(task)
-        saveAll(all)
+        if (!saveAll(all)) {
+            XLog.e(TAG, "Could not persist scheduled task securely")
+            return null
+        }
         scheduleAlarm(context, task)
-        XLog.i(TAG, "Scheduled: ${task.describe()}")
+        XLog.i(TAG, "Scheduled task id=${task.id} mode=${task.mode} textChars=${task.text.length}")
         return task
     }
 
@@ -150,7 +177,10 @@ object ScheduledTaskManager {
         val all = listAll().toMutableList()
         val target = all.firstOrNull { it.id == id } ?: return false
         all.removeAll { it.id == id }
-        saveAll(all)
+        if (!saveAll(all)) {
+            XLog.e(TAG, "Could not persist scheduled-task cancellation id=$id")
+            return false
+        }
         cancelAlarm(context, target)
         XLog.i(TAG, "Cancelled scheduled task $id")
         return true
@@ -170,14 +200,20 @@ object ScheduledTaskManager {
         if (nextTrigger == null) {
             // One-shot — remove
             all.removeAt(idx)
-            saveAll(all)
-            XLog.i(TAG, "One-shot $id fired and removed")
+            if (saveAll(all)) {
+                XLog.i(TAG, "One-shot $id fired and removed")
+            } else {
+                XLog.e(TAG, "Could not persist removal of fired one-shot id=$id")
+            }
         } else {
             val updated = original.copy(triggerAtMs = nextTrigger, lastRunAtMs = now)
             all[idx] = updated
-            saveAll(all)
-            scheduleAlarm(context, updated)
-            XLog.i(TAG, "Recurring $id rescheduled for ${Date(nextTrigger)}")
+            if (saveAll(all)) {
+                scheduleAlarm(context, updated)
+                XLog.i(TAG, "Recurring $id rescheduled for ${Date(nextTrigger)}")
+            } else {
+                XLog.e(TAG, "Could not persist recurring reschedule id=$id")
+            }
         }
     }
 
@@ -196,26 +232,37 @@ object ScheduledTaskManager {
     }
 
     /**
-     * Re-arm all alarms (called from BootReceiver after reboot).
+     * Normalize persisted schedules after a reboot. Expired one-shots are never
+     * re-fired just because the process/device restarted; recurring entries advance
+     * to their next future slot.
+     */
+    internal fun normalizeForRearm(tasks: List<ScheduledTask>, nowMs: Long): List<ScheduledTask> =
+        tasks.mapNotNull { task ->
+            when {
+                task.triggerAtMs > nowMs -> task
+                task.recurrence == Recurrence.ONCE -> null
+                else -> computeNextTrigger(task, nowMs)?.let { next ->
+                    task.copy(triggerAtMs = next)
+                }
+            }
+        }
+
+    /**
+     * Re-arm all alarms (called from BootReceiver after reboot). The in-memory
+     * normalized set is safe to arm even if secure persistence is temporarily
+     * unavailable: stale one-shots stay excluded and recurring times are recomputed
+     * again on the next boot.
      */
     @Synchronized
     fun rearmAll(context: Context) {
         val now = System.currentTimeMillis()
-        val all = listAll()
-        for (task in all) {
-            val effectiveTrigger = if (task.triggerAtMs <= now && task.recurrence != Recurrence.ONCE) {
-                computeNextTrigger(task, now) ?: task.triggerAtMs
-            } else {
-                task.triggerAtMs
-            }
-            val toArm = if (effectiveTrigger != task.triggerAtMs) {
-                task.copy(triggerAtMs = effectiveTrigger)
-            } else {
-                task
-            }
-            scheduleAlarm(context, toArm)
+        val stored = listAll()
+        val normalized = normalizeForRearm(stored, now)
+        if (normalized != stored && !saveAll(normalized)) {
+            XLog.e(TAG, "Could not persist normalized schedules after boot")
         }
-        XLog.i(TAG, "Re-armed ${all.size} scheduled alarms after boot")
+        normalized.forEach { scheduleAlarm(context, it) }
+        XLog.i(TAG, "Re-armed ${normalized.size} scheduled alarms after boot; dropped=${stored.size - normalized.size}")
     }
 
     private fun pendingIntentFor(context: Context, task: ScheduledTask): PendingIntent {

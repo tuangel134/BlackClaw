@@ -234,7 +234,7 @@ class DiscordGatewayClient private constructor() {
                 sessionId = d.get("session_id").asString
                 // Discord returns a resume_gateway_url for use when reconnecting after disconnect
                 resumeGatewayUrl = d.get("resume_gateway_url")?.takeIf { !it.isJsonNull }?.asString
-                XLog.d(TAG, "Gateway ready, sessionId=$sessionId, resumeUrl=$resumeGatewayUrl")
+                XLog.d(TAG, "Gateway ready: sessionPresent=${sessionId != null} resumeUrlPresent=${resumeGatewayUrl != null}")
             }
             DiscordConstants.EVENT_RESUMED -> {
                 XLog.d(TAG, "Connection resumed")
@@ -260,7 +260,7 @@ class DiscordGatewayClient private constructor() {
             val messageId = d.get("id").asString
             val content = d.get("content")?.takeIf { !it.isJsonNull }?.asString ?: ""
 
-            XLog.d(TAG, "Message received: channelId=$channelId, messageId=$messageId, content=$content")
+            XLog.d(TAG, "Message received: channelId=$channelId messageId=$messageId contentChars=${content.length}")
 
             messageListener?.onDiscordMessage(channelId, messageId, content)
         } catch (e: Exception) {
@@ -391,13 +391,13 @@ class DiscordGatewayClient private constructor() {
         } else {
             DiscordConstants.GATEWAY_URL
         }
-        XLog.d(TAG, "Reconnecting to: $url")
+        XLog.d(TAG, "Reconnecting: resuming=${url == resumeGatewayUrl && resumeGatewayUrl != null}")
         connectWebSocket(url)
     }
 
     fun isConnected(): Boolean = isConnected
 
     fun getConnectionState(): String {
-        return "connected=$isConnected, sessionId=$sessionId, lastSeq=$lastSeq, heartbeatInterval=$heartbeatInterval"
+        return "connected=$isConnected, resumable=${sessionId != null && resumeGatewayUrl != null}, lastSeq=$lastSeq, heartbeatInterval=$heartbeatInterval"
     }
 }

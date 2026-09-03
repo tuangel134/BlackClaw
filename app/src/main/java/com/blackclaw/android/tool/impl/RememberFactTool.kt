@@ -35,6 +35,7 @@ class RememberFactTool : BaseTool() {
         if (key.length > 64) return ToolResult.error("key too long (max 64 chars)")
         if (value.length > 512) return ToolResult.error("value too long (max 512 chars)")
         val fact = UserMemoryStore.remember(key, value)
+            ?: return ToolResult.error("Could not store that fact securely. Try again after unlocking the device.")
         return ToolResult.success("Remembered ${fact.key} = ${fact.value}")
     }
 }

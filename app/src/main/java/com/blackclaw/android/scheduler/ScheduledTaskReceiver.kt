@@ -26,7 +26,7 @@ class ScheduledTaskReceiver : BroadcastReceiver() {
             XLog.w(TAG, "Alarm fired for unknown schedule id=$id")
             return
         }
-        XLog.i(TAG, "Firing scheduled task: ${task.describe()}")
+        XLog.i(TAG, "Firing scheduled task id=${task.id} mode=${task.mode} textChars=${task.text.length}")
 
         if (task.mode == ScheduledTaskManager.Mode.TASK) {
             // Execute in the background with a wake lock; Android may block an Activity

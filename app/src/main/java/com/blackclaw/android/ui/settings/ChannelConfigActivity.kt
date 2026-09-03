@@ -68,16 +68,20 @@ class ChannelConfigActivity : BaseActivity() {
     }
 
     private fun saveToken(channelType: ChannelType, token: String) {
-        when (channelType) {
-            ChannelType.DISCORD -> {
-                KVUtils.setDiscordBotToken(token)
-                ChannelManager.reinitDiscordFromStorage()
-            }
-            ChannelType.TELEGRAM -> {
-                KVUtils.setTelegramBotToken(token)
-                ChannelManager.reinitTelegramFromStorage()
-            }
+        val stored = when (channelType) {
+            ChannelType.DISCORD -> KVUtils.setDiscordBotToken(token)
+            ChannelType.TELEGRAM -> KVUtils.setTelegramBotToken(token)
         }
+        if (!stored) {
+            Toast.makeText(this, "Could not save token securely", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        when (channelType) {
+            ChannelType.DISCORD -> ChannelManager.reinitDiscordFromStorage()
+            ChannelType.TELEGRAM -> ChannelManager.reinitTelegramFromStorage()
+        }
+
         // Contract preserved: callers still get the same result payload they always did.
         val result = ChannelConfigResult(
             channelType = channelType,

@@ -9,7 +9,6 @@ import com.blackclaw.android.utils.XLog
 
 object ExternalAutomationEntrypoint {
     private const val TAG = "ExternalAutomation"
-    private const val MAX_LOG_TEXT = 120
 
     fun handle(context: Context, intent: Intent?, launchFlags: Int): Boolean {
         if (intent == null) return false
@@ -53,7 +52,7 @@ object ExternalAutomationEntrypoint {
             return false
         }
 
-        XLog.i(TAG, "Accepted external automation ${request.mode}: ${request.text.take(MAX_LOG_TEXT)}")
+        XLog.i(TAG, "Accepted external automation mode=${request.mode} chars=${request.text.length}")
         ExternalAutomationContract.sendCallback(
             context = context,
             returnAction = request.returnAction,
@@ -89,11 +88,10 @@ object ExternalAutomationEntrypoint {
      *
      *     intent.setPackage("com.blackclaw.android")
      *
-     * The only thing it buys is filtering out broadcasts that merely happened to
-     * match our action filter, which is hygiene, not security. Authorisation lives
-     * in two other places: the `signature` permission on the exported components in
-     * AndroidManifest.xml, and [AutomationCallerPolicy] applied against
-     * `getCallingPackage()` in [ExternalAutomationActivity]. Do not add trust to
+     * The only thing it buys is filtering out intents that merely happened to match
+     * our action filter, which is hygiene, not security. Authorisation lives in the
+     * signature permission used by the broadcast receiver and in
+     * [AutomationCallerPolicy]/[AutomationToken] for the exported activity. Do not add trust to
      * this function; there is nothing trustworthy in an intent's own description of
      * where it is headed.
      */

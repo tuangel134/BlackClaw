@@ -65,7 +65,7 @@ class AutoRepliesActivity : BaseActivity() {
         cancelCron(profile)
         val now = System.currentTimeMillis()
         val intervalMs = profile.cronIntervalMinutes.toLong().coerceAtLeast(5L) * 60_000L
-        ScheduledTaskManager.schedule(
+        val scheduled = ScheduledTaskManager.schedule(
             context = this,
             mode = ScheduledTaskManager.Mode.TASK,
             text = "[autoreply:${profile.id}] " + profile.composeAgentPrompt(),
@@ -73,6 +73,13 @@ class AutoRepliesActivity : BaseActivity() {
             recurrence = ScheduledTaskManager.Recurrence.INTERVAL,
             intervalMs = intervalMs,
         )
+        if (scheduled == null) {
+            android.widget.Toast.makeText(
+                this,
+                "No se pudo programar la auto-respuesta de forma segura.",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     private fun cancelCron(profile: AutoReplyProfile) {
@@ -97,6 +104,7 @@ private fun AutoRepliesScreen(
     var profiles by remember { mutableStateOf(AutoReplyProfileStore.all()) }
     var editing by remember { mutableStateOf<AutoReplyProfile?>(null) }
     var creating by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         containerColor = colors.background,
@@ -150,13 +158,18 @@ private fun AutoRepliesScreen(
                             if (updated != null) {
                                 if (updated.enabled && updated.cronEnabled) onScheduleCron(updated)
                                 else onCancelCron(updated)
+                                profiles = AutoReplyProfileStore.all()
+                            } else {
+                                android.widget.Toast.makeText(context, "No se pudo guardar el cambio de forma segura.", android.widget.Toast.LENGTH_LONG).show()
                             }
-                            profiles = AutoReplyProfileStore.all()
                         },
                         onDelete = {
-                            onCancelCron(profile)
-                            AutoReplyProfileStore.delete(profile.id)
-                            profiles = AutoReplyProfileStore.all()
+                            if (AutoReplyProfileStore.delete(profile.id)) {
+                                onCancelCron(profile)
+                                profiles = AutoReplyProfileStore.all()
+                            } else {
+                                android.widget.Toast.makeText(context, "No se pudo eliminar el perfil de forma segura.", android.widget.Toast.LENGTH_LONG).show()
+                            }
                         },
                     )
                 }
@@ -170,9 +183,13 @@ private fun AutoRepliesScreen(
             colors = colors,
             onSave = { p ->
                 val saved = AutoReplyProfileStore.upsert(p)
-                if (saved.cronEnabled && saved.enabled) onScheduleCron(saved)
-                profiles = AutoReplyProfileStore.all()
-                creating = false
+                if (saved != null) {
+                    if (saved.cronEnabled && saved.enabled) onScheduleCron(saved)
+                    profiles = AutoReplyProfileStore.all()
+                    creating = false
+                } else {
+                    android.widget.Toast.makeText(context, "No se pudo guardar el perfil de forma segura.", android.widget.Toast.LENGTH_LONG).show()
+                }
             },
             onDismiss = { creating = false },
         )
@@ -183,10 +200,14 @@ private fun AutoRepliesScreen(
             colors = colors,
             onSave = { updated ->
                 val saved = AutoReplyProfileStore.upsert(updated)
-                onCancelCron(p)
-                if (saved.cronEnabled && saved.enabled) onScheduleCron(saved)
-                profiles = AutoReplyProfileStore.all()
-                editing = null
+                if (saved != null) {
+                    onCancelCron(p)
+                    if (saved.cronEnabled && saved.enabled) onScheduleCron(saved)
+                    profiles = AutoReplyProfileStore.all()
+                    editing = null
+                } else {
+                    android.widget.Toast.makeText(context, "No se pudo guardar el perfil de forma segura.", android.widget.Toast.LENGTH_LONG).show()
+                }
             },
             onDismiss = { editing = null },
         )

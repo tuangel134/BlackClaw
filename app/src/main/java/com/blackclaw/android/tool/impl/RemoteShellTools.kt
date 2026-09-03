@@ -18,8 +18,9 @@ import java.util.concurrent.TimeUnit
  * - "Mata el proceso que está usando toda la RAM" → ssh → kill
  * - "Reinicia el servidor web" → ssh → systemctl restart nginx
  *
- * Security: credentials stored in local app storage (MMKV). The user must
- * explicitly configure the connection. No credentials leave the device.
+ * Security: SSH credentials are encrypted at rest with an AndroidKeyStore-backed
+ * AES-GCM key. Legacy MMKV credentials are migrated lazily and deleted only after
+ * encrypted read-back succeeds. The user must explicitly configure the connection.
  */
 
 class RemoteShellTool : BaseTool() {
@@ -99,9 +100,15 @@ class RemoteConnectTool : BaseTool() {
                 // Store the fingerprint alongside the credentials, so every later
                 // connect is checked against it and a substituted host is refused
                 // before the password is sent.
-                RemoteConnectionStore.saveConnection(
-                    conn.copy(hostKeyFingerprint = result.hostKeyFingerprint)
-                )
+                if (!RemoteConnectionStore.saveConnection(
+                        conn.copy(hostKeyFingerprint = result.hostKeyFingerprint)
+                    )
+                ) {
+                    return ToolResult.error(
+                        "La conexión SSH funcionó, pero no pude guardar las credenciales de forma segura. " +
+                            "Desbloquea el dispositivo e inténtalo de nuevo."
+                    )
+                }
                 val systemInfo = testOutput.substringAfter("BlackClaw_connected").trim()
                 // Surfaced, not hidden: first contact is inherently unverified, and
                 // the user is the only one who can close that gap by comparing the
@@ -134,12 +141,20 @@ class RemoteDisconnectTool : BaseTool() {
     override fun execute(params: Map<String, Any>): ToolResult {
         val alias = requireString(params, "alias").trim()
         if (alias == "all") {
-            RemoteConnectionStore.clearAll()
-            return ToolResult.success("Todas las conexiones remotas eliminadas.")
+            return if (RemoteConnectionStore.clearAll()) {
+                ToolResult.success("Todas las conexiones remotas eliminadas.")
+            } else {
+                ToolResult.error("No pude borrar las conexiones remotas del almacenamiento seguro.")
+            }
         }
-        val removed = RemoteConnectionStore.removeConnection(alias)
-        return if (removed) ToolResult.success("Conexión '$alias' eliminada.")
-        else ToolResult.error("No encontré conexión '$alias'.")
+        if (RemoteConnectionStore.getConnection(alias) == null) {
+            return ToolResult.error("No encontré conexión '$alias'.")
+        }
+        return if (RemoteConnectionStore.removeConnection(alias)) {
+            ToolResult.success("Conexión '$alias' eliminada.")
+        } else {
+            ToolResult.error("No pude eliminar la conexión '$alias' del almacenamiento seguro.")
+        }
     }
 }
 
@@ -563,8 +578,23 @@ object RemoteConnectionStore {
 
     @Synchronized
     fun allConnections(): List<Connection> {
-        val raw = KVUtils.getString(KEY, "")
+        val secure = com.blackclaw.android.utils.SecretStore.getString(KEY)
+        val legacy = if (secure == null) KVUtils.getString(KEY, "") else ""
+        val raw = secure ?: legacy
         if (raw.isBlank()) return emptyList()
+
+        if (secure == null && legacy.isNotBlank()) {
+            val migrated = com.blackclaw.android.utils.SecretStore.putString(KEY, legacy) &&
+                com.blackclaw.android.utils.SecretStore.getString(KEY) == legacy
+            if (migrated) {
+                KVUtils.remove(KEY)
+                KVUtils.sync()
+                XLog.i("RemoteConnectionStore", "Migrated saved SSH credentials to encrypted storage")
+            } else {
+                XLog.w("RemoteConnectionStore", "SSH credential migration deferred; legacy data retained")
+            }
+        }
+
         return runCatching {
             val arr = org.json.JSONArray(raw)
             (0 until arr.length()).mapNotNull { i ->
@@ -590,23 +620,26 @@ object RemoteConnectionStore {
      * into something an attacker can reset just by presenting a new key.
      */
     @Synchronized
-    fun recordHostKeyFingerprint(alias: String, fingerprint: String) {
-        if (alias.isBlank() || fingerprint.isBlank()) return
+    fun recordHostKeyFingerprint(alias: String, fingerprint: String): Boolean {
+        if (alias.isBlank() || fingerprint.isBlank()) return false
         val list = allConnections().toMutableList()
         val index = list.indexOfFirst { it.alias.equals(alias, ignoreCase = true) }
-        if (index < 0) return
-        if (list[index].hostKeyFingerprint.isNotBlank()) return
+        if (index < 0) return false
+        if (list[index].hostKeyFingerprint.isNotBlank()) return true
         list[index] = list[index].copy(hostKeyFingerprint = fingerprint)
-        saveAll(list)
+        val saved = saveAll(list)
+        if (!saved) XLog.e("RemoteConnectionStore", "Could not persist SSH host-key pin")
+        return saved
     }
 
     @Synchronized
-    fun saveConnection(conn: Connection) {
+    fun saveConnection(conn: Connection): Boolean {
         val list = allConnections().toMutableList()
         list.removeAll { it.alias == conn.alias }
         list.add(conn)
-        saveAll(list)
+        if (!saveAll(list)) return false
         KVUtils.putString("remote_default_alias", conn.alias); KVUtils.sync()
+        return true
     }
 
     fun getConnection(alias: String): Connection? =
@@ -622,15 +655,21 @@ object RemoteConnectionStore {
     fun removeConnection(alias: String): Boolean {
         val list = allConnections().toMutableList()
         val removed = list.removeAll { it.alias.equals(alias, ignoreCase = true) }
-        if (removed) saveAll(list)
-        return removed
+        if (!removed) return false
+        return saveAll(list)
     }
 
-    fun clearAll() {
-        KVUtils.putString(KEY, ""); KVUtils.sync()
+    fun clearAll(): Boolean {
+        if (!com.blackclaw.android.utils.SecretStore.remove(KEY)) {
+            XLog.e("RemoteConnectionStore", "Could not clear encrypted SSH credentials")
+            return false
+        }
+        KVUtils.remove(KEY)
+        KVUtils.sync()
+        return true
     }
 
-    private fun saveAll(list: List<Connection>) {
+    private fun saveAll(list: List<Connection>): Boolean {
         val arr = org.json.JSONArray()
         list.forEach { c ->
             arr.put(org.json.JSONObject().apply {
@@ -639,6 +678,15 @@ object RemoteConnectionStore {
                 put("hostkey_fp", c.hostKeyFingerprint)
             })
         }
-        KVUtils.putString(KEY, arr.toString()); KVUtils.sync()
+        val encoded = arr.toString()
+        if (!com.blackclaw.android.utils.SecretStore.putString(KEY, encoded)) {
+            XLog.e("RemoteConnectionStore", "Could not store SSH credentials securely; previous data retained")
+            return false
+        }
+        // A successful secure write is the only point where an old plaintext copy
+        // may be deleted.
+        KVUtils.remove(KEY)
+        KVUtils.sync()
+        return true
     }
 }

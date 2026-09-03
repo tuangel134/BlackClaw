@@ -214,7 +214,7 @@ object AdbController {
             else discoverPort(context, AdbMdns.SERVICE_TYPE_TLS_PAIRING) ?: 0
         if (pairingPort == 0) {
             state = State.ERROR
-            lastError = "Leí el código ($finalCode) pero no encontré el puerto. Reintenta."
+            lastError = "Leí el código de emparejamiento, pero no encontré el puerto. Reintenta."
             return@withContext Result.failure(IOException(lastError))
         }
 
@@ -223,7 +223,7 @@ object AdbController {
             val ok = mgr(context).pair("127.0.0.1", pairingPort, finalCode)
             if (!ok) {
                 state = State.ERROR
-                lastError = "Emparejamiento rechazado por adbd (código $finalCode)."
+                lastError = "Emparejamiento rechazado por adbd. Genera un código nuevo e inténtalo otra vez."
                 return@withContext Result.failure(IOException(lastError))
             }
             KVUtils.putBoolean(KEY_PAIRED, true)
@@ -285,7 +285,7 @@ object AdbController {
             try {
                 shellBlocking(context, command, timeoutMs)
             } catch (e: Throwable) {
-                XLog.w(TAG, "shell('$command') failed: ${e.message}")
+                XLog.w(TAG, "shell failed: commandChars=${command.length} type=${e.javaClass.simpleName}")
                 // Connection may have dropped — mark disconnected so next call retries.
                 state = State.PAIRED_DISCONNECTED
                 null
@@ -326,7 +326,7 @@ object AdbController {
                 mgr(context).openStream("shell:$command").use { /* close immediately */ }
                 true
             } catch (e: Throwable) {
-                XLog.w(TAG, "shellFast('$command') failed: ${e.message}")
+                XLog.w(TAG, "shellFast failed: commandChars=${command.length} type=${e.javaClass.simpleName}")
                 state = State.PAIRED_DISCONNECTED
                 false
             }

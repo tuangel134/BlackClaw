@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -124,6 +125,7 @@ fun PrivilegedToolsCard(modifier: Modifier = Modifier) {
  */
 @Composable
 fun AutomationTokenCard(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     val code = remember(refresh) { AutomationToken.tokenForDisplay() }
 
@@ -136,10 +138,18 @@ fun AutomationTokenCard(modifier: Modifier = Modifier) {
         code = code,
         modifier = modifier,
         accent = ClawPalette.Signature,
+        emptyHint = "No se pudo generar el token en el almacenamiento seguro.",
         copyLabel = "Token copiado",
         onRegenerate = {
-            AutomationToken.regenerate()
+            val generated = AutomationToken.regenerate()
             refresh++
+            if (generated.isBlank()) {
+                android.widget.Toast.makeText(
+                    context,
+                    "No se pudo guardar el token de forma segura. Desbloquea el dispositivo e inténtalo de nuevo.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
         },
     )
 }
