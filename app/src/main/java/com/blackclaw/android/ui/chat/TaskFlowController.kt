@@ -1,8 +1,6 @@
 package com.blackclaw.android.ui.chat
 
-import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -170,7 +168,6 @@ class TaskFlowController(
         }
         sendTaskRetryCount = 0
 
-        ensureNotificationPermission()
         uiState.isAwaitingReply.value = false
         uiState.isTaskRunning.value = false
 
@@ -213,7 +210,6 @@ class TaskFlowController(
         toolCall: DirectDeviceDataGuard.DeterministicToolCall,
         originOverride: com.blackclaw.android.tool.guard.ToolRiskPolicy.Origin?,
     ) {
-        ensureNotificationPermission()
         addUser(text)
         uiState.isAwaitingReply.value = true
         uiState.isTaskRunning.value = false
@@ -450,14 +446,6 @@ class TaskFlowController(
         addSystem(note)
         lastMonitorStatusNote = note
         XLog.i(TAG, "checkAutoReplyConfirmation: monitor active, staying in BlackClaw")
-    }
-
-    private fun ensureNotificationPermission() {
-        if (!AppCapabilityCoordinator.isNotificationPermissionGranted(activity)) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-            }
-        }
     }
 
     private fun addUser(text: String) {

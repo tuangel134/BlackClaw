@@ -1,8 +1,11 @@
 package com.blackclaw.android.ui.onboarding
 
+import android.Manifest
+import android.app.Activity
 import android.app.AlarmManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -11,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +35,8 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -83,6 +89,7 @@ class OnboardingActivity : BaseActivity() {
 
 private data class PermStep(
     val key: String,
+    val topic: PermissionTopic,
     val icon: ImageVector,
     val title: String,
     val rationale: String,
@@ -122,6 +129,8 @@ private fun OnboardingScreen(colors: BlackClawColors, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var snap by remember { mutableStateOf(liteSnapshot(ctx)) }
+    var selectedStep by remember { mutableStateOf<PermStep?>(null) }
+    var showPermissionOverview by remember { mutableStateOf(false) }
 
     // Refresh status whenever we come back from a system settings screen.
     DisposableEffect(lifecycleOwner) {
@@ -135,37 +144,51 @@ private fun OnboardingScreen(colors: BlackClawColors, onDone: () -> Unit) {
     val steps = remember {
         listOf(
             PermStep(
-                "accessibility", Icons.Default.Accessibility, "Accesibilidad",
+                "accessibility", PermissionTopic.ACCESSIBILITY, Icons.Default.Accessibility, "Accesibilidad",
                 "El corazón de BlackClaw: le permite ver la pantalla y tocar por ti. Sin esto el agente no puede actuar.",
                 essential = true, isGranted = { it.accessibility },
                 onActivate = { AppCapabilityCoordinator.openSystemSettings(it, AppRequirement.ACCESSIBILITY) },
             ),
             PermStep(
-                "notifPerm", Icons.Default.Notifications, "Mostrar notificaciones",
+                "notifPerm", PermissionTopic.NOTIFICATIONS, Icons.Default.Notifications, "Mostrar notificaciones",
                 "Para enviarte recordatorios, alarmas y avisos del asistente.",
                 essential = true, isGranted = { it.notificationPermission },
-                onActivate = { openAppNotificationSettings(it) },
+                onActivate = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(it, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        (it as? Activity)?.let { activity ->
+                            ActivityCompat.requestPermissions(
+                                activity,
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                4301,
+                            )
+                        } ?: openAppNotificationSettings(it)
+                    } else {
+                        openAppNotificationSettings(it)
+                    }
+                },
             ),
             PermStep(
-                "notifAccess", Icons.Default.NotificationsActive, "Leer notificaciones",
+                "notifAccess", PermissionTopic.NOTIFICATION_ACCESS, Icons.Default.NotificationsActive, "Leer notificaciones",
                 "Deja que el asistente proactivo reaccione a tus mensajes (poner una alarma, registrar un cobro). Opcional pero recomendado.",
                 essential = false, isGranted = { it.notificationAccess },
                 onActivate = { AppCapabilityCoordinator.openSystemSettings(it, AppRequirement.NOTIFICATION_ACCESS) },
             ),
             PermStep(
-                "overlay", Icons.Default.Layers, "Superponer en pantalla",
+                "overlay", PermissionTopic.OVERLAY, Icons.Default.Layers, "Superponer en pantalla",
                 "Para la burbuja flotante y las alarmas a pantalla completa sobre otras apps.",
                 essential = false, isGranted = { it.overlay },
                 onActivate = { AppCapabilityCoordinator.openSystemSettings(it, AppRequirement.OVERLAY) },
             ),
             PermStep(
-                "exactAlarm", Icons.Default.Alarm, "Alarmas exactas",
+                "exactAlarm", PermissionTopic.EXACT_ALARMS, Icons.Default.Alarm, "Alarmas exactas",
                 "Para que las alarmas y recordatorios suenen justo a la hora, no minutos después.",
                 essential = false, isGranted = { it.exactAlarms },
                 onActivate = { openExactAlarmSettings(it) },
             ),
             PermStep(
-                "battery", Icons.Default.BatteryChargingFull, "Sin optimización de batería",
+                "battery", PermissionTopic.BATTERY, Icons.Default.BatteryChargingFull, "Sin optimización de batería",
                 "Evita que el sistema mate al asistente en segundo plano (clave en Honor/Xiaomi/Samsung).",
                 essential = false, isGranted = { it.battery },
                 onActivate = { AppCapabilityCoordinator.openSystemSettings(it, AppRequirement.BATTERY_OPTIMIZATION) },
@@ -238,8 +261,30 @@ private fun OnboardingScreen(colors: BlackClawColors, onDone: () -> Unit) {
 
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Spacer(Modifier.height(6.dp))
+                Surface(
+                    color = colors.accent.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.22f)),
+                    modifier = Modifier.fillMaxWidth().clickable { showPermissionOverview = true },
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Info, null, tint = colors.accent, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("¿Por qué BlackClaw pide permisos?", color = colors.textPrimary,
+                                fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Consulta todos, incluso los que solo aparecen al usar una función.",
+                                color = colors.textSecondary, fontSize = 11.sp)
+                        }
+                        Text("Ver", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 steps.forEach { step ->
-                    PermissionRow(step, step.isGranted(snap), colors)
+                    PermissionRow(step, step.isGranted(snap), colors) { selectedStep = step }
                     Spacer(Modifier.height(10.dp))
                 }
 
@@ -272,11 +317,30 @@ private fun OnboardingScreen(colors: BlackClawColors, onDone: () -> Unit) {
             }
         }
     }
+
+    selectedStep?.let { step ->
+        PermissionExplanationDialog(
+            topic = step.topic,
+            colors = colors,
+            onDismiss = { selectedStep = null },
+            onContinue = {
+                selectedStep = null
+                step.onActivate(ctx)
+            },
+        )
+    }
+    if (showPermissionOverview) {
+        PermissionOverviewDialog(colors = colors, onDismiss = { showPermissionOverview = false })
+    }
 }
 
 @Composable
-private fun PermissionRow(step: PermStep, granted: Boolean, colors: BlackClawColors) {
-    val ctx = LocalContext.current
+private fun PermissionRow(
+    step: PermStep,
+    granted: Boolean,
+    colors: BlackClawColors,
+    onExplain: () -> Unit,
+) {
     val green = Color(0xFF22C55E)
     Surface(
         color = if (granted) green.copy(alpha = 0.08f) else colors.surface,
@@ -323,7 +387,7 @@ private fun PermissionRow(step: PermStep, granted: Boolean, colors: BlackClawCol
                 }
             } else {
                 Button(
-                    onClick = { step.onActivate(ctx) },
+                    onClick = onExplain,
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 7.dp),
                     colors = ButtonDefaults.buttonColors(

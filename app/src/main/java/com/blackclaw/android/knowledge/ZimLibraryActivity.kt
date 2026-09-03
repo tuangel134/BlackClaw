@@ -35,6 +35,10 @@ import androidx.lifecycle.lifecycleScope
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.ui.assist.QuickAssistActivity
+import com.blackclaw.android.ui.chat.ThemeManager
+import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.onboarding.PermissionExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,13 +60,15 @@ class ZimLibraryActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        val permissionColors = with(ThemeManager) { ThemeManager.getColors().toComposeColors() }
         setContent {
+            var showStorageEducation by remember { mutableStateOf(false) }
             MaterialTheme(colorScheme = darkColorScheme()) {
                 ZimLibraryScreen(
                     libraries, selected, hits, article, query, message, loading,
                     onBack = { if (article != null) article = null else if (selected != null) select(null) else finish() },
                     onRefresh = ::loadLibraries,
-                    onGrantStorage = ::openStorageAccess,
+                    onGrantStorage = { showStorageEducation = true },
                     onSelect = { select(it) },
                     onQueryChange = { query = it },
                     onSearch = ::search,
@@ -70,6 +76,17 @@ class ZimLibraryActivity : BaseActivity() {
                     onAsk = ::askBlackClaw,
                     onIndex = ::startIndex,
                 )
+                if (showStorageEducation) {
+                    PermissionExplanationDialog(
+                        topic = PermissionTopic.FILES,
+                        colors = permissionColors,
+                        onDismiss = { showStorageEducation = false },
+                        onContinue = {
+                            showStorageEducation = false
+                            openStorageAccess()
+                        },
+                    )
+                }
             }
         }
         loadLibraries()

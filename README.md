@@ -521,6 +521,13 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.3.1
+
+- Added a reusable **permission education** experience: before a sensitive Android permission or special-access screen opens, BlackClaw explains why the capability is needed, what stops working if it is denied, and the relevant privacy behavior.
+- Added **Settings → Permissions → Why does BlackClaw need permissions?** with a catalog covering 23 permission/capability families, including Accessibility, notifications, microphone, camera, location/background location, files, contacts, calendar, SMS/call access, Bluetooth and Android-managed technical capabilities.
+- Extended contextual explanations to onboarding, Quick Assist, voice mode, calendar, ZIM storage access, geofence/location setup, scheduled tasks and emergency protection; emergency permissions are explained together before Android asks only for the missing ones.
+- Removed surprise permission prompts from ordinary chat/task startup: microphone and notification requests now happen only from an explicit feature flow, and voice mode no longer remains enabled when microphone permission is declined.
+
 ### v1.3.0
 
 - Added encrypted **semantic places** with arbitrary user-defined names and aliases: users can say “this place is my girlfriend’s house”, “this is my room”, “save this as gym”, then reference that place naturally in future automations through a stable `place_id`. Saved coordinates stay local/encrypted and are not returned in place-resolution prompts.

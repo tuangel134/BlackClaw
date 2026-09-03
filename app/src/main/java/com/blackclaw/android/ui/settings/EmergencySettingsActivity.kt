@@ -31,6 +31,10 @@ import com.blackclaw.android.emergency.EmergencyCameras
 import com.blackclaw.android.emergency.EmergencyMode
 import com.blackclaw.android.emergency.EmergencyStartOptions
 import com.blackclaw.android.emergency.EmergencyService
+import com.blackclaw.android.ui.chat.ThemeManager
+import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.onboarding.PermissionBundleExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 
 @OptIn(ExperimentalMaterial3Api::class)
 class EmergencySettingsActivity : BaseActivity() {
@@ -38,6 +42,7 @@ class EmergencySettingsActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val permissionTheme = with(ThemeManager) { ThemeManager.getColors().toComposeColors() }
         setContent {
             var name by remember { mutableStateOf(EmergencyConfig.contactName) }
             var phone by remember { mutableStateOf(EmergencyConfig.phone) }
@@ -46,6 +51,7 @@ class EmergencySettingsActivity : BaseActivity() {
             var torch by remember { mutableStateOf(EmergencyConfig.lowLightTorch) }
             var saved by remember { mutableStateOf(false) }
             var active by remember { mutableStateOf(EmergencyService.isActive) }
+            var pendingPermissionRequest by remember { mutableStateOf<Pair<Boolean, Boolean>?>(null) }
             var evidenceItems by remember { mutableStateOf(EmergencyEvidenceVault.listEvidence(this@EmergencySettingsActivity)) }
             val evidenceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                 evidenceItems = EmergencyEvidenceVault.listEvidence(this@EmergencySettingsActivity)
@@ -225,7 +231,7 @@ class EmergencySettingsActivity : BaseActivity() {
                                 EmergencyConfig.recordAudio = audio
                                 EmergencyConfig.lowLightTorch = torch
                                 saved = true
-                                requestEmergencyPermissions(audio, cameraChoice != EmergencyCameras.NONE)
+                                pendingPermissionRequest = audio to (cameraChoice != EmergencyCameras.NONE)
                             },
                             enabled = formReady,
                             modifier = Modifier.fillMaxWidth(),
@@ -265,6 +271,26 @@ class EmergencySettingsActivity : BaseActivity() {
                       }
                     }
                 }
+            }
+
+            pendingPermissionRequest?.let { (needsAudio, needsCamera) ->
+                val topics = buildList {
+                    add(PermissionTopic.SMS)
+                    add(PermissionTopic.LOCATION)
+                    if (needsAudio) add(PermissionTopic.MICROPHONE)
+                    if (needsCamera) add(PermissionTopic.CAMERA)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(PermissionTopic.NOTIFICATIONS)
+                }
+                PermissionBundleExplanationDialog(
+                    topics = topics,
+                    colors = permissionTheme,
+                    title = "Permisos para protección personal",
+                    onDismiss = { pendingPermissionRequest = null },
+                    onContinue = {
+                        pendingPermissionRequest = null
+                        requestEmergencyPermissions(needsAudio, needsCamera)
+                    },
+                )
             }
         }
     }

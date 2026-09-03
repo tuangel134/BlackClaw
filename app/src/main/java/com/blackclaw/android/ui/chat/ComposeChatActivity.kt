@@ -314,13 +314,10 @@ class ComposeChatActivity : ComponentActivity() {
         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
             this, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            runCatching {
-                androidx.core.app.ActivityCompat.requestPermissions(
-                    this, arrayOf(android.Manifest.permission.RECORD_AUDIO), 4201)
-            }
-            return
-        }
+        // Do not surprise the user with a microphone prompt just because the chat
+        // Activity resumed. Voice Settings and Quick Assist show the permission
+        // rationale at the moment the user explicitly chooses voice.
+        if (!granted) return
         runCatching { com.blackclaw.android.service.VoiceWakeService.start(this) }
     }
 

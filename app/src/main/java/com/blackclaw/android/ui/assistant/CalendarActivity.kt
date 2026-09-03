@@ -35,6 +35,8 @@ import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ThemeManager
 import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.onboarding.PermissionExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -93,6 +95,7 @@ private fun CalendarScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var refresh by remember { mutableStateOf(0) }
     var mode by remember { mutableStateOf(0) } // 0 = Mes, 1 = Agenda
     var rescheduleItem by remember { mutableStateOf<AssistantItem?>(null) }
+    var showCalendarPermissionExplanation by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
     // System-calendar overlay (read-only). Starts on if permission already granted.
@@ -122,7 +125,7 @@ private fun CalendarScreen(colors: BlackClawColors, onBack: () -> Unit) {
                         else if (com.blackclaw.android.assistant.SystemCalendar.hasPermission(ctx)) {
                             showSystem = true; refresh++
                         } else {
-                            permLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+                            showCalendarPermissionExplanation = true
                         }
                     }) {
                         Text(if (on) "📆 Sistema ✓" else "📆 Sistema",
@@ -160,6 +163,18 @@ private fun CalendarScreen(colors: BlackClawColors, onBack: () -> Unit) {
                 AgendaMode(colors, refresh, showSystem) { rescheduleItem = it }
             }
         }
+    }
+
+    if (showCalendarPermissionExplanation) {
+        PermissionExplanationDialog(
+            topic = PermissionTopic.CALENDAR,
+            colors = colors,
+            onDismiss = { showCalendarPermissionExplanation = false },
+            onContinue = {
+                showCalendarPermissionExplanation = false
+                permLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+            },
+        )
     }
 
     rescheduleItem?.let { item ->

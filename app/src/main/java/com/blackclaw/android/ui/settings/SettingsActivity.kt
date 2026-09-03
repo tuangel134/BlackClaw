@@ -47,6 +47,9 @@ import com.blackclaw.android.ui.chat.ThemeManager
 import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
 import com.blackclaw.android.ui.design.ClawGlassBackdrop
 import com.blackclaw.android.ui.design.ClawGlassCard
+import com.blackclaw.android.ui.onboarding.PermissionExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionOverviewDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 import com.blackclaw.android.ui.scheduled.ScheduledTasksActivity
 import com.blackclaw.android.ui.skills.SkillsActivity
 import com.blackclaw.android.ui.tools.ToolBrowserActivity
@@ -78,23 +81,53 @@ class SettingsActivity : BaseActivity() {
             val caps by remember(tickValue) {
                 mutableStateOf(AppCapabilityCoordinator.snapshot(activity))
             }
+            var pendingPermissionTopic by remember { mutableStateOf<PermissionTopic?>(null) }
+            var pendingPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+            var showPermissionOverview by remember { mutableStateOf(false) }
+            fun explainPermission(topic: PermissionTopic, action: () -> Unit) {
+                pendingPermissionTopic = topic
+                pendingPermissionAction = action
+            }
             ClawGlassBackdrop(colors = colors) {
                 ModernSettingsScreen(
                     colors = colors,
                     caps = caps,
                     onBack = { activity.finish() },
                     onOpenOnboarding = { activity.startActivity(Intent(activity, com.blackclaw.android.ui.onboarding.OnboardingActivity::class.java)) },
-                    onOpenAccessibility = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.ACCESSIBILITY) },
-                    onRequestNotifications = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                            && !AppCapabilityCoordinator.isNotificationPermissionGranted(activity)) {
-                            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+                    onOpenPermissionOverview = { showPermissionOverview = true },
+                    onOpenAccessibility = {
+                        explainPermission(PermissionTopic.ACCESSIBILITY) {
+                            AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.ACCESSIBILITY)
                         }
                     },
-                    onOpenNotificationAccess = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.NOTIFICATION_ACCESS) },
-                    onOpenOverlay = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.OVERLAY) },
-                    onOpenBattery = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.BATTERY_OPTIMIZATION) },
-                    onOpenStorage = { AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.STORAGE) },
+                    onRequestNotifications = {
+                        explainPermission(PermissionTopic.NOTIFICATIONS) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                                && !AppCapabilityCoordinator.isNotificationPermissionGranted(activity)) {
+                                activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+                            }
+                        }
+                    },
+                    onOpenNotificationAccess = {
+                        explainPermission(PermissionTopic.NOTIFICATION_ACCESS) {
+                            AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.NOTIFICATION_ACCESS)
+                        }
+                    },
+                    onOpenOverlay = {
+                        explainPermission(PermissionTopic.OVERLAY) {
+                            AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.OVERLAY)
+                        }
+                    },
+                    onOpenBattery = {
+                        explainPermission(PermissionTopic.BATTERY) {
+                            AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.BATTERY_OPTIMIZATION)
+                        }
+                    },
+                    onOpenStorage = {
+                        explainPermission(PermissionTopic.FILES) {
+                            AppCapabilityCoordinator.openSystemSettings(activity, AppRequirement.STORAGE)
+                        }
+                    },
                     onOpenLlmConfig = { activity.startActivity(Intent(activity, LlmConfigActivity::class.java)) },
                     onOpenTheme = { activity.startActivity(Intent(activity, ThemeActivity::class.java)) },
                     onOpenSkills = { activity.startActivity(Intent(activity, SkillsActivity::class.java)) },
@@ -125,6 +158,25 @@ class SettingsActivity : BaseActivity() {
                     },
                     onEditGlobalPrompt = { activity.showGlobalPromptDialog() },
                 )
+            }
+            pendingPermissionTopic?.let { topic ->
+                PermissionExplanationDialog(
+                    topic = topic,
+                    colors = colors,
+                    onDismiss = {
+                        pendingPermissionTopic = null
+                        pendingPermissionAction = null
+                    },
+                    onContinue = {
+                        val action = pendingPermissionAction
+                        pendingPermissionTopic = null
+                        pendingPermissionAction = null
+                        action?.invoke()
+                    },
+                )
+            }
+            if (showPermissionOverview) {
+                PermissionOverviewDialog(colors = colors, onDismiss = { showPermissionOverview = false })
             }
         }
     }
@@ -160,6 +212,7 @@ private fun ModernSettingsScreen(
     caps: com.blackclaw.android.AppCapabilitySnapshot,
     onBack: () -> Unit,
     onOpenOnboarding: () -> Unit,
+    onOpenPermissionOverview: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onRequestNotifications: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -264,9 +317,19 @@ private fun ModernSettingsScreen(
             // ── Permisos ───────────────────────────────────────────────────────
             SettingsSection(title = "Permisos", colors = colors) {
                 NavRow(
+                    icon = Icons.Outlined.Info,
+                    title = "¿Por qué necesita permisos?",
+                    subtitle = "Qué usa, qué se desactiva y cómo trata tus datos",
+                    trailing = "Ver todos",
+                    trailingHighlight = true,
+                    colors = colors,
+                    onClick = onOpenPermissionOverview,
+                )
+                Divider(colors)
+                NavRow(
                     icon = Icons.Outlined.AutoAwesome,
                     title = "Configuración guiada",
-                    subtitle = "Activa todos los permisos paso a paso",
+                    subtitle = "Activa permisos paso a paso con explicación previa",
                     trailing = "Abrir",
                     trailingHighlight = true,
                     colors = colors,

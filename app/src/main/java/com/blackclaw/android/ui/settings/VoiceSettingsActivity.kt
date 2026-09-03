@@ -4,7 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.core.app.ActivityCompat
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
@@ -29,6 +29,10 @@ import com.blackclaw.android.assistant.VoiceInputManager
 import com.blackclaw.android.assistant.VoskModelManager
 import com.blackclaw.android.assistant.WhisperMode
 import com.blackclaw.android.base.BaseActivity
+import com.blackclaw.android.ui.chat.ThemeManager
+import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
+import com.blackclaw.android.ui.onboarding.PermissionExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 
 /**
  * Settings screen for hands-free voice mode: enable/disable + offline model
@@ -38,20 +42,45 @@ import com.blackclaw.android.base.BaseActivity
 class VoiceSettingsActivity : BaseActivity() {
 
     private val assistantStatus = mutableStateOf<com.blackclaw.android.ui.assist.AssistantRole.Status?>(null)
+    private val voiceEnabledState = mutableStateOf(VoiceInputManager.wakeEnabled)
+    private val micPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) enableVoiceMode() else disableVoiceMode()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         assistantStatus.value = com.blackclaw.android.ui.assist.AssistantRole.status(this)
+        val permissionTheme = with(ThemeManager) { ThemeManager.getColors().toComposeColors() }
         setContent {
+            var showMicEducation by remember { mutableStateOf(false) }
             VoiceSettingsScreen(
                 onBack = { finish() },
-                onEnable = { ensureMicPermission() },
+                enabled = voiceEnabledState.value,
+                onEnabledChange = { requested ->
+                    if (!requested) disableVoiceMode()
+                    else if (hasMicPermission()) enableVoiceMode()
+                    else showMicEducation = true
+                },
                 assistantStatus = assistantStatus.value,
                 onOpenAssistantSettings = {
                     com.blackclaw.android.ui.assist.AssistantRole.openSettings(this)
                 },
             )
+            if (showMicEducation) {
+                PermissionExplanationDialog(
+                    topic = PermissionTopic.MICROPHONE,
+                    colors = permissionTheme,
+                    onDismiss = {
+                        showMicEducation = false
+                        disableVoiceMode()
+                    },
+                    onContinue = {
+                        showMicEducation = false
+                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                )
+            }
         }
     }
 
@@ -60,12 +89,20 @@ class VoiceSettingsActivity : BaseActivity() {
         assistantStatus.value = com.blackclaw.android.ui.assist.AssistantRole.status(this)
     }
 
-    private fun ensureMicPermission() {
-        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 4202)
-        }
+    private fun hasMicPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun enableVoiceMode() {
+        voiceEnabledState.value = true
+        VoiceInputManager.wakeEnabled = true
+        runCatching { com.blackclaw.android.service.VoiceWakeService.start(this) }
+    }
+
+    private fun disableVoiceMode() {
+        voiceEnabledState.value = false
+        VoiceInputManager.wakeEnabled = false
+        VoiceInputManager.stopWakeLoop()
+        runCatching { com.blackclaw.android.service.VoiceWakeService.stop(this) }
     }
 }
 
@@ -73,7 +110,8 @@ class VoiceSettingsActivity : BaseActivity() {
 @Composable
 private fun VoiceSettingsScreen(
     onBack: () -> Unit,
-    onEnable: () -> Unit,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
     assistantStatus: com.blackclaw.android.ui.assist.AssistantRole.Status?,
     onOpenAssistantSettings: () -> Unit,
 ) {
@@ -83,7 +121,6 @@ private fun VoiceSettingsScreen(
     val textPrimary = Color(0xFFC8D0E8)
     val textSecondary = Color(0xFF7A80A0)
 
-    var enabled by remember { mutableStateOf(VoiceInputManager.wakeEnabled) }
     var whisper by remember { mutableStateOf(WhisperMode.enabled) }
     var modelReady by remember { mutableStateOf(VoskModelManager.isReady()) }
     var preparing by remember { mutableStateOf(VoskModelManager.preparing) }
@@ -176,17 +213,7 @@ private fun VoiceSettingsScreen(
                 }
                 Switch(
                     checked = enabled,
-                    onCheckedChange = {
-                        enabled = it
-                        VoiceInputManager.wakeEnabled = it
-                        if (it) {
-                            onEnable()
-                            runCatching { com.blackclaw.android.service.VoiceWakeService.start(ctx) }
-                        } else {
-                            VoiceInputManager.stopWakeLoop()
-                            runCatching { com.blackclaw.android.service.VoiceWakeService.stop(ctx) }
-                        }
-                    },
+                    onCheckedChange = onEnabledChange,
                     colors = SwitchDefaults.colors(checkedTrackColor = accent),
                 )
             }

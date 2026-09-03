@@ -55,7 +55,11 @@ import com.blackclaw.android.agent.TaskClassifier
 import com.blackclaw.android.assistant.JarvisVoice
 import com.blackclaw.android.assistant.Speaker
 import com.blackclaw.android.assistant.VoiceInputManager
+import com.blackclaw.android.ui.chat.ThemeManager
+import com.blackclaw.android.ui.chat.ThemeManager.toComposeColors
 import com.blackclaw.android.ui.design.ClawAnimation
+import com.blackclaw.android.ui.onboarding.PermissionExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 import com.blackclaw.android.utils.XLog
 import java.util.UUID
 import kotlin.math.cos
@@ -107,6 +111,7 @@ class QuickAssistActivity : ComponentActivity() {
     private val rms = mutableFloatStateOf(0f)
     private val progress = mutableStateOf<QuickAssistProgress?>(null)
     private val recovery = mutableStateOf<QuickAssistRecovery?>(null)
+    private val permissionEducation = mutableStateOf<PermissionTopic?>(null)
     private var started = false
     private var silentCount = 0
     private var busy by mutableStateOf(false)
@@ -153,6 +158,7 @@ class QuickAssistActivity : ComponentActivity() {
                 android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             )
         }
+        val permissionTheme = with(ThemeManager) { ThemeManager.getColors().toComposeColors() }
         setContent {
             AssistScreen(
                 turns = turns,
@@ -172,6 +178,30 @@ class QuickAssistActivity : ComponentActivity() {
                 onRecovery = { runRecoveryAction() },
                 onClose = { runCatching { if (busy) appViewModel.stopTask() }; finish() },
             )
+            permissionEducation.value?.let { topic ->
+                PermissionExplanationDialog(
+                    topic = topic,
+                    colors = permissionTheme,
+                    onDismiss = {
+                        permissionEducation.value = null
+                        if (topic == PermissionTopic.MICROPHONE) {
+                            phase.value = Phase.NEED_MIC
+                            status.value = "Puedes escribir sin micrófono. Tócalo cuando quieras activarlo."
+                            recovery.value = QuickAssistRecovery.MICROPHONE
+                        }
+                    },
+                    onContinue = {
+                        permissionEducation.value = null
+                        when (topic) {
+                            PermissionTopic.MICROPHONE -> permLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            PermissionTopic.ACCESSIBILITY -> runCatching {
+                                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            }
+                            else -> Unit
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -238,7 +268,7 @@ class QuickAssistActivity : ComponentActivity() {
             this, android.Manifest.permission.RECORD_AUDIO) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
         if (granted) startListening()
-        else permLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        else permissionEducation.value = PermissionTopic.MICROPHONE
     }
 
     private fun startListening() {
@@ -535,8 +565,8 @@ class QuickAssistActivity : ComponentActivity() {
     private fun runRecoveryAction() {
         when (recovery.value) {
             QuickAssistRecovery.MICROPHONE -> ensureMicThenListen()
-            QuickAssistRecovery.ACCESSIBILITY -> runCatching {
-                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            QuickAssistRecovery.ACCESSIBILITY -> {
+                permissionEducation.value = PermissionTopic.ACCESSIBILITY
             }
             QuickAssistRecovery.CONNECTION -> runCatching {
                 startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))

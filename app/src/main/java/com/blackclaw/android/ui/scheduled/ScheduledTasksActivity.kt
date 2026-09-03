@@ -1,6 +1,7 @@
 package com.blackclaw.android.ui.scheduled
 
 import android.os.Bundle
+import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.view.WindowCompat
 import androidx.core.content.ContextCompat
 import com.blackclaw.android.base.BaseActivity
@@ -57,6 +59,8 @@ import com.blackclaw.android.ui.design.ClawGlassBackdrop
 import com.blackclaw.android.ui.design.ClawGlassCard
 import com.blackclaw.android.ui.design.ClawGlassPill
 import com.blackclaw.android.ui.design.ClawReveal
+import com.blackclaw.android.ui.onboarding.PermissionExplanationDialog
+import com.blackclaw.android.ui.onboarding.PermissionTopic
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -317,6 +321,10 @@ private fun SavedPlacesPane(
     val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     val background = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+    var permissionTopic by remember { mutableStateOf<PermissionTopic?>(null) }
+    val openPermissionSettings = {
+        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -341,10 +349,12 @@ private fun SavedPlacesPane(
                             color = colors.textTertiary, fontSize = 11.sp,
                         )
                         TextButton(onClick = {
-                            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+                            permissionTopic = if (!fine) PermissionTopic.LOCATION else PermissionTopic.BACKGROUND_LOCATION
                         }) { Text("Abrir permisos de BlackClaw", color = colors.accent) }
                     }
-                    Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = {
+                        if (!fine) permissionTopic = PermissionTopic.LOCATION else onAdd()
+                    }, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.AddLocationAlt, null)
                         Spacer(Modifier.width(6.dp))
                         Text("Guardar mi ubicación actual")
@@ -376,6 +386,25 @@ private fun SavedPlacesPane(
                 }
             }
         }
+    }
+    permissionTopic?.let { topic ->
+        PermissionExplanationDialog(
+            topic = topic,
+            colors = colors,
+            onDismiss = { permissionTopic = null },
+            onContinue = {
+                permissionTopic = null
+                if (topic == PermissionTopic.LOCATION && ctx is Activity) {
+                    ActivityCompat.requestPermissions(
+                        ctx,
+                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                        4401,
+                    )
+                } else {
+                    openPermissionSettings()
+                }
+            },
+        )
     }
 }
 
