@@ -87,9 +87,11 @@ object ToolSelector {
         ),
         Category(
             triggers = listOf("cron", "programa", "schedule", "cada dia", "cada día", "diariamente",
-                "periodic", "repite", "automatiza", "si llego", "si recibo", "cuando me escriba"),
+                "periodic", "repite", "automatiza", "si llego", "si salgo", "cuando llegue", "cuando salga",
+                "si recibo", "cuando me escriba", "este lugar", "guarda este lugar", "aqui es", "aquí es",
+                "casa", "trabajo", "cuarto", "gimnasio"),
             tools = listOf("assistant_reminder", "schedule_task", "list_scheduled_tasks",
-                "cancel_scheduled_task", "automation_rule", "get_location"),
+                "cancel_scheduled_task", "automation_rule", "automation_profile", "saved_place", "get_location"),
         ),
         Category(
             triggers = listOf("volumen", "volume", "brillo", "brightness", "wifi", "bluetooth",

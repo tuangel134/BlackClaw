@@ -40,6 +40,11 @@ class BootReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 XLog.e(TAG, "Failed to re-arm automation profiles", e)
             }
+            try {
+                com.blackclaw.android.automation.AutomationGeofenceManager.sync(context.applicationContext)
+            } catch (e: Exception) {
+                XLog.e(TAG, "Failed to re-arm automation geofences", e)
+            }
         }
     }
 }

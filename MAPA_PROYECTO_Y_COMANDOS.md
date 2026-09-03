@@ -5,7 +5,7 @@ subsistema y publicar cambios sin adivinar rutas. En este documento, `REPO`
 significa la carpeta raíz donde clonaste BlackClaw; evita guardar rutas personales
 o específicas de una máquina en documentación versionada.
 
-Estado documentado: `v1.2.20`, rama `main`, paquete Android
+Estado documentado: `v1.3.0`, rama `main`, paquete Android
 `com.blackclaw.android`, `minSdk 28`, `targetSdk 36`, JDK 17.
 
 > No guardes tokens, contraseñas, keystores ni `local.properties` en este archivo.
@@ -181,8 +181,28 @@ find app/src/main/java -type f \( -name '*.kt' -o -name '*.java' \) -print0 | xa
 | Voz | `app/src/main/java/com/blackclaw/android/service/VoiceWakeService.kt` | Wake word, reconocimiento y ejecución de órdenes. |
 | OCR/captura | `app/src/main/java/com/blackclaw/android/perception/` | Imagen de pantalla, OCR y permisos de captura. |
 | Terminal | `app/src/main/java/com/blackclaw/android/terminal/` | Runtime de terminal embebido. |
-| Automatización | `app/src/main/java/com/blackclaw/android/automation/` | Perfiles, triggers, acciones y pruebas. |
+| Automatización | `app/src/main/java/com/blackclaw/android/automation/` | Perfiles, lugares semánticos, geofencing, triggers, condiciones, acciones y pruebas. |
 | ZIM | `app/src/main/java/com/blackclaw/android/knowledge/` | Indexación/consulta offline. |
+
+### Automatización v1.3.0
+
+Rutas principales del motor determinista:
+
+```text
+app/src/main/java/com/blackclaw/android/automation/AutomationProfileStore.kt
+app/src/main/java/com/blackclaw/android/automation/AutomationProfileEngine.kt
+app/src/main/java/com/blackclaw/android/automation/AutomationProfileScheduler.kt
+app/src/main/java/com/blackclaw/android/automation/AutomationGeofenceManager.kt
+app/src/main/java/com/blackclaw/android/automation/AutomationSystemReceiver.kt
+app/src/main/java/com/blackclaw/android/automation/LocationSnapshotProvider.kt
+app/src/main/java/com/blackclaw/android/automation/SavedPlaceStore.kt
+app/src/main/java/com/blackclaw/android/tool/impl/AutomationProfileTool.kt
+app/src/main/java/com/blackclaw/android/tool/impl/SavedPlaceTool.kt
+app/src/main/java/com/blackclaw/android/ui/scheduled/ScheduledTasksActivity.kt
+app/src/main/java/com/blackclaw/android/ui/scheduled/AutomationProfileEditorActivity.kt
+```
+
+`SavedPlaceStore` acepta nombres y aliases libres (`casa de mi novia`, `cuarto`, `gimnasio`, etc.), cifra coordenadas con `SecretStore` y entrega IDs estables a los perfiles. `AutomationGeofenceManager` registra enter/exit con Play Services cuando hay permisos y `GeofenceChecker` mantiene un fallback best-effort. La comparación técnica con Tasker, MacroDroid y Automate está en `docs/AUTOMATION_PARITY.md`.
 
 ## 4. Manifest y puntos de entrada Android
 
@@ -253,6 +273,7 @@ Servicios/receivers importantes:
 .emergency.EmergencyService
 .scheduler.ScheduledTaskReceiver
 .automation.AutomationProfileTimeReceiver
+.automation.AutomationGeofenceReceiver
 .automation.AutomationSystemReceiver
 .automation.AutomationWebhookReceiver
 .automation.ExternalAutomationActivity

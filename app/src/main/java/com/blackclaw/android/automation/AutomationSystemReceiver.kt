@@ -11,7 +11,11 @@ import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.BatteryManager
+import android.os.PowerManager
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.telephony.TelephonyManager
+import android.provider.Settings
 import android.provider.Telephony
 import com.blackclaw.android.utils.XLog
 
@@ -72,8 +76,32 @@ class AutomationSystemReceiver : BroadcastReceiver() {
                         "name" to bluetoothDeviceName(app, intent),
                     ))
                 WifiManager.NETWORK_STATE_CHANGED_ACTION,
-                ConnectivityManager.CONNECTIVITY_ACTION,
-                Intent.ACTION_AIRPLANE_MODE_CHANGED -> emitConnectivity(app)
+                ConnectivityManager.CONNECTIVITY_ACTION -> emitConnectivity(app)
+                Intent.ACTION_AIRPLANE_MODE_CHANGED -> {
+                    val enabled = Settings.Global.getInt(app.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.AIRPLANE_MODE,
+                        mapOf("value" to enabled.toString()))
+                    emitConnectivity(app)
+                }
+                PowerManager.ACTION_POWER_SAVE_MODE_CHANGED -> {
+                    val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.POWER_SAVE,
+                        mapOf("value" to pm.isPowerSaveMode.toString()))
+                }
+                PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
+                    val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    AutomationProfileEngine.emitSystemEvent(app, AutomationProfileStore.TriggerType.DEVICE_IDLE,
+                        mapOf("value" to pm.isDeviceIdleMode.toString()))
+                }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED, UsbManager.ACTION_USB_DEVICE_DETACHED -> emitUsb(app, intent)
+                Intent.ACTION_DEVICE_STORAGE_LOW -> AutomationProfileEngine.emitSystemEvent(app,
+                    AutomationProfileStore.TriggerType.STORAGE, mapOf("state" to "low"))
+                Intent.ACTION_DEVICE_STORAGE_OK -> AutomationProfileEngine.emitSystemEvent(app,
+                    AutomationProfileStore.TriggerType.STORAGE, mapOf("state" to "ok"))
+                Intent.ACTION_TIMEZONE_CHANGED -> AutomationProfileEngine.emitSystemEvent(app,
+                    AutomationProfileStore.TriggerType.TIMEZONE, mapOf("id" to java.util.TimeZone.getDefault().id))
+                Intent.ACTION_LOCALE_CHANGED -> AutomationProfileEngine.emitSystemEvent(app,
+                    AutomationProfileStore.TriggerType.LOCALE, mapOf("tag" to java.util.Locale.getDefault().toLanguageTag()))
             }
         }.onFailure { XLog.w("AutomationSystemReceiver", "System event failed: $action", it) }
     }
@@ -104,14 +132,31 @@ class AutomationSystemReceiver : BroadcastReceiver() {
             "state" to if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) "online" else "offline",
             "transport" to transport,
         ))
-        if (transport == "wifi") {
-            AutomationProfileEngine.emitSystemEvent(context, AutomationProfileStore.TriggerType.WIFI, mapOf(
-                "connected" to "true",
-                "ssid" to (runCatching {
-                    (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).connectionInfo?.ssid.orEmpty()
-                }.getOrDefault("")),
-            ))
+        val wifiConnected = transport == "wifi"
+        val ssid = if (wifiConnected) runCatching {
+            SavedPlaceStore.normalizeSsid(
+                (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).connectionInfo?.ssid.orEmpty()
+            )
+        }.getOrDefault("") else ""
+        AutomationProfileEngine.emitSystemEvent(context, AutomationProfileStore.TriggerType.WIFI, mapOf(
+            "connected" to wifiConnected.toString(),
+            "ssid" to ssid,
+        ))
+    }
+
+    private fun emitUsb(context: Context, intent: Intent) {
+        val connected = intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED
+        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION") intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
         }
+        AutomationProfileEngine.emitSystemEvent(context, AutomationProfileStore.TriggerType.USB, mapOf(
+            "connected" to connected.toString(),
+            "vendor_id" to (device?.vendorId?.toString().orEmpty()),
+            "product_id" to (device?.productId?.toString().orEmpty()),
+            "name" to device?.deviceName.orEmpty(),
+        ))
     }
 
     /**

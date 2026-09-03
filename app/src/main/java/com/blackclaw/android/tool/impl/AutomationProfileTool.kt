@@ -2,6 +2,8 @@ package com.blackclaw.android.tool.impl
 
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.automation.AutomationProfileEngine
+import com.blackclaw.android.automation.AutomationGeofenceManager
+import com.blackclaw.android.automation.SavedPlaceStore
 import com.blackclaw.android.automation.AutomationProfileScheduler
 import com.blackclaw.android.automation.AutomationProfileStore
 import com.blackclaw.android.automation.AutomationProfileValidator
@@ -32,8 +34,8 @@ class AutomationProfileTool : BaseTool() {
             "bounded actions. Use capabilities before authoring when you need the live catalog. " +
             "Use draft to save a disabled profile the user can inspect visually; create/update are previews unless confirm=true. " +
             "Update is PATCH-like: only fields supplied by the agent are changed. " +
-            "Triggers: time, notification, location_enter/exit, app_foreground/closed, connectivity, battery, charging, screen, " +
-            "headset, bluetooth, wifi, call_state, sms_received, boot or webhook/Tasker intent. " +
+            "Triggers include time/interval, notification, reusable named-place enter/exit, app, connectivity, battery, charging, screen, " +
+            "headset, bluetooth, wifi, call/SMS, boot, airplane/power-save/idle, USB/storage/timezone/locale and webhook/Tasker intent. " +
             "Actions: tool, agent_task, run_routine, notify, set_variable, wait, if and bounded loop. " +
             "Webhook triggers accept the broadcast action com.blackclaw.android.AUTOMATION_WEBHOOK with extra token."
     override fun getDescriptionCN() = getDescriptionEN()
@@ -45,6 +47,7 @@ class AutomationProfileTool : BaseTool() {
         ToolParameter("description", "string", "Qué hace el perfil", false),
         ToolParameter("triggers", "string", "JSON o lista: [{\"type\":\"notification\",\"params\":{...}}]", false),
         ToolParameter("conditions", "string", "JSON o lista: [{\"type\":\"time_window\",\"params\":{\"start\":\"07:00\",\"end\":\"22:00\"}}]", false),
+        ToolParameter("condition_logic", "string", "all, any, none o xor", false),
         ToolParameter("actions", "string", "JSON o lista: [{\"type\":\"tool\",\"params\":{\"tool\":\"set_volume\",\"params\":{...}}}]", false),
         ToolParameter("cooldown_ms", "integer", "Enfriamiento mínimo entre ejecuciones", false),
         ToolParameter("max_runs_per_day", "integer", "Límite diario; 0 = sin límite", false),
@@ -66,7 +69,7 @@ class AutomationProfileTool : BaseTool() {
         "delete" -> {
             val id = optionalString(params, "id", optionalString(params, "name", ""))
             if (AutomationProfileStore.delete(id)) {
-                AutomationProfileScheduler.sync(ClawApplication.instance)
+                syncRuntimes()
                 ToolResult.success("Perfil eliminado.")
             } else ToolResult.error("No encontré el perfil '$id'.")
         }
@@ -89,7 +92,7 @@ class AutomationProfileTool : BaseTool() {
         requireLocalConfirmation()?.let { return it }
         val stored = AutomationProfileStore.create(profile, enable = true)
             .getOrElse { return ToolResult.error(it.message ?: "No se pudo guardar el perfil.") }
-        AutomationProfileScheduler.sync(ClawApplication.instance)
+        syncRuntimes()
         return ToolResult.success("✓ Flujo '${stored.name}' activo [${stored.id}].\n$preview")
     }
 
@@ -104,7 +107,7 @@ class AutomationProfileTool : BaseTool() {
         }
         val stored = AutomationProfileStore.create(profile, enable = false)
             .getOrElse { return ToolResult.error(it.message ?: "No se pudo guardar el borrador.") }
-        AutomationProfileScheduler.sync(ClawApplication.instance)
+        syncRuntimes()
         return ToolResult.success(
             "✓ Borrador '${stored.name}' guardado [${stored.id}] y DESACTIVADO.\n${preview(stored)}\n" +
                 "El usuario puede revisarlo en Automatizaciones y activarlo desde el teléfono."
@@ -132,7 +135,7 @@ class AutomationProfileTool : BaseTool() {
         requireLocalConfirmation()?.let { return it }
         val stored = AutomationProfileStore.create(updated, enable = existing.enabled)
             .getOrElse { return ToolResult.error(it.message ?: "No se pudo actualizar el perfil.") }
-        AutomationProfileScheduler.sync(ClawApplication.instance)
+        syncRuntimes()
         return ToolResult.success(
             "✓ Flujo '${stored.name}' actualizado [${stored.id}] · ${if (stored.enabled) "activo" else "desactivado"}.\n$preview"
         )
@@ -160,6 +163,8 @@ class AutomationProfileTool : BaseTool() {
             append("Actions: ${AutomationProfileStore.ActionType.values().joinToString { it.name.lowercase() }}\n")
             append("Safe tools (${safe.size}): ${safe.joinToString()}\n")
             append("Sensitive tools (${sensitive.size}, require user-approved profile): ${sensitive.joinToString()}\n")
+            append("Named places: use saved_place first, then location trigger/condition params {place_id:...}; names are arbitrary and encrypted.\n")
+            append("Condition logic: all/any/none/xor. Action strings support {{event.key}}, {{var.name}}, {{profile.name}} templates.\n")
             append("Privileged arbitrary-shell/network tools are intentionally unavailable inside automations. ")
             append("Prefer deterministic TOOL actions; use AGENT_TASK only when the action genuinely needs reasoning.")
         })
@@ -214,7 +219,7 @@ class AutomationProfileTool : BaseTool() {
         }
         val id = optionalString(params, "id", optionalString(params, "name", ""))
         return if (AutomationProfileStore.setEnabled(id, enabled)) {
-            AutomationProfileScheduler.sync(ClawApplication.instance)
+            syncRuntimes()
             ToolResult.success("Perfil '${id}' ${if (enabled) "activado" else "desactivado"}.")
         } else ToolResult.error("No encontré el perfil '$id'.")
     }
@@ -241,17 +246,19 @@ class AutomationProfileTool : BaseTool() {
         }
         val triggers = if (params.containsKey("triggers")) {
             parseArray(jsonText(params, "triggers", "[]")) { row ->
+                val type = enumValue(row["type"], AutomationProfileStore.TriggerType.values())
                 AutomationProfileStore.Trigger(
-                    type = enumValue(row["type"], AutomationProfileStore.TriggerType.values()),
-                    params = objectMap(row["params"], "trigger.params"),
+                    type = type,
+                    params = canonicalizeLocationParams(type.name.startsWith("LOCATION_"), objectMap(row["params"], "trigger.params")),
                 )
             }
         } else base?.triggers ?: emptyList()
         val conditions = if (params.containsKey("conditions")) {
             parseArray(jsonText(params, "conditions", "[]")) { row ->
+                val type = enumValue(row["type"], AutomationProfileStore.ConditionType.values())
                 AutomationProfileStore.Condition(
-                    type = enumValue(row["type"], AutomationProfileStore.ConditionType.values()),
-                    params = objectMap(row["params"], "condition.params"),
+                    type = type,
+                    params = canonicalizeLocationParams(type == AutomationProfileStore.ConditionType.LOCATION, objectMap(row["params"], "condition.params")),
                     negate = row["negate"]?.toString()?.toBoolean() ?: false,
                 )
             }
@@ -274,6 +281,11 @@ class AutomationProfileTool : BaseTool() {
         val description = if (params.containsKey("description")) {
             optionalString(params, "description", "")
         } else base?.description.orEmpty()
+        val conditionLogic = if (params.containsKey("condition_logic")) {
+            AutomationProfileStore.ConditionLogic.valueOf(
+                optionalString(params, "condition_logic", "ALL").uppercase().replace('-', '_')
+            )
+        } else base?.conditionLogic ?: AutomationProfileStore.ConditionLogic.ALL
         val cooldownMs = if (params.containsKey("cooldown_ms")) {
             optionalLong(params, "cooldown_ms", 60_000L)
         } else base?.cooldownMs ?: 60_000L
@@ -296,6 +308,7 @@ class AutomationProfileTool : BaseTool() {
                 description = description,
                 triggers = triggers,
                 conditions = conditions,
+                conditionLogic = conditionLogic,
                 actions = actions,
                 cooldownMs = cooldownMs,
                 maxRunsPerDay = maxRunsPerDay,
@@ -309,12 +322,39 @@ class AutomationProfileTool : BaseTool() {
                 description = description,
                 triggers = triggers,
                 conditions = conditions,
+                conditionLogic = conditionLogic,
                 actions = actions,
                 cooldownMs = cooldownMs,
                 maxRunsPerDay = maxRunsPerDay,
                 maxRuntimeMs = maxRuntimeMs,
                 concurrency = concurrency,
             )
+        }
+    }
+
+    private fun canonicalizeLocationParams(isLocation: Boolean, params: Map<String, Any>): Map<String, Any> {
+        if (!isLocation) return params
+        val placeId = params["place_id"]?.toString().orEmpty().trim()
+        val placeName = params["place"]?.toString().orEmpty().trim()
+        if (placeId.isBlank() && placeName.isBlank()) return params
+        val place = if (placeId.isNotBlank()) SavedPlaceStore.findById(placeId) else {
+            val resolution = SavedPlaceStore.resolve(placeName)
+            when {
+                resolution.place != null -> resolution.place
+                resolution.isAmbiguous -> throw IllegalArgumentException(
+                    "Lugar ambiguo '$placeName': ${resolution.candidates.joinToString { it.name }}. Usa saved_place(resolve) y un place_id exacto."
+                )
+                else -> null
+            }
+        } ?: throw IllegalArgumentException("No encontré el lugar guardado '${placeName.ifBlank { placeId }}'. Guárdalo primero con saved_place.")
+        return params + mapOf("place_id" to place.id, "place" to place.name)
+    }
+
+    private fun syncRuntimes() {
+        AutomationProfileScheduler.sync(ClawApplication.instance)
+        AutomationGeofenceManager.sync(ClawApplication.instance)
+        if (com.blackclaw.android.assistant.GeofenceChecker.hasActiveGeofences()) {
+            com.blackclaw.android.service.KeepAliveJobService.schedule(ClawApplication.instance)
         }
     }
 
@@ -363,7 +403,7 @@ class AutomationProfileTool : BaseTool() {
             when (it.type) {
                 AutomationProfileStore.TriggerType.NOTIFICATION -> permissions += "Notification Access"
                 AutomationProfileStore.TriggerType.LOCATION_ENTER,
-                AutomationProfileStore.TriggerType.LOCATION_EXIT -> permissions += "Ubicación"
+                AutomationProfileStore.TriggerType.LOCATION_EXIT -> permissions += "Ubicación precisa y en segundo plano"
                 AutomationProfileStore.TriggerType.APP_FOREGROUND,
                 AutomationProfileStore.TriggerType.APP_CLOSED -> permissions += "Accesibilidad"
                 AutomationProfileStore.TriggerType.CALL_STATE -> permissions += "Estado del teléfono"
@@ -382,7 +422,7 @@ class AutomationProfileTool : BaseTool() {
         return buildString {
             append("Nombre: ${profile.name}\n")
             append("Disparadores: ${profile.triggers.joinToString { it.type.name.lowercase() }}\n")
-            append("Condiciones: ${profile.conditions.size}\n")
+            append("Condiciones: ${profile.conditions.size} · lógica ${profile.conditionLogic.name.lowercase()}\n")
             append("Acciones: ${profile.actions.joinToString { it.type.name.lowercase() }}\n")
             append("Límites: cooldown ${profile.cooldownMs}ms, máximo diario ${if (profile.maxRunsPerDay == 0) "sin límite" else profile.maxRunsPerDay}, tiempo máximo ${profile.maxRuntimeMs}ms, concurrencia ${profile.concurrency.name.lowercase()}\n")
             append("Permisos/capacidades: ${if (permissions.isEmpty()) "ninguno adicional" else permissions.joinToString()}")

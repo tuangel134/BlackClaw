@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blackclaw.android.automation.AutomationProfileScheduler
+import com.blackclaw.android.automation.AutomationGeofenceManager
 import com.blackclaw.android.automation.AutomationProfileStore
 import com.blackclaw.android.automation.AutomationProfileValidator
 import com.blackclaw.android.base.BaseActivity
@@ -130,6 +131,9 @@ private fun AutomationProfileEditorScreen(
     var concurrency by remember {
         mutableStateOf(initial?.concurrency ?: AutomationProfileStore.Concurrency.SKIP_IF_RUNNING)
     }
+    var conditionLogic by remember {
+        mutableStateOf(initial?.conditionLogic ?: AutomationProfileStore.ConditionLogic.ALL)
+    }
     val triggers = remember { mutableStateListOf<TriggerDraft>().apply { addAll(initial.toTriggerDrafts()) } }
     val conditions = remember { mutableStateListOf<ConditionDraft>().apply { addAll(initial.toConditionDrafts()) } }
     val actions = remember { mutableStateListOf<ActionDraft>().apply { addAll(initial.toActionDrafts()) } }
@@ -149,6 +153,7 @@ private fun AutomationProfileEditorScreen(
             conditions = conditions.map {
                 AutomationProfileStore.Condition(it.type, it.params.toAnyMap(), it.negate)
             },
+            conditionLogic = conditionLogic,
             actions = actions.map { it.toAction() },
             cooldownMs = cooldown.toLongOrNull() ?: -1L,
             maxRunsPerDay = maxRuns.toIntOrNull() ?: -1,
@@ -164,6 +169,7 @@ private fun AutomationProfileEditorScreen(
             enabled = edited.enabled,
             triggers = edited.triggers,
             conditions = edited.conditions,
+            conditionLogic = edited.conditionLogic,
             actions = edited.actions,
             cooldownMs = edited.cooldownMs,
             maxRunsPerDay = edited.maxRunsPerDay,
@@ -181,6 +187,7 @@ private fun AutomationProfileEditorScreen(
             return
         }
         AutomationProfileScheduler.sync(context)
+        AutomationGeofenceManager.sync(context)
         onSaved()
     }
 
@@ -242,8 +249,11 @@ private fun AutomationProfileEditorScreen(
             item { AddBlockButton(colors, "Añadir disparador") { showTriggerPicker = true } }
 
             item {
-                SectionTitle(colors, "SI", "Opcional: todas estas condiciones deben cumplirse")
-                if (conditions.isEmpty()) EmptyEditorHint(colors, "Opcional: limita por horario, batería, app o variables")
+                SectionTitle(colors, "SI", "Opcional: combina condiciones con lógica ALL / ANY / NONE / XOR")
+                Picker(colors, "Lógica de condiciones", conditionLogic, AutomationProfileStore.ConditionLogic.values().toList()) {
+                    conditionLogic = it
+                }
+                if (conditions.isEmpty()) EmptyEditorHint(colors, "Opcional: limita por lugar, horario, Wi-Fi, batería, app o variables")
             }
             itemsIndexed(conditions, key = { index, item -> "condition-$index-${item.type}" }) { index, draft ->
                 ConditionEditorCard(colors, draft,
@@ -411,9 +421,14 @@ private fun TriggerParams(colors: BlackClawColors, draft: TriggerDraft, onChange
             }
             field("days", "Días: daily, weekdays o mon,wed")
         }
+        AutomationProfileStore.TriggerType.INTERVAL -> field("minutes", "Cada N minutos (1..10080)")
         AutomationProfileStore.TriggerType.NOTIFICATION -> { field("package", "Paquete opcional"); field("match", "Texto a buscar") }
         AutomationProfileStore.TriggerType.LOCATION_ENTER, AutomationProfileStore.TriggerType.LOCATION_EXIT -> {
-            field("latitude", "Latitud"); field("longitude", "Longitud"); field("radius_m", "Radio en metros")
+            field("place_id", "ID de lugar guardado (recomendado)")
+            field("place", "Nombre del lugar (ej. casa de mi novia)")
+            field("latitude", "Latitud manual (si no usas lugar guardado)")
+            field("longitude", "Longitud manual")
+            field("radius_m", "Radio en metros")
         }
         AutomationProfileStore.TriggerType.APP_FOREGROUND, AutomationProfileStore.TriggerType.APP_CLOSED -> field("package", "Paquete")
         AutomationProfileStore.TriggerType.CONNECTIVITY -> { field("state", "online/offline"); field("transport", "wifi/cellular/none") }
@@ -425,6 +440,13 @@ private fun TriggerParams(colors: BlackClawColors, draft: TriggerDraft, onChange
         AutomationProfileStore.TriggerType.CALL_STATE -> { field("state", "ringing/offhook/idle"); field("number", "Número opcional") }
         AutomationProfileStore.TriggerType.SMS_RECEIVED -> { field("sender", "Remitente opcional"); field("match", "Texto a buscar") }
         AutomationProfileStore.TriggerType.WEBHOOK -> field("token", "Token del Intent de Tasker")
+        AutomationProfileStore.TriggerType.AIRPLANE_MODE,
+        AutomationProfileStore.TriggerType.POWER_SAVE,
+        AutomationProfileStore.TriggerType.DEVICE_IDLE -> field("value", "true/false")
+        AutomationProfileStore.TriggerType.USB -> { field("connected", "true/false"); field("vendor_id", "Vendor ID opcional"); field("product_id", "Product ID opcional") }
+        AutomationProfileStore.TriggerType.STORAGE -> field("state", "low/ok")
+        AutomationProfileStore.TriggerType.TIMEZONE -> field("id", "Zona horaria opcional")
+        AutomationProfileStore.TriggerType.LOCALE -> field("tag", "Locale opcional, ej. es-MX")
         AutomationProfileStore.TriggerType.MANUAL, AutomationProfileStore.TriggerType.BOOT -> Unit
     }
 }

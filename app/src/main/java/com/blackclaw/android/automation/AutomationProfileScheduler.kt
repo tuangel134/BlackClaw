@@ -29,9 +29,10 @@ object AutomationProfileScheduler {
             .filter { it.enabled && AutomationProfileValidator.validate(it).isEmpty() }
             .forEach { profile ->
             profile.triggers.forEachIndexed { index, trigger ->
-                if (trigger.type != AutomationProfileStore.TriggerType.TIME) return@forEachIndexed
+                if (trigger.type != AutomationProfileStore.TriggerType.TIME &&
+                    trigger.type != AutomationProfileStore.TriggerType.INTERVAL) return@forEachIndexed
                 val key = key(profile.id, index)
-                val at = nextAt(trigger.params) ?: return@forEachIndexed
+                val at = nextAt(trigger) ?: return@forEachIndexed
                 schedule(alarm, app, profile.id, index, at)
                 armed += key
             }
@@ -74,7 +75,13 @@ object AutomationProfileScheduler {
 
     private fun key(profileId: String, index: Int) = "$profileId:$index"
 
-    private fun nextAt(params: Map<String, Any>): Long? {
+    private fun nextAt(trigger: AutomationProfileStore.Trigger): Long? {
+        if (trigger.type == AutomationProfileStore.TriggerType.INTERVAL) {
+            val minutes = automationInt(trigger.params["minutes"])?.coerceIn(1, 10_080) ?: return null
+            return System.currentTimeMillis() + minutes * 60_000L
+        }
+        if (trigger.type != AutomationProfileStore.TriggerType.TIME) return null
+        val params = trigger.params
         val hour = automationInt(params["hour"]) ?: return null
         val minute = automationInt(params["minute"]) ?: return null
         if (hour !in 0..23 || minute !in 0..59) return null
@@ -119,14 +126,16 @@ class AutomationProfileTimeReceiver : BroadcastReceiver() {
         val index = intent.getIntExtra("trigger_index", -1)
         val profile = AutomationProfileStore.find(id) ?: return
         val trigger = profile.triggers.getOrNull(index) ?: return
-        if (!profile.enabled || trigger.type != AutomationProfileStore.TriggerType.TIME) return
+        if (!profile.enabled || (trigger.type != AutomationProfileStore.TriggerType.TIME &&
+                trigger.type != AutomationProfileStore.TriggerType.INTERVAL)) return
         val now = Calendar.getInstance()
-        AutomationProfileEngine.emitSystemEvent(context, AutomationProfileStore.TriggerType.TIME, mapOf(
+        val attrs = if (trigger.type == AutomationProfileStore.TriggerType.TIME) mapOf(
             "hour" to now.get(Calendar.HOUR_OF_DAY).toString(),
             "minute" to now.get(Calendar.MINUTE).toString(),
             "day" to now.get(Calendar.DAY_OF_WEEK).toString(),
             "time" to "%02d:%02d".format(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE)),
-        ))
+        ) else mapOf("minutes" to trigger.params["minutes"].toString())
+        AutomationProfileEngine.emitSystemEvent(context, trigger.type, attrs)
         AutomationProfileScheduler.sync(context)
     }
 }

@@ -98,7 +98,10 @@ Example 5 — "Busca el clima de hoy"
 - List or cancel scheduled tasks → list_scheduled_tasks() or cancel_scheduled_task(id="abc")
 - Time/cron automation ("a las 5 envía X", "cada lunes haz Y") → schedule_task(text="the complete action or precise multi-step sequence", when="17:00", recurrence="once|daily|weekly|interval"). Explicit user schedules RUN without asking again.
 - IF→THEN by notification ("si mi novia escribe, despiértame") → automation_rule(operation="create", name="...", trigger="notification", match="contact name", package_name="com.whatsapp", action="despiértame").
-- IF→THEN by place ("al llegar a casa apaga datos y enciende Wi-Fi") → get_location first if home means current place, then automation_rule(trigger="location_enter", latitude=..., longitude=..., action="Apaga datos móviles y enciende Wi-Fi").
+- Save any semantic place ("este lugar es casa de mi novia", "aquí es mi cuarto", "guarda esto como gimnasio") → saved_place(operation="save_here", name="the exact user-chosen name"). Never limit place names to home/work.
+- Resolve a place before using it in an automation → saved_place(operation="resolve", name="casa de mi novia"). Use the returned stable place ID; never invent coordinates and never assume the CURRENT location is a previously named place.
+- IF→THEN by place ("al llegar a casa apaga datos y enciende Wi-Fi") → resolve the named place, then prefer automation_profile with trigger location_enter/location_exit params {"place_id":"..."} and deterministic toggle_setting actions. If the place is unknown, only save the current location when the user is explicitly defining the current spot; otherwise ask where it is instead of guessing.
+- Location automations can combine constraints: e.g. enter a saved place AND time window, Wi-Fi, battery, charging, power-save, etc. condition_logic supports all/any/none/xor.
 - Multi-step scheduled actions must preserve the requested order and verification. Do not ask again merely because execution is scheduled; only destructive/financial/account actions need confirmation.
 - Remember a fact long-term → remember_fact(key="name", value="Alex")
 - Recall remembered facts → recall_facts(query="optional substring")

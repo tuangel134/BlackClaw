@@ -2,6 +2,7 @@ package com.blackclaw.android.tool.impl
 
 import com.blackclaw.android.ClawApplication
 import com.blackclaw.android.automation.AutomationEngine
+import com.blackclaw.android.automation.AutomationGeofenceManager
 import com.blackclaw.android.automation.AutomationRuleStore
 import com.blackclaw.android.tool.BaseTool
 import com.blackclaw.android.tool.ToolParameter
@@ -41,12 +42,17 @@ class AutomationRuleTool : BaseTool() {
         }
         "enable", "disable" -> {
             val id = optionalString(params, "id", optionalString(params, "name", ""))
-            if (AutomationRuleStore.setEnabled(id, requireString(params, "operation") == "enable"))
-                ToolResult.success("Regla actualizada.") else ToolResult.error("No encontré la regla '$id'.")
+            if (AutomationRuleStore.setEnabled(id, requireString(params, "operation") == "enable")) {
+                AutomationGeofenceManager.sync(ClawApplication.instance)
+                ToolResult.success("Regla actualizada.")
+            } else ToolResult.error("No encontré la regla '$id'.")
         }
         "delete" -> {
             val id = optionalString(params, "id", optionalString(params, "name", ""))
-            if (AutomationRuleStore.delete(id)) ToolResult.success("Regla eliminada.") else ToolResult.error("No encontré '$id'.")
+            if (AutomationRuleStore.delete(id)) {
+                AutomationGeofenceManager.sync(ClawApplication.instance)
+                ToolResult.success("Regla eliminada.")
+            } else ToolResult.error("No encontré '$id'.")
         }
         "run" -> {
             val id = optionalString(params, "id", optionalString(params, "name", ""))
@@ -76,7 +82,8 @@ class AutomationRuleTool : BaseTool() {
             name, trigger, optionalString(params, "match", ""), optionalString(params, "package_name", ""), action,
             lat, lon, optionalInt(params, "radius_m", 150).toFloat(),
             optionalInt(params, "cooldown_minutes", 5).coerceAtLeast(1) * 60_000L,
-        )
+        ) ?: return ToolResult.error("No se pudo guardar la regla de forma segura.")
+        AutomationGeofenceManager.sync(ClawApplication.instance)
         return ToolResult.success("✓ Regla '${rule.name}' activa [${rule.id}]: SI ${rule.trigger.name.lowercase()} ENTONCES $action")
     }
 }

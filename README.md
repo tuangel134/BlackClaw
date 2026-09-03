@@ -70,7 +70,7 @@ rather than relying on per-app integrations.
   search that uses the car's own speech-to-text — answers read aloud.
 - **Remote-controllable.** Drive the phone by messaging it from Telegram,
   Discord, or WeChat — useful for an agent that runs while the device is away.
-- **Broad reach.** 177 built-in tools spanning UI control, device settings,
+- **Broad reach.** 181 built-in tools spanning UI control, device settings,
   messaging, files, network, perception, and automation — browsable in-app via
   Settings → Herramientas → Catálogo de herramientas.
 
@@ -96,7 +96,7 @@ touching the phone.
 
 ---
 
-## Tools at a glance (177)
+## Tools at a glance (181)
 
 | Category | Examples |
 |---|---|
@@ -113,7 +113,7 @@ touching the phone.
 | **Web & data** | web search · fetch URL · weather · translate · currency/unit convert · QR · hash · JSON/regex |
 | **Files & memory** | read/write files · long-term facts · shared knowledge base |
 | **Assistant hub** | reminders · alarms · notes · calendar · alerts · finances (native, push) |
-| **Automation** | guided scheduled tasks · recurring schedules · Tasker-style profiles · multi-step plan execution · external API (Tasker/ADB) |
+| **Automation** | semantic named places · Play Services geofences + fallback · recurring schedules · Tasker-style profiles · conditions/variables/branches · external API |
 | **Terminal** | persistent internal shell (local/privileged) · adb-over-wifi to remote devices (pair/connect/shell) without a PC |
 | **Security** | app risk scanner · real-time ad attribution · neutralize/block/disable/uninstall problem apps |
 
@@ -235,6 +235,14 @@ touching the phone.
   and per-app watch lists keep it from being noisy
 - **Export finances to CSV** for a backup or to open in a spreadsheet
 
+### Automation engine
+- **Semantic places with any name:** say *“BlackClaw, this place is my girlfriend’s house”*, *“this is my room”* or *“save this as gym”*. BlackClaw stores a stable place ID plus the coordinates in Android Keystore-backed encrypted storage; automations reuse the ID instead of asking the model to remember coordinates.
+- **Hybrid geofencing:** Google Play Services geofences are the primary low-power enter/exit path, with BlackClaw’s last-known-location checker as a best-effort fallback when Play Services/background location is unavailable. Geofence request IDs are opaque hashes and location events do not expose saved coordinates to action templates.
+- **Tasker-class profile core:** multiple OR triggers, reusable conditions, `ALL` / `ANY` / `NONE` / `XOR` logic, negation, ordered actions, IF/ELSE, bounded loops, encrypted variables, templates, cooldowns, daily/runtime limits, and `skip` / `queue` / `replace` concurrency.
+- **More Android state triggers:** time/interval, notification, location, app foreground/closed, connectivity/Wi-Fi, battery/charging, screen, headset/Bluetooth, call/SMS, boot, airplane mode, power saver, device idle, USB, storage, timezone, locale and token-protected webhooks.
+- **Visual + conversational authoring:** use **Automatizaciones → Flujos / Lugares** or describe the automation in normal language. The AI can author/edit the structure, but event matching and deterministic actions run locally without needing an LLM round-trip.
+- Design/parity notes: [`docs/AUTOMATION_PARITY.md`](docs/AUTOMATION_PARITY.md).
+
 ### Reliability and assistant polish
 - Hardened ActionGuard with anti-prompt-injection defense
 - Guided permissions onboarding
@@ -345,7 +353,7 @@ touching the phone.
         │ result                      │ tool calls
         │                             ▼
 ┌───────┴───────┐          ┌──────────────────────┐
-│  LLM           │◀────────│  Tool layer (177)     │
+│  LLM           │◀────────│  Tool layer (181)     │
 │ local / cloud  │ schemas │  a11y · ADB · OCR ·   │
 └───────────────┘          │  net · device · files │
                            └───────────┬───────────┘
@@ -362,7 +370,7 @@ next move without a wasted round.
 
 ### Token-efficient tool disclosure
 
-Sending 177 full tool schemas on every request is expensive and trips cloud rate
+Sending 181 full tool schemas on every request is expensive and trips cloud rate
 limits. BlackClaw uses **progressive disclosure**: a compact one-line catalog of
 every tool is shown in the system prompt, a task-relevant subset is preloaded
 with full schemas, and the model loads anything else on demand via a
@@ -377,8 +385,8 @@ for and retries).
 
 - Android 9+ (API 28)
 - ~4 GB RAM minimum for the local Gemma E2B model (E4B for 10 GB+ devices)
-- Permissions granted once in-app: Accessibility, Notification access, Overlay,
-  and battery whitelist
+- Permissions granted once in-app as needed: Accessibility, Notification access, Overlay,
+  battery whitelist, and precise/background location only for always-on geofence automations
 - Cloud mode: your own API key for OpenAI / Anthropic / Google Gemini / Groq /
   DeepSeek / Cerebras, or any OpenAI-compatible endpoint
 
@@ -412,7 +420,7 @@ Then:
 
 See [`RELEASING.md`](RELEASING.md) for the full release process.
 For the complete route map, Android entry points, ADB recipes and GitHub commands,
-see [`MAPA_PROYECTO_Y_COMANDOS.md`](MAPA_PROYECTO_Y_COMANDOS.md).
+see [`MAPA_PROYECTO_Y_COMANDOS.md`](MAPA_PROYECTO_Y_COMANDOS.md). For the automation architecture and competitor-parity audit, see [`docs/AUTOMATION_PARITY.md`](docs/AUTOMATION_PARITY.md).
 
 ---
 
@@ -436,7 +444,7 @@ app/
     service/          Accessibility, notification listener, foreground services
     shizuku/          Optional Shizuku backend
     game/             Guarded visual game sessions + normalized coordinates
-    tool/             Generic tool layer (177 tools)
+    tool/             Generic tool layer (181 tools)
     ui/               Compose UI: chat, settings, themes, skills, auto-replies, ADB
     utils/            Logging, KV storage, contact / UI matching
 docs/                 Skill file specification
@@ -512,6 +520,13 @@ PR guidelines, and conventions.
 ---
 
 ## Changelog
+
+### v1.3.0
+
+- Added encrypted **semantic places** with arbitrary user-defined names and aliases: users can say “this place is my girlfriend’s house”, “this is my room”, “save this as gym”, then reference that place naturally in future automations through a stable `place_id`. Saved coordinates stay local/encrypted and are not returned in place-resolution prompts.
+- Added a hybrid location runtime with Google Play Services geofencing as the primary low-power enter/exit path, opaque hashed geofence IDs, background-location guidance, reboot/profile re-arming, and the existing last-known-location checker as a platform fallback.
+- Expanded automation profiles to schema v2 with interval and Android-state triggers, live state/location conditions, `ALL`/`ANY`/`NONE`/`XOR` condition logic, encrypted variables with comparison operators, recursive action templates, and improved runtime broadcast handling for modern Android.
+- Added **Automatizaciones → Lugares**, enhanced the visual flow editor, taught the agent to resolve semantic places without inventing coordinates, migrated legacy automation rules to encrypted storage, and documented the Tasker/MacroDroid/Automate parity model and deliberate safety boundaries.
 
 ### v1.2.20
 

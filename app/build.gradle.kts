@@ -62,8 +62,8 @@ android {
         applicationId = "com.blackclaw.android"
         minSdk = 28
         targetSdk = 36
-        versionCode = readLocalOrEnvInt("BLACKCLAW_VERSION_CODE", 134)
-        versionName = readLocalOrEnvString("BLACKCLAW_VERSION_NAME", "1.2.20")
+        versionCode = readLocalOrEnvInt("BLACKCLAW_VERSION_CODE", 135)
+        versionName = readLocalOrEnvString("BLACKCLAW_VERSION_NAME", "1.3.0")
         buildConfigField("String", "VERSION_INFO", getVersionGit())
         buildConfigField("String", "APP_ORIGIN", "\"BlackClaw by BlackClaw | github.com/tuangel134/BlackClaw\"")
         buildConfigField("String", "BUILD_FINGERPRINT", "\"${getBuildFingerprint()}\"")
@@ -178,6 +178,8 @@ dependencies {
     implementation(libs.material)
     implementation(libs.constraintlayout)
     implementation(libs.gson)
+    // Battery-efficient enter/exit geofences; platform fallback remains for devices without Play Services.
+    implementation("com.google.android.gms:play-services-location:21.4.0")
 
     // LangChain4j (exclude JDK http-client, use OkHttp adapter for Android)
     implementation(libs.langchain4j.core)

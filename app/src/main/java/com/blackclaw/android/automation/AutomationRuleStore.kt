@@ -1,6 +1,8 @@
 package com.blackclaw.android.automation
 
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
+import com.blackclaw.android.utils.XLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -49,7 +51,15 @@ object AutomationRuleStore {
     }
 
     @Synchronized fun list(): List<Rule> {
-        val raw = KVUtils.getString(KEY, "")
+        var raw = SecretStore.getString(KEY).orEmpty()
+        if (raw.isBlank()) {
+            val legacy = KVUtils.getString(KEY, "")
+            if (legacy.isNotBlank() && SecretStore.putString(KEY, legacy) && SecretStore.getString(KEY) == legacy) {
+                KVUtils.remove(KEY); KVUtils.sync()
+                XLog.i("AutomationRuleStore", "Migrated legacy automation rules to encrypted storage")
+                raw = legacy
+            } else raw = legacy
+        }
         if (raw.isBlank()) return emptyList()
         return runCatching {
             val a = JSONArray(raw)
@@ -60,13 +70,12 @@ object AutomationRuleStore {
     @Synchronized fun create(
         name: String, trigger: Trigger, match: String, packageName: String, actionText: String,
         latitude: Double = 0.0, longitude: Double = 0.0, radiusM: Float = 150f, cooldownMs: Long = 300_000L,
-    ): Rule {
+    ): Rule? {
         require(name.isNotBlank() && actionText.isNotBlank())
         val rule = Rule(UUID.randomUUID().toString().take(8), name.trim().take(80), true, trigger,
             match.trim().take(200), packageName.trim(), actionText.trim().take(2_000), latitude, longitude,
             radiusM.coerceIn(50f, 5_000f), cooldownMs.coerceIn(10_000L, 7 * 24 * 60 * 60_000L))
-        save((list().filterNot { it.name.equals(rule.name, true) } + rule).takeLast(MAX_RULES))
-        return rule
+        return if (save((list().filterNot { it.name.equals(rule.name, true) } + rule).takeLast(MAX_RULES))) rule else null
     }
 
     @Synchronized fun delete(idOrName: String): Boolean = mutate(idOrName) { null }
@@ -81,11 +90,13 @@ object AutomationRuleStore {
         if (index < 0) return false
         val changed = change(all[index])
         if (changed == null) all.removeAt(index) else all[index] = changed
-        save(all); return true
+        return save(all)
     }
 
-    private fun save(rules: List<Rule>) {
+    private fun save(rules: List<Rule>): Boolean {
         val a = JSONArray(); rules.forEach { a.put(it.toJson()) }
-        KVUtils.putString(KEY, a.toString()); KVUtils.sync()
+        val ok = SecretStore.putString(KEY, a.toString())
+        if (!ok) XLog.e("AutomationRuleStore", "Could not store automation rules securely; previous data retained")
+        return ok
     }
 }

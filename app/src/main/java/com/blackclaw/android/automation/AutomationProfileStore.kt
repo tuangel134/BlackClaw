@@ -18,18 +18,22 @@ object AutomationProfileStore {
     private const val TAG = "AutomationProfiles"
     private const val KEY = "automation_profiles_v1"
     private const val MAX_PROFILES = 100
-    const val SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
 
     enum class TriggerType {
-        MANUAL, TIME, NOTIFICATION, LOCATION_ENTER, LOCATION_EXIT,
+        MANUAL, TIME, INTERVAL, NOTIFICATION, LOCATION_ENTER, LOCATION_EXIT,
         APP_FOREGROUND, APP_CLOSED, CONNECTIVITY, BATTERY, CHARGING,
         SCREEN, HEADSET, BLUETOOTH, WIFI, CALL_STATE, SMS_RECEIVED, BOOT, WEBHOOK,
+        AIRPLANE_MODE, POWER_SAVE, DEVICE_IDLE, USB, STORAGE, TIMEZONE, LOCALE,
     }
 
     enum class ConditionType {
         TIME_WINDOW, DAY_OF_WEEK, APP, CONNECTIVITY, BATTERY_LEVEL,
-        CHARGING, SCREEN, VARIABLE, NOTIFICATION,
+        CHARGING, SCREEN, VARIABLE, NOTIFICATION, LOCATION, WIFI, BLUETOOTH,
+        HEADSET, AIRPLANE_MODE, POWER_SAVE, DEVICE_IDLE,
     }
+
+    enum class ConditionLogic { ALL, ANY, NONE, XOR }
 
     enum class ActionType {
         TOOL, AGENT_TASK, RUN_ROUTINE, NOTIFY, SET_VARIABLE, WAIT, IF, LOOP,
@@ -87,6 +91,7 @@ object AutomationProfileStore {
         val enabled: Boolean = false,
         val triggers: List<Trigger> = emptyList(),
         val conditions: List<Condition> = emptyList(),
+        val conditionLogic: ConditionLogic = ConditionLogic.ALL,
         val actions: List<Action> = emptyList(),
         val cooldownMs: Long = 60_000L,
         val maxRunsPerDay: Int = 0,
@@ -111,6 +116,7 @@ object AutomationProfileStore {
             put("enabled", enabled)
             put("triggers", JSONArray().also { a -> triggers.forEach { a.put(it.toJson()) } })
             put("conditions", JSONArray().also { a -> conditions.forEach { a.put(it.toJson()) } })
+            put("conditionLogic", conditionLogic.name)
             put("actions", JSONArray().also { a -> actions.forEach { a.put(it.toJson()) } })
             put("cooldownMs", cooldownMs)
             put("maxRunsPerDay", maxRunsPerDay)
@@ -141,6 +147,8 @@ object AutomationProfileStore {
                     enabled = o.optBoolean("enabled", false),
                     triggers = triggers,
                     conditions = conditions,
+                    conditionLogic = runCatching { ConditionLogic.valueOf(o.optString("conditionLogic", "ALL")) }
+                        .getOrDefault(ConditionLogic.ALL),
                     actions = actions,
                     cooldownMs = o.optLong("cooldownMs", 60_000L),
                     maxRunsPerDay = o.optInt("maxRunsPerDay", 0),
@@ -220,11 +228,12 @@ object AutomationProfileStore {
                 append(profile.triggers.joinToString { it.type.name.lowercase() })
                 append(" → ")
                 append(profile.actions.joinToString { it.type.name.lowercase() })
-                if (profile.conditions.isNotEmpty()) append(" · ${profile.conditions.size} condición(es)")
+                if (profile.conditions.isNotEmpty()) append(" · ${profile.conditions.size} condición(es) ${profile.conditionLogic.name.lowercase()}")
                 append("\n")
             }
             append("Usa automation_profile capabilities para conocer el catálogo real; ")
-            append("update con el id para cambios parciales, draft para guardar una propuesta desactivada y run/test para probarla.\n")
+            append("update con el id para cambios parciales, draft para guardar una propuesta desactivada y run/test para probarla. ")
+            append("Los lugares se resuelven con saved_place y se referencian por place_id estable.\n")
         }
     }
 
@@ -438,16 +447,25 @@ object AutomationProfileValidator {
                 if (minute == null || minute !in 0..59) errors += "$label: minute debe estar entre 0 y 59."
                 validateDays(p["days"]?.toString(), label, errors)
             }
+            AutomationProfileStore.TriggerType.INTERVAL -> {
+                val minutes = automationInt(p["minutes"])
+                if (minutes == null || minutes !in 1..10_080) errors += "$label: minutes debe estar entre 1 y 10080."
+            }
             AutomationProfileStore.TriggerType.NOTIFICATION -> Unit
             AutomationProfileStore.TriggerType.LOCATION_ENTER,
             AutomationProfileStore.TriggerType.LOCATION_EXIT -> {
+                val place = p["place"]?.toString().orEmpty().trim()
+                val placeId = p["place_id"]?.toString().orEmpty().trim()
+                val hasSemanticPlace = place.isNotBlank() || placeId.isNotBlank()
                 val lat = p["latitude"]?.toString()?.toDoubleOrNull()
                 val lon = p["longitude"]?.toString()?.toDoubleOrNull()
                 val radius = p["radius_m"]?.let { automationFloat(it) }
-                if (lat == null || lat !in -90.0..90.0) errors += "$label: latitude inválida."
-                if (lon == null || lon !in -180.0..180.0) errors += "$label: longitude inválida."
+                if (!hasSemanticPlace) {
+                    if (lat == null || lat !in -90.0..90.0) errors += "$label: latitude inválida."
+                    if (lon == null || lon !in -180.0..180.0) errors += "$label: longitude inválida."
+                }
                 if (p["radius_m"] != null && radius == null) errors += "$label: radius_m debe ser un número."
-                if (radius != null && radius !in 1f..100_000f) errors += "$label: radius_m debe estar entre 1 y 100000."
+                if (radius != null && radius !in 25f..100_000f) errors += "$label: radius_m debe estar entre 25 y 100000."
             }
             AutomationProfileStore.TriggerType.APP_FOREGROUND,
             AutomationProfileStore.TriggerType.APP_CLOSED -> required("package")
@@ -466,7 +484,14 @@ object AutomationProfileValidator {
                 validateOneOf(p["state"]?.toString(), setOf("ringing", "offhook", "idle"), "$label state", errors)
             AutomationProfileStore.TriggerType.SMS_RECEIVED -> Unit
             AutomationProfileStore.TriggerType.BOOT,
-            AutomationProfileStore.TriggerType.MANUAL -> Unit
+            AutomationProfileStore.TriggerType.MANUAL,
+            AutomationProfileStore.TriggerType.AIRPLANE_MODE,
+            AutomationProfileStore.TriggerType.POWER_SAVE,
+            AutomationProfileStore.TriggerType.DEVICE_IDLE,
+            AutomationProfileStore.TriggerType.USB,
+            AutomationProfileStore.TriggerType.STORAGE,
+            AutomationProfileStore.TriggerType.TIMEZONE,
+            AutomationProfileStore.TriggerType.LOCALE -> Unit
             AutomationProfileStore.TriggerType.WEBHOOK -> {
                 required("token")
                 val token = p["token"]?.toString().orEmpty()
@@ -510,8 +535,29 @@ object AutomationProfileValidator {
             }
             AutomationProfileStore.ConditionType.SCREEN ->
                 validateOneOf(p["state"]?.toString(), setOf("on", "off", "unlocked"), "$label state", errors)
-            AutomationProfileStore.ConditionType.VARIABLE -> required("name")
+            AutomationProfileStore.ConditionType.VARIABLE -> {
+                required("name")
+                validateOneOf(p["op"]?.toString(), setOf("equals", "not_equals", "contains", "regex", "gt", "gte", "lt", "lte", "exists"), "$label op", errors)
+            }
             AutomationProfileStore.ConditionType.NOTIFICATION -> Unit
+            AutomationProfileStore.ConditionType.LOCATION -> {
+                val hasPlace = !p["place"]?.toString().isNullOrBlank() || !p["place_id"]?.toString().isNullOrBlank()
+                val lat = p["latitude"]?.toString()?.toDoubleOrNull()
+                val lon = p["longitude"]?.toString()?.toDoubleOrNull()
+                if (!hasPlace && (lat == null || lon == null)) errors += "$label necesita place/place_id o latitude/longitude."
+                val inside = p["inside"]?.toString()
+                if (inside != null && inside.toBooleanStrictOrNull() == null) errors += "$label: inside debe ser true o false."
+            }
+            AutomationProfileStore.ConditionType.WIFI -> Unit
+            AutomationProfileStore.ConditionType.BLUETOOTH,
+            AutomationProfileStore.ConditionType.HEADSET,
+            AutomationProfileStore.ConditionType.AIRPLANE_MODE,
+            AutomationProfileStore.ConditionType.POWER_SAVE,
+            AutomationProfileStore.ConditionType.DEVICE_IDLE -> {
+                p["value"]?.toString()?.let { raw ->
+                    if (raw.toBooleanStrictOrNull() == null) errors += "$label: value debe ser true o false."
+                }
+            }
         }
     }
 

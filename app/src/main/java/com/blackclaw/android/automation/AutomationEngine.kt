@@ -57,6 +57,29 @@ object AutomationEngine {
             }
     }
 
+    /** Primary Play Services geofence path for legacy rules. */
+    fun onGeofenceTransition(
+        context: Context,
+        type: AutomationProfileStore.TriggerType,
+        target: AutomationLocationTarget.Target,
+    ) {
+        val expectedTrigger = when (type) {
+            AutomationProfileStore.TriggerType.LOCATION_ENTER -> AutomationRuleStore.Trigger.LOCATION_ENTER
+            AutomationProfileStore.TriggerType.LOCATION_EXIT -> AutomationRuleStore.Trigger.LOCATION_EXIT
+            else -> return
+        }
+        AutomationRuleStore.list().asSequence()
+            .filter { it.enabled && it.trigger == expectedTrigger }
+            .filter { rule ->
+                AutomationLocationTarget.same(
+                    AutomationLocationTarget.Target(rule.latitude, rule.longitude, rule.radiusM),
+                    target,
+                )
+            }
+            .filter { cooldownReady(it) }
+            .forEach { fire(context, it, "Ubicación detectada") }
+    }
+
     fun fire(context: Context, rule: AutomationRuleStore.Rule, reason: String = "Ejecución manual") {
         AutomationRuleStore.markRun(rule.id)
         if (isWakeAction(rule.actionText)) {

@@ -13,15 +13,13 @@ import com.blackclaw.android.utils.XLog
 /**
  * Lightweight, dependency-free location reminders.
  *
- * Instead of pulling in Play Services GeofencingClient (heavy, and flaky on
- * some OEM ROMs), we store geofence reminders as REMINDER items with a radius
- * and check them opportunistically against the last known location whenever the
- * assistant's keep-alive service ticks. When the user is inside (enter) or
- * outside (exit) the radius, the reminder fires once.
+ * Assistant reminders and the no-Play-Services automation fallback check the
+ * last known location opportunistically when the keep-alive job ticks. Advanced
+ * automation profiles prefer Play Services geofencing when it is available and
+ * permitted, then fall back here without requiring continuous GPS polling.
  *
- * Trade-off: not instant — fires on the next tick after you arrive (≈ minutes),
- * not the second you cross the line. Good enough for "remind me when I get home"
- * without draining the battery on constant GPS.
+ * The fallback is intentionally best-effort: it may fire on the next keep-alive
+ * tick rather than at the exact second the boundary is crossed.
  */
 object GeofenceChecker {
     private const val TAG = "GeofenceChecker"
@@ -32,7 +30,7 @@ object GeofenceChecker {
         AssistantStore.byType(AssistantItemType.REMINDER).any { it.radiusM > 0 && !it.done } ||
             com.blackclaw.android.automation.AutomationRuleStore.list().any {
                 it.enabled && it.trigger != com.blackclaw.android.automation.AutomationRuleStore.Trigger.NOTIFICATION
-            }
+            } || hasProfileLocations()
 
     /** Check all geofence reminders against current location. Call from the
      *  keep-alive tick. Non-blocking-safe (uses last known location only). */
@@ -41,13 +39,14 @@ object GeofenceChecker {
             .filter { it.radiusM > 0 && !it.done }
         val hasAutomationLocations = com.blackclaw.android.automation.AutomationRuleStore.list().any {
             it.enabled && it.trigger != com.blackclaw.android.automation.AutomationRuleStore.Trigger.NOTIFICATION
-        }
+        } || hasProfileLocations()
         if (geofences.isEmpty() && !hasAutomationLocations) return
 
         val loc = lastKnownLocation(context) ?: run {
             XLog.d(TAG, "No location available for geofence check"); return
         }
         runCatching { com.blackclaw.android.automation.AutomationEngine.onLocation(context, loc) }
+        runCatching { com.blackclaw.android.automation.AutomationProfileEngine.onLocation(context, loc) }
 
         for (g in geofences) {
             val dist = FloatArray(1)
@@ -71,6 +70,14 @@ object GeofenceChecker {
             }
         }
     }
+
+    private fun hasProfileLocations(): Boolean =
+        com.blackclaw.android.automation.AutomationProfileStore.list().any { profile ->
+            profile.enabled && profile.triggers.any { trigger ->
+                trigger.type == com.blackclaw.android.automation.AutomationProfileStore.TriggerType.LOCATION_ENTER ||
+                    trigger.type == com.blackclaw.android.automation.AutomationProfileStore.TriggerType.LOCATION_EXIT
+            }
+        }
 
     private fun lastKnownLocation(context: Context): Location? {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==

@@ -4,6 +4,11 @@ import android.os.Bundle
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import android.os.Build
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -31,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.core.content.ContextCompat
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.scheduler.ScheduledTaskManager
 import com.blackclaw.android.automation.AutomationEngine
@@ -39,6 +45,9 @@ import com.blackclaw.android.automation.AutomationProfileScheduler
 import com.blackclaw.android.automation.AutomationProfileStore
 import com.blackclaw.android.automation.AutomationProfileValidator
 import com.blackclaw.android.automation.AutomationRuleStore
+import com.blackclaw.android.automation.AutomationGeofenceManager
+import com.blackclaw.android.automation.LocationSnapshotProvider
+import com.blackclaw.android.automation.SavedPlaceStore
 import com.blackclaw.android.automation.ExternalAutomationEntrypoint
 import com.blackclaw.android.ui.chat.BlackClawColors
 import com.blackclaw.android.ui.chat.ComposeChatActivity
@@ -52,6 +61,9 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ScheduledTasksActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,12 +86,14 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
     var tasks by remember { mutableStateOf(ScheduledTaskManager.listAll()) }
     var rules by remember { mutableStateOf(AutomationRuleStore.list()) }
     var profiles by remember { mutableStateOf(AutomationProfileStore.list()) }
+    var places by remember { mutableStateOf(SavedPlaceStore.list()) }
     // Advanced flows are the canonical Tasker-like surface. Legacy rules remain
     // available for installed users, but should not be the first mental model.
     var selected by remember { mutableStateOf(2) }
     var showAddRule by remember { mutableStateOf(false) }
     var showAddTask by remember { mutableStateOf(false) }
     var showAgentFlowBuilder by remember { mutableStateOf(false) }
+    var showSavePlace by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -89,6 +103,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                 tasks = ScheduledTaskManager.listAll()
                 rules = AutomationRuleStore.list()
                 profiles = AutomationProfileStore.list()
+                places = SavedPlaceStore.list()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -130,6 +145,10 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                         IconButton(onClick = { showAgentFlowBuilder = true }) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = "Crear con BlackClaw", tint = colors.accent)
                         }
+                    } else if (selected == 3) {
+                        IconButton(onClick = { showSavePlace = true }) {
+                            Icon(Icons.Default.AddLocationAlt, contentDescription = "Guardar este lugar", tint = colors.accent)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -151,6 +170,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                         Triple("Agenda", tasks.size, "⏱"),
                         Triple("Reglas", rules.size, "⚡"),
                         Triple("Flujos", profiles.size, "✦"),
+                        Triple("Lugares", places.size, "⌖"),
                     ).forEachIndexed { index, item ->
                         ClawGlassPill(
                             colors = colors,
@@ -184,11 +204,19 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(rules, key = { it.id }) { rule -> RuleCard(rule, colors,
-                        onToggle = { AutomationRuleStore.setEnabled(rule.id, it); rules = AutomationRuleStore.list() },
+                        onToggle = {
+                            AutomationRuleStore.setEnabled(rule.id, it)
+                            AutomationGeofenceManager.sync(ctx)
+                            rules = AutomationRuleStore.list()
+                        },
                         onRun = { AutomationEngine.fire(ctx, rule) },
-                        onDelete = { AutomationRuleStore.delete(rule.id); rules = AutomationRuleStore.list() }) }
+                        onDelete = {
+                            AutomationRuleStore.delete(rule.id)
+                            AutomationGeofenceManager.sync(ctx)
+                            rules = AutomationRuleStore.list()
+                        }) }
                 }
-            } else {
+            } else if (selected == 2) {
                 if (profiles.isEmpty()) {
                     ProfileEmptyState(
                         colors = colors,
@@ -213,6 +241,7 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                                 onToggle = {
                                     AutomationProfileStore.setEnabled(profile.id, it)
                                     AutomationProfileScheduler.sync(ctx)
+                                    AutomationGeofenceManager.sync(ctx)
                                     profiles = AutomationProfileStore.list()
                                 },
                                 onRun = { AutomationProfileEngine.runNow(ctx, profile) },
@@ -220,11 +249,24 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
                                 onDelete = {
                                     AutomationProfileStore.delete(profile.id)
                                     AutomationProfileScheduler.sync(ctx)
+                                    AutomationGeofenceManager.sync(ctx)
                                     profiles = AutomationProfileStore.list()
                                 })
                         }
                     }
                 }
+            } else {
+                SavedPlacesPane(
+                    colors = colors,
+                    places = places,
+                    onAdd = { showSavePlace = true },
+                    onDelete = { place ->
+                        if (SavedPlaceStore.delete(place.id)) {
+                            AutomationGeofenceManager.sync(ctx)
+                            places = SavedPlaceStore.list()
+                        }
+                    },
+                )
             }
         }
     }
@@ -239,6 +281,14 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
             showAddTask = false
         },
     )
+    if (showSavePlace) SavePlaceDialog(
+        colors = colors,
+        onDismiss = { showSavePlace = false },
+        onSaved = {
+            places = SavedPlaceStore.list()
+            showSavePlace = false
+        },
+    )
     if (showAgentFlowBuilder) AgentFlowBuilderDialog(
         colors = colors,
         onDismiss = { showAgentFlowBuilder = false },
@@ -247,12 +297,142 @@ private fun ScheduledTasksScreen(colors: BlackClawColors, onBack: () -> Unit) {
             val task = buildString {
                 append("Crea una automatización BlackClaw basada exactamente en esta solicitud del usuario: ")
                 append(request.trim())
-                append("\n\nUsa la herramienta automation_profile. Consulta capabilities si necesitas conocer disparadores o acciones disponibles, valida el flujo antes de guardarlo y guárdalo como draft para que el usuario pueda revisarlo en Automatizaciones > Flujos. No lo actives ni ejecutes sin confirmación local explícita. Conserva la intención del usuario y prefiere acciones determinísticas TOOL cuando exista una herramienta adecuada.")
+                append("\n\nSi la solicitud usa un lugar con nombre, resuélvelo primero con saved_place y usa su place_id; no inventes coordenadas. Usa la herramienta automation_profile. Consulta capabilities si necesitas conocer disparadores o acciones disponibles, valida el flujo antes de guardarlo y guárdalo como draft para que el usuario pueda revisarlo en Automatizaciones > Flujos. No lo actives ni ejecutes sin confirmación local explícita. Conserva la intención del usuario y prefiere acciones determinísticas TOOL cuando exista una herramienta adecuada.")
             }
             ctx.startActivity(Intent(ctx, ComposeChatActivity::class.java).apply {
                 putExtra(ExternalAutomationEntrypoint.EXTRA_TASK, task)
             })
         },
+    )
+}
+
+@Composable
+private fun SavedPlacesPane(
+    colors: BlackClawColors,
+    places: List<SavedPlaceStore.Place>,
+    onAdd: () -> Unit,
+    onDelete: (SavedPlaceStore.Place) -> Unit,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    val background = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), radius = 22.dp) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocationOn, null, tint = colors.accent)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Lugares semánticos", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    }
+                    Text(
+                        "Guarda cualquier nombre: casa, cuarto, casa de mi novia, gimnasio, escuela o lo que tú decidas. Los flujos guardan un ID estable y las coordenadas quedan cifradas.",
+                        color = colors.textSecondary, fontSize = 12.sp,
+                    )
+                    if (!fine || !background) {
+                        Text(
+                            if (!fine) "Falta ubicación precisa para capturar y detectar lugares."
+                            else "Para entradas/salidas fiables con BlackClaw en segundo plano, permite ubicación ‘Todo el tiempo’.",
+                            color = colors.textTertiary, fontSize = 11.sp,
+                        )
+                        TextButton(onClick = {
+                            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+                        }) { Text("Abrir permisos de BlackClaw", color = colors.accent) }
+                    }
+                    Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.AddLocationAlt, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Guardar mi ubicación actual")
+                    }
+                }
+            }
+        }
+        if (places.isEmpty()) item {
+            Text("Todavía no hay lugares guardados.", color = colors.textSecondary, modifier = Modifier.padding(12.dp))
+        }
+        items(places, key = { it.id }) { place ->
+            ClawGlassCard(colors = colors, modifier = Modifier.fillMaxWidth(), elevated = false, radius = 18.dp) {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Place, null, tint = colors.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(place.name, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            buildString {
+                                append("Radio ${place.radiusM.toInt()} m · ID ${place.id}")
+                                if (place.aliases.isNotEmpty()) append(" · ${place.aliases.joinToString()}")
+                            },
+                            color = colors.textSecondary, fontSize = 11.sp,
+                        )
+                    }
+                    IconButton(onClick = { onDelete(place) }) {
+                        Icon(Icons.Default.Delete, "Eliminar lugar", tint = colors.textTertiary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavePlaceDialog(
+    colors: BlackClawColors,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var radius by remember { mutableStateOf("150") }
+    var aliases by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        containerColor = colors.surface.copy(alpha = .98f),
+        title = { Text("Guardar este lugar", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text("Ponle el nombre que tú quieras. BlackClaw lo entenderá después en tus automatizaciones.", color = colors.textSecondary, fontSize = 12.sp)
+                OutlinedTextField(name, { name = it }, label = { Text("Nombre: casa de mi novia, cuarto, gimnasio…") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(radius, { radius = it.filter(Char::isDigit) }, label = { Text("Radio en metros") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(aliases, { aliases = it }, label = { Text("Aliases opcionales, separados por coma") }, modifier = Modifier.fillMaxWidth())
+                error?.let { Text(it, color = colors.textTertiary, fontSize = 11.sp) }
+            }
+        },
+        confirmButton = {
+            Button(enabled = name.isNotBlank() && !saving, onClick = {
+                val r = radius.toFloatOrNull()
+                if (r == null || r !in 25f..100_000f) { error = "El radio debe estar entre 25 y 100000 m."; return@Button }
+                saving = true; error = null
+                scope.launch(Dispatchers.IO) {
+                    val location = LocationSnapshotProvider.current(ctx).getOrElse {
+                        withContext(Dispatchers.Main) { saving = false; error = it.message ?: "No pude obtener la ubicación." }
+                        return@launch
+                    }
+                    val result = SavedPlaceStore.save(
+                        name = name,
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        radiusM = r,
+                        aliases = aliases.split(',').map { it.trim() }.filter { it.isNotBlank() },
+                    )
+                    if (result.isSuccess) {
+                        AutomationGeofenceManager.sync(ctx)
+                        com.blackclaw.android.service.KeepAliveJobService.schedule(ctx)
+                        withContext(Dispatchers.Main) { onSaved() }
+                    } else withContext(Dispatchers.Main) {
+                        saving = false; error = result.exceptionOrNull()?.message ?: "No se pudo guardar."
+                    }
+                }
+            }) { Text(if (saving) "Guardando…" else "Guardar") }
+        },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancelar", color = colors.textSecondary) } },
     )
 }
 

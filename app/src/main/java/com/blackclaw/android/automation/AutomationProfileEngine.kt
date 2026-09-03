@@ -2,6 +2,11 @@ package com.blackclaw.android.automation
 
 import android.content.Context
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
+import android.os.PowerManager
+import android.provider.Settings
 import com.blackclaw.android.assistant.AssistantReceiver
 import com.blackclaw.android.assistant.RoutineEngine
 import com.blackclaw.android.tool.ToolRegistry
@@ -9,6 +14,7 @@ import com.blackclaw.android.tool.guard.ToolExecutionContext
 import com.blackclaw.android.tool.guard.ToolRiskPolicy
 import com.blackclaw.android.server.ConfigServerPolicy
 import com.blackclaw.android.utils.KVUtils
+import com.blackclaw.android.utils.SecretStore
 import com.blackclaw.android.utils.XLog
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -54,7 +60,7 @@ object AutomationProfileEngine {
                     .asSequence()
                     .filter { it.enabled && AutomationProfileValidator.validate(it).isEmpty() }
                     .filter { it.triggers.any { trigger -> matches(trigger, event) } }
-                    .filter { conditionsMatch(it, event) }
+                    .filter { conditionsMatch(appContext, it, event) }
                     .filter { cooldownReady(it, event.atMs) }
                     .filter { dailyLimitReady(it, event.atMs) }
                     .forEach { profile -> scheduleProfile(appContext, profile, event, force = false) }
@@ -62,43 +68,56 @@ object AutomationProfileEngine {
         }
     }
 
-    /** Bridges the existing low-power location checker to enter/exit profiles. */
+    /** Platform-only fallback when Play Services geofencing is unavailable. */
     fun onLocation(context: Context, location: Location) {
         AutomationProfileStore.list()
             .filter { it.enabled && AutomationProfileValidator.validate(it).isEmpty() }
             .forEach { profile ->
-                val locationTriggers = profile.triggers.filter { trigger ->
-                    trigger.type == AutomationProfileStore.TriggerType.LOCATION_ENTER ||
-                        trigger.type == AutomationProfileStore.TriggerType.LOCATION_EXIT
-                }
-                locationTriggers.groupBy { trigger ->
-                    "${trigger.params["latitude"]}|${trigger.params["longitude"]}|${trigger.params["radius_m"] ?: 150}"
-                }.forEach target@ { (_, triggersAtTarget) ->
-                    val firstTrigger = triggersAtTarget.first()
-                    val targetLat = firstTrigger.params["latitude"]?.toString()?.toDoubleOrNull() ?: return@target
-                    val targetLon = firstTrigger.params["longitude"]?.toString()?.toDoubleOrNull() ?: return@target
-                    val radius = automationFloat(firstTrigger.params["radius_m"])?.coerceAtLeast(1f) ?: 150f
+                val groups = profile.triggers
+                    .filter { it.type == AutomationProfileStore.TriggerType.LOCATION_ENTER || it.type == AutomationProfileStore.TriggerType.LOCATION_EXIT }
+                    .mapNotNull { trigger -> AutomationLocationTarget.resolve(trigger.params)?.let { it to trigger } }
+                    .groupBy({ AutomationLocationTarget.requestId(it.first) }, { it })
+                groups.forEach { (_, rows) ->
+                    val target = rows.first().first
                     val distance = FloatArray(1)
-                    Location.distanceBetween(location.latitude, location.longitude, targetLat, targetLon, distance)
-                    val inside = distance[0] <= radius
-                    val stateKey = LOCATION_STATE_PREFIX + profile.id + "_" + targetLat + "_" + targetLon + "_" + radius
-                    val previous = KVUtils.getString(stateKey, "").takeIf { it.isNotBlank() }?.toBoolean()
-                    KVUtils.putString(stateKey, inside.toString())
-                    KVUtils.sync()
-                    if (previous == null) return@target
-                    triggersAtTarget.forEach { trigger ->
+                    Location.distanceBetween(location.latitude, location.longitude, target.latitude, target.longitude, distance)
+                    val inside = distance[0] <= target.radiusM
+                    val stateKey = LOCATION_STATE_PREFIX + profile.id + "_" + AutomationLocationTarget.requestId(target)
+                    val previous = SecretStore.getString(stateKey)?.toBooleanStrictOrNull()
+                        ?: KVUtils.getString(stateKey, "").takeIf { it.isNotBlank() }?.toBooleanStrictOrNull()
+                    if (SecretStore.putString(stateKey, inside.toString())) {
+                        KVUtils.remove(stateKey); KVUtils.sync()
+                    }
+                    if (previous == null) return@forEach
+                    rows.forEach { (_, trigger) ->
                         val crossed = when (trigger.type) {
                             AutomationProfileStore.TriggerType.LOCATION_ENTER -> !previous && inside
                             AutomationProfileStore.TriggerType.LOCATION_EXIT -> previous && !inside
                             else -> false
                         }
-                        if (crossed) emit(context, Event(trigger.type, mapOf(
-                            "latitude" to location.latitude.toString(),
-                            "longitude" to location.longitude.toString(),
-                        )))
+                        if (crossed) emit(context, Event(trigger.type, locationEventAttributes(target, location)))
                     }
                 }
             }
+    }
+
+    /** Primary path called by [AutomationGeofenceReceiver]. */
+    fun onGeofenceTransition(
+        context: Context,
+        type: AutomationProfileStore.TriggerType,
+        target: AutomationLocationTarget.Target,
+    ) {
+        if (type != AutomationProfileStore.TriggerType.LOCATION_ENTER && type != AutomationProfileStore.TriggerType.LOCATION_EXIT) return
+        emit(context, Event(type, locationEventAttributes(target, null)))
+    }
+
+    private fun locationEventAttributes(target: AutomationLocationTarget.Target, current: Location?): Map<String, String> = buildMap {
+        // Keep coordinates local. Event templates only receive an opaque target id,
+        // semantic place metadata and non-sensitive accuracy information.
+        put("geofence_request_id", AutomationLocationTarget.requestId(target))
+        if (target.placeId.isNotBlank()) put("place_id", target.placeId)
+        if (target.placeName.isNotBlank()) put("place", target.placeName)
+        current?.let { put("accuracy", it.accuracy.toString()) }
     }
 
     @JvmStatic
@@ -175,7 +194,8 @@ object AutomationProfileEngine {
         val a = event.attributes
         return when (trigger.type) {
             AutomationProfileStore.TriggerType.MANUAL,
-            AutomationProfileStore.TriggerType.BOOT -> true
+            AutomationProfileStore.TriggerType.BOOT,
+            AutomationProfileStore.TriggerType.INTERVAL -> true
             AutomationProfileStore.TriggerType.TIME -> {
                 val hour = automationInt(a["hour"]) ?: Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
                 val minute = automationInt(a["minute"]) ?: Calendar.getInstance().get(Calendar.MINUTE)
@@ -201,10 +221,8 @@ object AutomationProfileEngine {
                 val max = automationInt(p["max"]) ?: 100
                 level in min..max
             }
-            AutomationProfileStore.TriggerType.CHARGING ->
-                booleanMatches(p["value"], a["charging"])
-            AutomationProfileStore.TriggerType.SCREEN ->
-                stringMatches(p["state"], a["state"])
+            AutomationProfileStore.TriggerType.CHARGING -> booleanMatches(p["value"], a["charging"])
+            AutomationProfileStore.TriggerType.SCREEN -> stringMatches(p["state"], a["state"])
             AutomationProfileStore.TriggerType.CALL_STATE ->
                 stringMatches(p["state"], a["state"]) && stringMatches(p["number"], a["number"])
             AutomationProfileStore.TriggerType.SMS_RECEIVED ->
@@ -212,26 +230,39 @@ object AutomationProfileEngine {
                     (p["match"]?.toString().isNullOrBlank() || a["body"].orEmpty().contains(p["match"].toString(), true))
             AutomationProfileStore.TriggerType.HEADSET,
             AutomationProfileStore.TriggerType.BLUETOOTH,
-            AutomationProfileStore.TriggerType.WIFI -> {
+            AutomationProfileStore.TriggerType.WIFI ->
                 booleanMatches(p["connected"], a["connected"]) &&
                     stringMatches(p["name"], a["name"]) && stringMatches(p["ssid"], a["ssid"])
+            AutomationProfileStore.TriggerType.AIRPLANE_MODE,
+            AutomationProfileStore.TriggerType.POWER_SAVE,
+            AutomationProfileStore.TriggerType.DEVICE_IDLE -> booleanMatches(p["value"], a["value"])
+            AutomationProfileStore.TriggerType.USB ->
+                booleanMatches(p["connected"], a["connected"]) &&
+                    stringMatches(p["vendor_id"], a["vendor_id"]) && stringMatches(p["product_id"], a["product_id"])
+            AutomationProfileStore.TriggerType.STORAGE -> stringMatches(p["state"], a["state"])
+            AutomationProfileStore.TriggerType.TIMEZONE -> stringMatches(p["id"], a["id"])
+            AutomationProfileStore.TriggerType.LOCALE -> stringMatches(p["tag"], a["tag"])
+            AutomationProfileStore.TriggerType.WEBHOOK -> p["token"]?.toString().orEmpty().let { expected ->
+                expected.isNotBlank() && ConfigServerPolicy.tokensMatch(expected, a["token"])
             }
-            AutomationProfileStore.TriggerType.WEBHOOK ->
-                p["token"]?.toString().orEmpty().let { expected ->
-                    // Reuse the hardened secret comparison already shared by other
-                    // authenticated BlackClaw entry points.
-                    expected.isNotBlank() && ConfigServerPolicy.tokensMatch(expected, a["token"])
-                }
         }
     }
 
-    private fun conditionsMatch(profile: AutomationProfileStore.Profile, event: Event): Boolean =
-        profile.conditions.all { condition ->
-            val result = conditionMatches(condition, event)
-            if (condition.negate) !result else result
+    private fun conditionsMatch(context: Context, profile: AutomationProfileStore.Profile, event: Event): Boolean {
+        if (profile.conditions.isEmpty()) return true
+        val values = profile.conditions.map { condition ->
+            val raw = conditionMatches(context, condition, event)
+            if (condition.negate) !raw else raw
         }
+        return when (profile.conditionLogic) {
+            AutomationProfileStore.ConditionLogic.ALL -> values.all { it }
+            AutomationProfileStore.ConditionLogic.ANY -> values.any { it }
+            AutomationProfileStore.ConditionLogic.NONE -> values.none { it }
+            AutomationProfileStore.ConditionLogic.XOR -> values.count { it } == 1
+        }
+    }
 
-    private fun conditionMatches(condition: AutomationProfileStore.Condition, event: Event): Boolean {
+    private fun conditionMatches(context: Context, condition: AutomationProfileStore.Condition, event: Event): Boolean {
         val p = condition.params
         val a = event.attributes
         return when (condition.type) {
@@ -240,30 +271,63 @@ object AutomationProfileEngine {
                 isTimeInWindow(now, p["start"]?.toString(), p["end"]?.toString())
             }
             AutomationProfileStore.ConditionType.DAY_OF_WEEK -> {
-                val day = a["day"] ?: Calendar.getInstance().apply { timeInMillis = event.atMs }
-                    .get(Calendar.DAY_OF_WEEK).toString()
+                val day = a["day"] ?: Calendar.getInstance().apply { timeInMillis = event.atMs }.get(Calendar.DAY_OF_WEEK).toString()
                 p["days"].toString().split(',', '|', ' ').filter { it.isNotBlank() }
                     .any { it.equals(day, true) || it.equals(dayName(day), true) }
             }
             AutomationProfileStore.ConditionType.APP -> stringMatches(p["package"], a["package"])
-            AutomationProfileStore.ConditionType.CONNECTIVITY ->
-                stringMatches(p["state"], a["state"]) && stringMatches(p["transport"], a["transport"])
+            AutomationProfileStore.ConditionType.CONNECTIVITY -> {
+                val state = currentConnectivity(context)
+                stringMatches(p["state"], a["state"] ?: state.first) && stringMatches(p["transport"], a["transport"] ?: state.second)
+            }
             AutomationProfileStore.ConditionType.BATTERY_LEVEL -> {
-                val level = automationInt(a["level"]) ?: return false
+                val level = automationInt(a["level"]) ?: currentBatteryLevel(context) ?: return false
                 val min = automationInt(p["min"]) ?: 0
                 val max = automationInt(p["max"]) ?: 100
                 level in min..max
             }
-            AutomationProfileStore.ConditionType.CHARGING -> booleanMatches(p["value"], a["charging"])
-            AutomationProfileStore.ConditionType.SCREEN -> stringMatches(p["state"], a["state"])
-            AutomationProfileStore.ConditionType.VARIABLE -> {
-                val current = KVUtils.getString(VARIABLE_PREFIX + p["name"].toString(), "")
-                val expected = p["equals"]?.toString()
-                expected == null || current == expected
+            AutomationProfileStore.ConditionType.CHARGING -> booleanMatches(p["value"], a["charging"] ?: currentCharging(context).toString())
+            AutomationProfileStore.ConditionType.SCREEN -> {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                stringMatches(p["state"], a["state"] ?: if (pm.isInteractive) "on" else "off")
             }
+            AutomationProfileStore.ConditionType.VARIABLE -> variableMatches(p)
             AutomationProfileStore.ConditionType.NOTIFICATION -> {
                 val match = p["match"]?.toString().orEmpty()
                 match.isBlank() || "${a["title"].orEmpty()}\n${a["text"].orEmpty()}".contains(match, true)
+            }
+            AutomationProfileStore.ConditionType.LOCATION -> {
+                val target = AutomationLocationTarget.resolve(p) ?: return false
+                val loc = LocationSnapshotProvider.lastKnown(context, 15 * 60_000L) ?: return false
+                val distance = FloatArray(1)
+                Location.distanceBetween(loc.latitude, loc.longitude, target.latitude, target.longitude, distance)
+                val inside = distance[0] <= target.radiusM
+                inside == (p["inside"]?.toString()?.toBooleanStrictOrNull() ?: true)
+            }
+            AutomationProfileStore.ConditionType.WIFI -> {
+                val connected = currentConnectivity(context).second == "wifi"
+                val ssid = currentWifiSsid(context)
+                booleanMatches(p["connected"] ?: p["value"], connected.toString()) && stringMatches(p["ssid"], ssid)
+            }
+            AutomationProfileStore.ConditionType.BLUETOOTH -> {
+                val enabled = runCatching { android.bluetooth.BluetoothAdapter.getDefaultAdapter()?.isEnabled == true }.getOrDefault(false)
+                booleanMatches(p["value"], enabled.toString())
+            }
+            AutomationProfileStore.ConditionType.HEADSET -> {
+                val connected = a["connected"]?.toBooleanStrictOrNull() ?: currentHeadsetConnected(context)
+                booleanMatches(p["value"], connected.toString())
+            }
+            AutomationProfileStore.ConditionType.AIRPLANE_MODE -> {
+                val value = Settings.Global.getInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+                booleanMatches(p["value"], value.toString())
+            }
+            AutomationProfileStore.ConditionType.POWER_SAVE -> {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                booleanMatches(p["value"], pm.isPowerSaveMode.toString())
+            }
+            AutomationProfileStore.ConditionType.DEVICE_IDLE -> {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                booleanMatches(p["value"], pm.isDeviceIdleMode.toString())
             }
         }
     }
@@ -321,21 +385,22 @@ object AutomationProfileEngine {
             }
         }
         AutomationProfileStore.ActionType.SET_VARIABLE -> {
-            val name = action.params["name"]?.toString().orEmpty()
-            val value = action.params["value"]?.toString().orEmpty()
-            KVUtils.putString(VARIABLE_PREFIX + name.take(80), value.take(2_000)); KVUtils.sync()
-            Result.success(Unit)
+            val name = expandString(action.params["name"]?.toString().orEmpty(), profile, event).take(80)
+            val value = expandString(action.params["value"]?.toString().orEmpty(), profile, event).take(2_000)
+            if (name.isBlank()) Result.failure(IllegalArgumentException("La variable necesita nombre."))
+            else if (SecretStore.putString(VARIABLE_PREFIX + name, value)) Result.success(Unit)
+            else Result.failure(IllegalStateException("No se pudo guardar la variable de forma segura."))
         }
         AutomationProfileStore.ActionType.NOTIFY -> {
             AssistantReceiver.postNotification(
-                context, action.params["title"]?.toString() ?: profile.name,
-                action.params["text"]?.toString().orEmpty(),
+                context, expandString(action.params["title"]?.toString() ?: profile.name, profile, event),
+                expandString(action.params["text"]?.toString().orEmpty(), profile, event),
                 action.params["highPriority"]?.toString()?.toBoolean() ?: false,
             )
             Result.success(Unit)
         }
         AutomationProfileStore.ActionType.RUN_ROUTINE -> {
-            val name = action.params["name"]?.toString().orEmpty()
+            val name = expandString(action.params["name"]?.toString().orEmpty(), profile, event)
             val routine = RoutineEngine.findByName(name) ?: RoutineEngine.find(name)
                 ?: return Result.failure(IllegalArgumentException("No encontré rutina '$name'."))
             ToolExecutionContext.setOrigin(ToolRiskPolicy.Origin.AUTOMATION)
@@ -349,7 +414,7 @@ object AutomationProfileEngine {
             val toolName = action.params["tool"]?.toString().orEmpty()
             val rawParams = action.params["params"]
             @Suppress("UNCHECKED_CAST")
-            val toolParams = (rawParams as? Map<String, Any>).orEmpty()
+            val toolParams = expandValue((rawParams as? Map<String, Any>).orEmpty(), profile, event) as Map<String, Any>
             ToolExecutionContext.setOrigin(ToolRiskPolicy.Origin.AUTOMATION)
             try {
                 val result = ToolRegistry.getInstance().executeTool(toolName, toolParams)
@@ -358,7 +423,7 @@ object AutomationProfileEngine {
             } finally { ToolExecutionContext.reset() }
         }
         AutomationProfileStore.ActionType.AGENT_TASK -> {
-            val text = action.params["text"]?.toString().orEmpty()
+            val text = expandString(action.params["text"]?.toString().orEmpty(), profile, event)
             if (text.isBlank()) Result.failure(IllegalArgumentException("La tarea está vacía."))
             else {
                 AutomationEngine.executeTask(context, text, "profile:${profile.id}")
@@ -368,7 +433,7 @@ object AutomationProfileEngine {
         AutomationProfileStore.ActionType.IF -> {
             val condition = conditionFrom(action) ?: return Result.failure(
                 IllegalArgumentException("if necesita condition_type y condition_params."))
-            val branch = if (conditionMatches(condition, event)) action.params["then"] else action.params["else"]
+            val branch = if (conditionMatches(context, condition, event)) action.params["then"] else action.params["else"]
             executeActions(context, profile, nestedActions(branch), event, deadline, depth + 1)
         }
         AutomationProfileStore.ActionType.LOOP -> {
@@ -430,14 +495,105 @@ object AutomationProfileEngine {
     }
 
     private fun locationMatches(params: Map<String, Any>, attrs: Map<String, String>): Boolean {
+        val expected = AutomationLocationTarget.resolve(params) ?: return false
+        attrs["geofence_request_id"]?.let { return it == AutomationLocationTarget.requestId(expected) }
+        // Backward-compatible path for any in-process caller that still emits raw
+        // coordinates; new geofence/fallback events never populate these attributes.
         val lat = attrs["latitude"]?.toDoubleOrNull() ?: return false
         val lon = attrs["longitude"]?.toDoubleOrNull() ?: return false
-        val targetLat = params["latitude"]?.toString()?.toDoubleOrNull() ?: return false
-        val targetLon = params["longitude"]?.toString()?.toDoubleOrNull() ?: return false
-        val radius = automationFloat(params["radius_m"])?.coerceAtLeast(1f) ?: 150f
         val distance = FloatArray(1)
-        Location.distanceBetween(lat, lon, targetLat, targetLon, distance)
-        return distance[0] <= radius
+        Location.distanceBetween(lat, lon, expected.latitude, expected.longitude, distance)
+        return distance[0] <= expected.radiusM
+    }
+
+    internal fun variableMatches(params: Map<String, Any>): Boolean {
+        val name = params["name"]?.toString().orEmpty().take(80)
+        if (name.isBlank()) return false
+        val current = SecretStore.getString(VARIABLE_PREFIX + name)
+            ?: KVUtils.getString(VARIABLE_PREFIX + name, "").takeIf { it.isNotEmpty() }
+        val op = params["op"]?.toString()?.lowercase() ?: if (params.containsKey("equals")) "equals" else "exists"
+        val expected = params["value"]?.toString() ?: params["equals"]?.toString().orEmpty()
+        return when (op) {
+            "exists" -> current != null
+            "equals" -> current.orEmpty() == expected
+            "not_equals" -> current.orEmpty() != expected
+            "contains" -> current.orEmpty().contains(expected, ignoreCase = params["ignore_case"]?.toString()?.toBoolean() == true)
+            "regex" -> runCatching { Regex(expected).containsMatchIn(current.orEmpty()) }.getOrDefault(false)
+            "gt", "gte", "lt", "lte" -> {
+                val left = current?.toDoubleOrNull() ?: return false
+                val right = expected.toDoubleOrNull() ?: return false
+                when (op) { "gt" -> left > right; "gte" -> left >= right; "lt" -> left < right; else -> left <= right }
+            }
+            else -> false
+        }
+    }
+
+    private fun currentConnectivity(context: Context): Pair<String, String> {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        val transport = when {
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ethernet"
+            else -> "none"
+        }
+        val online = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        return (if (online) "online" else "offline") to transport
+    }
+
+    private fun currentWifiSsid(context: Context): String = runCatching {
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        SavedPlaceStore.normalizeSsid(wm.connectionInfo?.ssid.orEmpty())
+    }.getOrDefault("")
+
+    private fun currentHeadsetConnected(context: Context): Boolean = runCatching {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+            device.type in setOf(
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+            )
+        }
+    }.getOrDefault(false)
+
+    private fun currentBatteryLevel(context: Context): Int? {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        return bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+    }
+
+    private fun currentCharging(context: Context): Boolean {
+        val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)) ?: return false
+        return intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1).let {
+            it == android.os.BatteryManager.BATTERY_STATUS_CHARGING || it == android.os.BatteryManager.BATTERY_STATUS_FULL
+        }
+    }
+
+    private fun expandString(value: String, profile: AutomationProfileStore.Profile, event: Event): String {
+        val regex = Regex("\\{\\{(event|var)\\.([A-Za-z0-9_.-]{1,80})\\}\\}")
+        var out = regex.replace(value) { match ->
+            when (match.groupValues[1]) {
+                "event" -> event.attributes[match.groupValues[2]].orEmpty()
+                else -> SecretStore.getString(VARIABLE_PREFIX + match.groupValues[2]).orEmpty()
+            }
+        }
+        out = out.replace("{{profile.name}}", profile.name)
+            .replace("{{profile.id}}", profile.id)
+            .replace("{{event.type}}", event.type.name.lowercase())
+            .replace("{{now_ms}}", event.atMs.toString())
+        return out
+    }
+
+    private fun expandValue(value: Any, profile: AutomationProfileStore.Profile, event: Event): Any = when (value) {
+        is String -> expandString(value, profile, event)
+        is Map<*, *> -> buildMap<String, Any> {
+            value.forEach { (k, v) -> if (k is String && v != null) put(k, expandValue(v, profile, event)) }
+        }
+        is List<*> -> value.mapNotNull { it?.let { item -> expandValue(item, profile, event) } }
+        else -> value
     }
 
     private fun appMatches(params: Map<String, Any>, attrs: Map<String, String>): Boolean =

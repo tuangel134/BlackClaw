@@ -79,7 +79,10 @@ object MemoryHub {
         RoutineEngine.asPromptSnippet().takeIf { it.isNotBlank() }
             ?.let { sections.add(Section(3, it)) }
 
-        // Priority 4: deterministic profiles the AI can edit/test safely.
+        // Priority 4: semantic places + deterministic profiles for location-aware automation.
+        com.blackclaw.android.automation.SavedPlaceStore.asPromptSnippet()
+            .takeIf { it.isNotBlank() }
+            ?.let { sections.add(Section(4, it)) }
         com.blackclaw.android.automation.AutomationProfileStore.asPromptSnippet()
             .takeIf { it.isNotBlank() }
             ?.let { sections.add(Section(4, it)) }

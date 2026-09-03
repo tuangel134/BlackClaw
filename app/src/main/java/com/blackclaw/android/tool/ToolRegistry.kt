@@ -66,6 +66,7 @@ object ToolRegistry {
         register(CancelScheduledTaskTool())
         register(AutomationRuleTool())
         register(AutomationProfileTool())
+        register(SavedPlaceTool())
 
         // Native Assistant hub — reminders, alarms, notes, events, alerts, finance.
         // The AI writes here instead of bouncing out to external Clock/Calendar apps.

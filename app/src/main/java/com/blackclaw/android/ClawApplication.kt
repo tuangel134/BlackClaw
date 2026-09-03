@@ -45,7 +45,7 @@ class ClawApplication : BaseApp() {
         com.blackclaw.android.shizuku.ShizukuManager.init()
         appViewModelInstance = getAppViewModelProvider()[AppViewModel::class.java]
         KVUtils.init(this)
-        registerAutomationBatteryObserver()
+        registerAutomationRuntimeObservers()
         com.blackclaw.android.adb.AdbController.init(this)
         runCatching { com.blackclaw.android.proactive.BriefingScheduler.syncAll(this) }
             .onFailure {
@@ -54,6 +54,8 @@ class ClawApplication : BaseApp() {
             }
         runCatching { com.blackclaw.android.automation.AutomationProfileScheduler.sync(this) }
             .onFailure { XLog.w(TAG, "Automation profile scheduler sync failed: ${it.message}") }
+        runCatching { com.blackclaw.android.automation.AutomationGeofenceManager.sync(this) }
+            .onFailure { XLog.w(TAG, "Automation geofence sync failed: ${it.message}") }
         runCatching { com.blackclaw.android.agent.OpenCodeZenModels.refreshIfStale() }
             .onFailure {
                 XLog.w(TAG, "OpenCode Zen model refresh failed, model picker keeps the " +
@@ -154,15 +156,31 @@ class ClawApplication : BaseApp() {
 
     private var networkListener: NetworkUtils.OnNetworkStatusChangedListener? = null
 
-    private fun registerAutomationBatteryObserver() {
+    private fun registerAutomationRuntimeObservers() {
         runCatching {
+            val filter = android.content.IntentFilter().apply {
+                // Most implicit broadcasts are restricted for manifest receivers on
+                // Android 8+, and CONNECTIVITY_ACTION requires context registration.
+                // The application context keeps these observers alive with the process.
+                addAction(android.content.Intent.ACTION_BATTERY_CHANGED)
+                addAction(android.content.Intent.ACTION_AIRPLANE_MODE_CHANGED)
+                addAction(android.content.Intent.ACTION_SCREEN_ON)
+                addAction(android.content.Intent.ACTION_SCREEN_OFF)
+                addAction(android.content.Intent.ACTION_USER_PRESENT)
+                addAction(android.os.PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+                addAction(android.os.PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+                addAction(android.content.Intent.ACTION_DEVICE_STORAGE_LOW)
+                addAction(android.content.Intent.ACTION_DEVICE_STORAGE_OK)
+                addAction(android.net.wifi.WifiManager.NETWORK_STATE_CHANGED_ACTION)
+                addAction(android.net.ConnectivityManager.CONNECTIVITY_ACTION)
+            }
             ContextCompat.registerReceiver(
                 this,
                 com.blackclaw.android.automation.AutomationSystemReceiver(),
-                android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED),
-                ContextCompat.RECEIVER_EXPORTED,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
             )
-        }.onFailure { XLog.w(TAG, "Automation battery observer unavailable: ${it.message}") }
+        }.onFailure { XLog.w(TAG, "Automation runtime observers unavailable: ${it.message}") }
     }
 
     /**
