@@ -521,6 +521,13 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.3.2
+
+- Fixed local **text-only LiteRT-LM models** failing at startup with `TF_LITE_VISION_ENCODER not found`: BlackClaw now detects/probes model modality, retries the same backend without `visionBackend` when the optional encoder is absent, and releases partially initialized native engines before retrying.
+- Local image chat now respects the loaded model capability: multimodal bundles receive image bytes, while text-only bundles use the existing OCR fallback instead of sending an unsupported vision payload. Missing vision assets no longer quarantine a healthy GPU as a backend failure.
+- Updated the on-device runtime from **LiteRT-LM 0.10.0 to 0.16.1** and expanded the model UI with explicit **Vision + text**, **Text only · images via OCR**, or **modality detected on load** labels. Automatic bootstrap remains on vetted default Gemma models; community/uncensored models are always explicit opt-in choices.
+- Added three recently published, public LiteRT-LM community choices: **Gemma 4 E4B Abliterated MTP (3.7 GB)**, **Huihui Gemma 4 E2B Abliterated multimodal (5.2 GB)** and **Huihui Gemma 4 E4B Abliterated multimodal (8.4 GB)**, with verified public download artifacts and RAM guidance.
+
 ### v1.3.1
 
 - Added a reusable **permission education** experience: before a sensitive Android permission or special-access screen opens, BlackClaw explains why the capability is needed, what stops working if it is denied, and the relevant privacy behavior.

@@ -73,6 +73,11 @@ object LocalModelRuntime {
         return EngineHolder.getBackendLabel(modelPath)
     }
 
+    /** Whether the currently loaded model has an initialized LiteRT-LM vision path. */
+    fun currentVisionEnabled(modelPath: String?): Boolean? {
+        return EngineHolder.isVisionEnabled(modelPath)
+    }
+
     fun openConversation(
         context: Context,
         modelPath: String,
@@ -164,6 +169,10 @@ object LocalModelRuntime {
     }
 
     fun isGpuBackendFailure(error: Throwable?): Boolean {
+        // A missing optional vision encoder is a model-modality mismatch, not a bad
+        // GPU. EngineHolder retries it text-only; keep this guard for nested/caller
+        // errors so we never quarantine a healthy GPU because of model contents.
+        if (EngineHolder.isMissingVisionEncoder(error)) return false
         val message = error?.message.orEmpty()
         if (message.isEmpty()) return false
         return message.contains("OpenCL", ignoreCase = true) ||

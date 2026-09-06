@@ -22,8 +22,11 @@ object LocalModelManager {
 
     private const val TAG = "LocalModelManager"
     private const val SIZE_TOLERANCE_BYTES = 32L * 1024L * 1024L
+    private val DEFAULT_MODEL_IDS = setOf("gemma4-e2b", "gemma4-e4b")
 
-    /** Available models for download */
+    enum class VisionSupport { YES, NO, UNKNOWN }
+
+    /** Available models for download. */
     data class ModelInfo(
         val id: String,
         val displayName: String,
@@ -31,10 +34,14 @@ object LocalModelManager {
         val fileName: String,
         val sizeBytes: Long,
         val minRamGb: Int,
+        /** Whether the published LiteRT-LM bundle is known to include a vision encoder.
+         *  UNKNOWN is intentionally probed at runtime: community conversions frequently
+         *  differ even when they share a model family/name. */
+        val visionSupport: VisionSupport = VisionSupport.UNKNOWN,
         /** True when this model came from the user-supplied custom URL (#36).
          *  Custom models skip strict size-bound validation since we don't know
          *  the expected size up front. */
-        val isCustom: Boolean = false
+        val isCustom: Boolean = false,
     )
 
     data class DeviceSupport(
@@ -107,11 +114,12 @@ object LocalModelManager {
         ),
         ModelInfo(
             id = "gemma4-e2b-uncensored-max",
-            displayName = "Gemma 4 E2B Uncensored MAX — 2.6 GB · sin censura",
+            displayName = "Gemma 4 E2B Uncensored MAX — 2.6 GB · sin censura · texto",
             url = "https://huggingface.co/PeppX/gemma-4-e2b-uncensored-litertlm/resolve/main/gemma-4-E2B-it-Uncensored-MAX.litertlm",
             fileName = "gemma-4-E2B-uncensored-max.litertlm",
             sizeBytes = 2_550_041_824L,
-            minRamGb = 8
+            minRamGb = 8,
+            visionSupport = VisionSupport.NO,
         ),
         ModelInfo(
             id = "gemma4-e4b-uncensored",
@@ -119,9 +127,53 @@ object LocalModelManager {
             url = "https://huggingface.co/DuoNeural/Gemma-4-Abliterated-LiteRT/resolve/main/Gemma-4-E4B-Abliterated.litertlm",
             fileName = "gemma-4-E4B-abliterated.litertlm",
             sizeBytes = 4_120_150_016L,
-            minRamGb = 10
+            minRamGb = 10,
+        ),
+        // ── Ports recientes verificados (julio/agosto 2026) ───────────────────
+        // Solo se incluyen repos públicos, no-gated, con .litertlm descargable.
+        ModelInfo(
+            id = "gemma4-e4b-olekk-abliterated",
+            displayName = "Gemma 4 E4B Abliterated MTP — 3.7 GB · sin censura · visión",
+            url = "https://huggingface.co/olekk/gemma-4-E4B-it-abliterated-litert-lm/resolve/main/gemma-4-E4B-it-abliterated.litertlm",
+            fileName = "gemma-4-E4B-it-abliterated.litertlm",
+            sizeBytes = 3_659_530_240L,
+            minRamGb = 10,
+            visionSupport = VisionSupport.YES,
+        ),
+        ModelInfo(
+            id = "huihui-gemma4-e2b-abliterated-vision",
+            displayName = "Huihui Gemma 4 E2B Abliterated — 5.2 GB · sin censura · visión",
+            url = "https://huggingface.co/edp1096/Huihui-gemma-4-E2B-it-abliterated-litert-lm/resolve/main/Huihui-gemma-4-E2B-it-abliterated.litertlm",
+            fileName = "Huihui-gemma-4-E2B-it-abliterated.litertlm",
+            sizeBytes = 5_247_716_576L,
+            minRamGb = 12,
+            visionSupport = VisionSupport.YES,
+        ),
+        ModelInfo(
+            id = "huihui-gemma4-e4b-abliterated-vision",
+            displayName = "Huihui Gemma 4 E4B Abliterated — 8.4 GB · sin censura · visión · pesado",
+            url = "https://huggingface.co/vokash3/Huihui-gemma-4-E4B-it-abliterated-LiteRT-LM/resolve/main/Huihui-gemma-4-E4B-it-abliterated.litertlm",
+            fileName = "Huihui-gemma-4-E4B-it-abliterated.litertlm",
+            sizeBytes = 8_376_372_448L,
+            minRamGb = 16,
+            visionSupport = VisionSupport.YES,
         ),
     )
+
+    /**
+     * Returns published modality metadata for a managed model path. Unknown/custom
+     * files are probed by EngineHolder and safely fall back to text-only when their
+     * bundle has no TF_LITE_VISION_ENCODER.
+     */
+    fun visionSupportForPath(modelPath: String): VisionSupport {
+        if (modelPath.isBlank()) return VisionSupport.UNKNOWN
+        val baseName = modelPath.substringAfterLast('/')
+        return AVAILABLE_MODELS.firstOrNull { model ->
+            val publishedName = model.url.substringAfterLast('/').substringBefore('?')
+            baseName.equals(model.fileName, ignoreCase = true) ||
+                baseName.equals(publishedName, ignoreCase = true)
+        }?.visionSupport ?: VisionSupport.UNKNOWN
+    }
 
     /**
      * Pick the best model for this device based on available RAM.
@@ -148,8 +200,10 @@ object LocalModelManager {
         return DeviceSupport(
             deviceRamGb = deviceRamGb,
             minimumBuiltInRamGb = AVAILABLE_MODELS.minOf { it.minRamGb },
+            // Automatic bootstrap must stay on the vetted default family. Community
+            // uncensored models are explicit opt-in choices and can be much larger.
             bestSupportedModel = AVAILABLE_MODELS
-                .filter { it.minRamGb <= deviceRamGb }
+                .filter { it.id in DEFAULT_MODEL_IDS && it.minRamGb <= deviceRamGb }
                 .maxByOrNull { it.minRamGb }
         )
     }

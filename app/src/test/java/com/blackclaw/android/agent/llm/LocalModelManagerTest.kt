@@ -1,6 +1,7 @@
 package com.blackclaw.android.agent.llm
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -59,4 +60,37 @@ class LocalModelManagerTest {
         assertEquals(internalRoot.resolve("models"), dir)
         assertTrue(dir.isDirectory)
     }
+    @Test
+    fun `catalog marks known text-only and multimodal community bundles`() {
+        assertEquals(
+            LocalModelManager.VisionSupport.NO,
+            LocalModelManager.visionSupportForPath("/models/gemma-4-E2B-uncensored-max.litertlm"),
+        )
+        assertEquals(
+            LocalModelManager.VisionSupport.NO,
+            LocalModelManager.visionSupportForPath("/Downloads/gemma-4-E2B-it-Uncensored-MAX.litertlm"),
+        )
+        assertEquals(
+            LocalModelManager.VisionSupport.YES,
+            LocalModelManager.visionSupportForPath("/models/gemma-4-E4B-it-abliterated.litertlm"),
+        )
+        assertEquals(
+            LocalModelManager.VisionSupport.YES,
+            LocalModelManager.visionSupportForPath("/models/Huihui-gemma-4-E2B-it-abliterated.litertlm"),
+        )
+        assertEquals(
+            LocalModelManager.VisionSupport.UNKNOWN,
+            LocalModelManager.visionSupportForPath("/models/custom-user-model.litertlm"),
+        )
+    }
+
+    @Test
+    fun `recent uncensored catalog entries use public LiteRT bundles`() {
+        val ids = LocalModelManager.AVAILABLE_MODELS.map { it.id }.toSet()
+        assertTrue("gemma4-e4b-olekk-abliterated" in ids)
+        assertTrue("huihui-gemma4-e2b-abliterated-vision" in ids)
+        assertTrue("huihui-gemma4-e4b-abliterated-vision" in ids)
+        assertFalse(LocalModelManager.AVAILABLE_MODELS.any { it.url.isBlank() || !it.fileName.endsWith(".litertlm") })
+    }
+
 }

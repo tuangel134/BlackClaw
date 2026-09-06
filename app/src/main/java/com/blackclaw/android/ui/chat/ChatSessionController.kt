@@ -578,13 +578,22 @@ class ChatSessionController(
                         ?: throw IllegalStateException("El modelo local aún está cargando")
                     val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
                     val modelTag = localModelTag(modelPath)
-                    val responseText = try {
-                        currentConversation.sendMessage(
-                            Contents.of(Content.ImageBytes(image.bytes), Content.Text(prompt))
-                        ).contents?.toString()?.trim().orEmpty()
-                    } catch (visionError: Exception) {
-                        XLog.w(TAG, "Local model has no usable vision path; using OCR fallback: ${visionError.message}")
+                    val visionEnabled = LocalModelRuntime.currentVisionEnabled(modelPath)
+                    val responseText = if (visionEnabled == false) {
+                        // Text-only LiteRT-LM bundles are valid local LLMs. Do not send
+                        // ImageBytes to a conversation whose engine intentionally has no
+                        // vision executor; OCR is the supported image fallback.
+                        XLog.i(TAG, "Local model is text-only; using OCR image fallback")
                         currentConversation.sendMessage(prompt)?.contents?.toString()?.trim().orEmpty()
+                    } else {
+                        try {
+                            currentConversation.sendMessage(
+                                Contents.of(Content.ImageBytes(image.bytes), Content.Text(prompt))
+                            ).contents?.toString()?.trim().orEmpty()
+                        } catch (visionError: Exception) {
+                            XLog.w(TAG, "Local model has no usable vision path; using OCR fallback: ${visionError.message}")
+                            currentConversation.sendMessage(prompt)?.contents?.toString()?.trim().orEmpty()
+                        }
                     }.ifBlank { "(no response)" }
                     recordSharedAssistant(responseText)
                     postToMain {

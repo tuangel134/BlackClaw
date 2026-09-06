@@ -5,7 +5,7 @@ subsistema y publicar cambios sin adivinar rutas. En este documento, `REPO`
 significa la carpeta raíz donde clonaste BlackClaw; evita guardar rutas personales
 o específicas de una máquina en documentación versionada.
 
-Estado documentado: `v1.3.1`, rama `main`, paquete Android
+Estado documentado: `v1.3.2`, rama `main`, paquete Android
 `com.blackclaw.android`, `minSdk 28`, `targetSdk 36`, JDK 17.
 
 > No guardes tokens, contraseñas, keystores ni `local.properties` en este archivo.

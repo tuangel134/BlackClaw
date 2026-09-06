@@ -229,7 +229,12 @@ class LlmConfigActivity : BaseActivity() {
             info.addView(nameTV)
 
             val descTV = TextView(this).apply {
-                val baseText = "${model.sizeBytes / 1_000_000} MB · ${model.minRamGb}GB+ RAM"
+                val modality = when (model.visionSupport) {
+                    LocalModelManager.VisionSupport.YES -> "Visión + texto"
+                    LocalModelManager.VisionSupport.NO -> "Solo texto · imágenes por OCR"
+                    LocalModelManager.VisionSupport.UNKNOWN -> "Modalidad detectada al cargar"
+                }
+                val baseText = "${model.sizeBytes / 1_000_000} MB · ${model.minRamGb}GB+ RAM · $modality"
                 text = if (supportedOnDevice) baseText else "$baseText · This phone reports ${deviceSupport.deviceRamGb}GB"
                 textSize = 12f
                 setTextColor(if (supportedOnDevice) Color.parseColor("#8b949e") else getColor(R.color.colorWarningPrimary))
