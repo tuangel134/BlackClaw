@@ -4,14 +4,18 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.cardview.widget.CardView
@@ -27,7 +31,12 @@ import com.blackclaw.android.agent.ModelPricing
 import com.blackclaw.android.agent.llm.ActiveModelMode
 import com.blackclaw.android.agent.llm.AutomaticModelManager
 import com.blackclaw.android.agent.llm.ExternalModelDiscovery
+import com.blackclaw.android.agent.llm.LocalContextBudget
 import com.blackclaw.android.agent.llm.LocalModelManager
+import com.blackclaw.android.agent.llm.LocalModelPreset
+import com.blackclaw.android.agent.llm.LocalModelRuntime
+import com.blackclaw.android.agent.llm.LocalModelTuning
+import com.blackclaw.android.agent.llm.LocalModelTuningStore
 import com.blackclaw.android.agent.llm.ModelConfigRepository
 import com.blackclaw.android.base.BaseActivity
 import com.blackclaw.android.ui.chat.ThemeManager
@@ -87,6 +96,7 @@ class LlmConfigActivity : BaseActivity() {
         val defaultLocalName = findViewById<TextView>(R.id.tvDefaultLocalName)
         val defaultLocalMeta = findViewById<TextView>(R.id.tvDefaultLocalMeta)
         val defaultLocalStatus = findViewById<TextView>(R.id.tvDefaultLocalStatus)
+        val configureLocalParams = findViewById<TextView>(R.id.btnConfigureLocalParams)
         val defaultCloudName = findViewById<TextView>(R.id.tvDefaultCloudName)
         val defaultCloudMeta = findViewById<TextView>(R.id.tvDefaultCloudMeta)
         val defaultCloudStatus = findViewById<TextView>(R.id.tvDefaultCloudStatus)
@@ -167,6 +177,17 @@ class LlmConfigActivity : BaseActivity() {
             }
         )
 
+        if (resolvedConfig.local.isConfigured) {
+            configureLocalParams.visibility = View.VISIBLE
+            configureLocalParams.setOnClickListener {
+                showLocalTuningDialog(resolvedConfig.local.modelPath, resolvedConfig.local.displayName)
+            }
+            val tuning = LocalModelTuningStore.get(resolvedConfig.local.modelPath)
+            defaultLocalMeta.text = "${defaultLocalState.metaText} · ${tuning.contextWindowTokens} ctx · ${tuning.maxOutputTokens} out"
+        } else {
+            configureLocalParams.visibility = View.GONE
+        }
+
         if (resolvedConfig.defaultCloud.isConfigured) {
             defaultCloudName.text = resolvedConfig.defaultCloud.modelName
             defaultCloudMeta.text = "${resolvedConfig.defaultCloud.provider.displayName} · Cloud"
@@ -242,6 +263,17 @@ class LlmConfigActivity : BaseActivity() {
             info.addView(descTV)
 
             row.addView(info)
+
+            if (downloaded && resolvedLocalPath != null) {
+                row.addView(TextView(this).apply {
+                    text = "⚙"
+                    textSize = 16f
+                    contentDescription = "Configurar parámetros de ${model.displayName}"
+                    setTextColor(getColor(R.color.colorBrandPrimary))
+                    setPadding(dp(8), dp(6), dp(8), dp(6))
+                    setOnClickListener { showLocalTuningDialog(resolvedLocalPath, model.displayName) }
+                })
+            }
 
             // Action button
             if (downloaded) {
@@ -504,6 +536,153 @@ class LlmConfigActivity : BaseActivity() {
         findViewById<TextView>(R.id.tvStorageInfo).text = "$count model${if (count != 1) "s" else ""} · ${mbUsed} MB"
         findViewById<ProgressBar>(R.id.progressStorage).progress = pct
         findViewById<TextView>(R.id.tvStorageDetail).text = "${mbUsed} MB of ${allocated} MB allocated"
+    }
+
+    private fun showLocalTuningDialog(modelPath: String, displayName: String) {
+        var current = LocalModelTuningStore.get(modelPath)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+
+        fun addLabel(text: String) = TextView(this).also {
+            it.text = text
+            it.textSize = 12f
+            it.setTextColor(Color.parseColor("#8b949e"))
+            it.setPadding(0, dp(8), 0, dp(3))
+            container.addView(it)
+        }
+
+        fun addField(label: String, value: String, inputType: Int): EditText {
+            addLabel(label)
+            return EditText(this).also {
+                it.setText(value)
+                it.inputType = inputType
+                it.setSingleLine(true)
+                it.setTextColor(ThemeManager.getColors().aiText)
+                it.setHintTextColor(Color.parseColor("#6e7681"))
+                it.background = getDrawable(R.drawable.bg_edit_text)
+                it.setPadding(dp(12), dp(9), dp(12), dp(9))
+                container.addView(it, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ))
+            }
+        }
+
+        addLabel("Preset")
+        val presetLabels = listOf("Agente / preciso", "Balanceado", "Creativo", "Determinista", "Personalizado")
+        val presetValues = listOf(
+            LocalModelPreset.PRECISE,
+            LocalModelPreset.BALANCED,
+            LocalModelPreset.CREATIVE,
+            LocalModelPreset.DETERMINISTIC,
+            LocalModelPreset.CUSTOM,
+        )
+        val presetSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@LlmConfigActivity, android.R.layout.simple_spinner_dropdown_item, presetLabels)
+            setSelection(presetValues.indexOf(current.preset).coerceAtLeast(0))
+        }
+        container.addView(presetSpinner)
+
+        val temp = addField("Temperatura · 0.0–2.0", current.temperature.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val topP = addField("Top-P · 0.01–1.0", current.topP.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+        val topK = addField("Top-K · 1–64", current.topK.toString(), InputType.TYPE_CLASS_NUMBER)
+        val seed = addField("Seed · 0 = predeterminado", current.seed.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED)
+        val maxOutput = addField("Máx. tokens de respuesta · 64–4096", current.maxOutputTokens.toString(), InputType.TYPE_CLASS_NUMBER)
+        val context = addField("Contexto / KV-cache · 2048–32768", current.contextWindowTokens.toString(), InputType.TYPE_CLASS_NUMBER)
+        val autoCompact = CheckBox(this).apply {
+            text = "Compactar automáticamente antes de llenar el contexto"
+            isChecked = current.autoCompactContext
+            setTextColor(ThemeManager.getColors().aiText)
+            setPadding(0, dp(10), 0, dp(4))
+        }
+        container.addView(autoCompact)
+        container.addView(TextView(this).apply {
+            text = "BlackClaw reserva los tokens de respuesta + ${LocalContextBudget.SAFETY_TOKENS} tokens de seguridad. Subir el contexto aumenta el uso de RAM y el modelo debe soportarlo."
+            textSize = 11f
+            setTextColor(Color.parseColor("#8b949e"))
+            setPadding(0, dp(4), 0, dp(8))
+        })
+
+        var syncingPreset = false
+        presetSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (syncingPreset) return
+                val selected = presetValues[position]
+                if (selected == LocalModelPreset.CUSTOM) return
+                val preset = LocalModelTuning.preset(selected, context.text.toString().toIntOrNull() ?: current.contextWindowTokens)
+                temp.setText(preset.temperature.toString())
+                topP.setText(preset.topP.toString())
+                topK.setText(preset.topK.toString())
+                seed.setText(preset.seed.toString())
+                maxOutput.setText(preset.maxOutputTokens.toString())
+            }
+        }
+
+        val scroll = ScrollView(this).apply { addView(container) }
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle(displayName)
+            .setView(scroll)
+            .setNegativeButton("Cancelar", null)
+            .setNeutralButton("Restaurar", null)
+            .setPositiveButton("Guardar", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val defaults = LocalModelTuning()
+                syncingPreset = true
+                presetSpinner.setSelection(presetValues.indexOf(defaults.preset))
+                syncingPreset = false
+                temp.setText(defaults.temperature.toString())
+                topP.setText(defaults.topP.toString())
+                topK.setText(defaults.topK.toString())
+                seed.setText(defaults.seed.toString())
+                maxOutput.setText(defaults.maxOutputTokens.toString())
+                context.setText(defaults.contextWindowTokens.toString())
+                autoCompact.isChecked = true
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selectedPreset = presetValues[presetSpinner.selectedItemPosition]
+                val parsed = runCatching {
+                    LocalModelTuning(
+                        preset = selectedPreset,
+                        temperature = temp.text.toString().toDouble(),
+                        topP = topP.text.toString().toDouble(),
+                        topK = topK.text.toString().toInt(),
+                        seed = seed.text.toString().toInt(),
+                        maxOutputTokens = maxOutput.text.toString().toInt(),
+                        contextWindowTokens = context.text.toString().toInt(),
+                        autoCompactContext = autoCompact.isChecked,
+                    )
+                }.getOrElse {
+                    Toast.makeText(this, "Revisa los valores numéricos", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                val normalized = parsed.normalized()
+                if (!LocalModelTuningStore.save(modelPath, normalized)) {
+                    Toast.makeText(this, "No se pudieron guardar los parámetros", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                // maxNumTokens is an EngineConfig value, so an already loaded engine
+                // must be recreated for a changed context window to take effect.
+                if (ModelConfigRepository.snapshot().local.modelPath == modelPath) {
+                    LocalModelRuntime.resetSharedEngine()
+                    ClawApplication.appViewModelInstance.updateAgentConfig()
+                    ClawApplication.appViewModelInstance.initAgent()
+                }
+                Toast.makeText(
+                    this,
+                    "Guardado: ${normalized.contextWindowTokens} contexto · ${normalized.maxOutputTokens} salida",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                dialog.dismiss()
+                recreate()
+            }
+        }
+        dialog.show()
     }
 
     private fun setupCloudLlm(tc: ThemeManager.ChatColors) {

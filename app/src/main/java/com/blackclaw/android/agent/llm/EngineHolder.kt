@@ -31,6 +31,7 @@ object EngineHolder {
     private var currentModelPath: String? = null
     private var currentBackendLabel: String? = null
     private var currentVisionEnabled: Boolean? = null
+    private var currentMaxNumTokens: Int? = null
 
     private fun backendLabel(backend: Backend): String =
         if (backend is Backend.CPU) "CPU" else if (backend is Backend.GPU) "GPU" else backend.javaClass.simpleName
@@ -45,18 +46,24 @@ object EngineHolder {
      */
     @Synchronized
     @JvmOverloads
-    fun getOrCreate(modelPath: String, cacheDir: String, backend: Backend = Backend.CPU()): Engine {
+    fun getOrCreate(
+        modelPath: String,
+        cacheDir: String,
+        backend: Backend = Backend.CPU(),
+        maxNumTokens: Int? = LocalModelTuningStore.get(modelPath).contextWindowTokens,
+    ): Engine {
         val existing = engine
         val requestedBackendLabel = backendLabel(backend)
-        if (existing != null && currentModelPath == modelPath && currentBackendLabel == requestedBackendLabel) {
-            XLog.d(TAG, "getOrCreate: reusing engine for $modelPath (${currentBackendLabel ?: "unknown"}, vision=${currentVisionEnabled ?: false})")
+        if (existing != null && currentModelPath == modelPath &&
+            currentBackendLabel == requestedBackendLabel && currentMaxNumTokens == maxNumTokens) {
+            XLog.d(TAG, "getOrCreate: reusing engine for $modelPath (${currentBackendLabel ?: "unknown"}, vision=${currentVisionEnabled ?: false}, context=${currentMaxNumTokens ?: "model"})")
             return existing
         }
 
         if (existing != null) {
             XLog.i(
                 TAG,
-                "getOrCreate: runtime changed (model=$currentModelPath/${currentBackendLabel ?: "?"} -> $modelPath/$requestedBackendLabel), closing old engine"
+                "getOrCreate: runtime changed (model=$currentModelPath/${currentBackendLabel ?: "?"}/${currentMaxNumTokens ?: "model"} -> $modelPath/$requestedBackendLabel/${maxNumTokens ?: "model"}), closing old engine"
             )
             try {
                 existing.close()
@@ -67,6 +74,7 @@ object EngineHolder {
             currentModelPath = null
             currentBackendLabel = null
             currentVisionEnabled = null
+            currentMaxNumTokens = null
         }
 
         val catalogVision = LocalModelManager.visionSupportForPath(modelPath)
@@ -87,6 +95,7 @@ object EngineHolder {
                     cacheDir = cacheDir,
                     backend = backend,
                     enableVision = tryVisionFirst,
+                    maxNumTokens = maxNumTokens,
                 ) to tryVisionFirst
             } catch (visionError: Exception) {
                 if (!tryVisionFirst || !isMissingVisionEncoder(visionError)) throw visionError
@@ -100,6 +109,7 @@ object EngineHolder {
                     cacheDir = cacheDir,
                     backend = backend,
                     enableVision = false,
+                    maxNumTokens = maxNumTokens,
                 ) to false
             }
 
@@ -111,6 +121,7 @@ object EngineHolder {
             currentModelPath = modelPath
             currentBackendLabel = requestedBackendLabel
             currentVisionEnabled = created.second
+            currentMaxNumTokens = maxNumTokens
             XLog.i(
                 TAG,
                 "getOrCreate: engine ready for $modelPath ($currentBackendLabel, vision=${created.second})"
@@ -132,12 +143,13 @@ object EngineHolder {
         cacheDir: String,
         backend: Backend,
         enableVision: Boolean,
+        maxNumTokens: Int?,
     ): Engine {
         val engineConfig = EngineConfig(
             modelPath = modelPath,
             backend = backend,
             visionBackend = if (enableVision) backend else null,
-            maxNumTokens = 8192,
+            maxNumTokens = maxNumTokens,
             cacheDir = cacheDir,
         )
         val candidate = Engine(engineConfig)
@@ -189,6 +201,7 @@ object EngineHolder {
         currentModelPath = null
         currentBackendLabel = null
         currentVisionEnabled = null
+        currentMaxNumTokens = null
         XLog.i(TAG, "close: done")
     }
 

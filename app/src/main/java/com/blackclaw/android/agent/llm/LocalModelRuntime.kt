@@ -39,13 +39,18 @@ object LocalModelRuntime {
         preferCpu: Boolean = false,
     ): LocalEngineLease {
         val shouldUseCpu = LocalBackendHealth.shouldForceCpu(preferCpu)
+        val tuning = LocalModelTuningStore.get(modelPath)
         if (shouldUseCpu) {
-            val engine = EngineHolder.getOrCreate(modelPath, context.cacheDir.path, Backend.CPU())
+            val engine = EngineHolder.getOrCreate(
+                modelPath, context.cacheDir.path, Backend.CPU(), tuning.contextWindowTokens
+            )
             return LocalEngineLease(engine = engine, backendLabel = "CPU")
         }
 
         return try {
-            val engine = EngineHolder.getOrCreate(modelPath, context.cacheDir.path, Backend.GPU())
+            val engine = EngineHolder.getOrCreate(
+                modelPath, context.cacheDir.path, Backend.GPU(), tuning.contextWindowTokens
+            )
             LocalEngineLease(engine = engine, backendLabel = EngineHolder.getBackendLabel(modelPath) ?: "GPU")
         } catch (e: Exception) {
             if (!isGpuBackendFailure(e)) throw e
@@ -57,7 +62,10 @@ object LocalModelRuntime {
 
     fun forceCpuEngine(context: Context, modelPath: String): LocalEngineLease {
         resetSharedEngine()
-        val engine = EngineHolder.getOrCreate(modelPath, context.cacheDir.path, Backend.CPU())
+        val tuning = LocalModelTuningStore.get(modelPath)
+        val engine = EngineHolder.getOrCreate(
+            modelPath, context.cacheDir.path, Backend.CPU(), tuning.contextWindowTokens
+        )
         return LocalEngineLease(engine = engine, backendLabel = "CPU")
     }
 
@@ -139,16 +147,14 @@ object LocalModelRuntime {
         temperature: Double = 0.3,
         preferCpu: Boolean = false,
     ): LocalSingleShotResult {
+        val tuning = LocalModelTuningStore.get(modelPath)
         val lease = openConversation(
             context = context,
             modelPath = modelPath,
             conversationConfig = ConversationConfig(
                 systemInstruction = Contents.of(systemPrompt),
-                samplerConfig = SamplerConfig(
-                    topK = 64,
-                    topP = 0.95,
-                    temperature = temperature,
-                )
+                samplerConfig = tuning.samplerConfig(temperatureOverride = temperature),
+                maxOutputToken = tuning.maxOutputTokens,
             ),
             preferCpu = preferCpu,
         )

@@ -521,6 +521,12 @@ PR guidelines, and conventions.
 
 ## Changelog
 
+### v1.3.3
+
+- Fixed OpenAI-compatible chat templates such as Qwen's Jinja template rejecting conversations after a cloud model switch: system instructions are now merged and kept at the beginning of every request.
+- Added per-model local generation controls for presets, temperature, top-p, top-k, seed, output budget, context/KV-cache size, and automatic context compaction.
+- Added local context guards that recreate the conversation before overflow and preserve recent chat context when a long conversation approaches its configured budget.
+
 ### v1.3.2
 
 - Fixed local **text-only LiteRT-LM models** failing at startup with `TF_LITE_VISION_ENCODER not found`: BlackClaw now detects/probes model modality, retries the same backend without `visionBackend` when the optional encoder is absent, and releases partially initialized native engines before retrying.

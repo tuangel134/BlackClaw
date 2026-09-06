@@ -12,8 +12,11 @@ import dev.langchain4j.data.message.UserMessage
 import com.blackclaw.android.agent.ModelPricing
 import com.blackclaw.android.agent.llm.LlmClient
 import com.blackclaw.android.agent.llm.LlmSessionManager
+import com.blackclaw.android.agent.llm.LocalContextBudget
 import com.blackclaw.android.agent.llm.LocalModelManager
 import com.blackclaw.android.agent.llm.LocalModelRuntime
+import com.blackclaw.android.agent.llm.LocalModelTuning
+import com.blackclaw.android.agent.llm.LocalModelTuningStore
 import com.blackclaw.android.agent.llm.ModelConfigRepository
 import com.blackclaw.android.utils.XLog
 import com.google.ai.edge.litertlm.Contents
@@ -65,6 +68,7 @@ class ChatSessionController(
     private var localUiGeneration: Long = 0
     @Volatile private var localLoadInProgress: Boolean = false
     private var suppressNextCloudSwitchMessage: Boolean = false
+    private var localConversationApproxChars: Int = 0
 
     fun isModelReady(): Boolean = isModelReady
 
@@ -105,10 +109,8 @@ class ChatSessionController(
                 if (previousModel == null || cloudHistory.isEmpty()) {
                     rebuildCloudHistoryFromVisibleMessages()
                 } else if (previousModel != cloudConfig.modelName) {
-                    cloudHistory.add(
-                        SystemMessage.from(
-                            "The user has switched from $previousModel to ${cloudConfig.modelName}. Continue the conversation naturally."
-                        )
+                    appendCloudSystemInstruction(
+                        "The user has switched from $previousModel to ${cloudConfig.modelName}. Continue the conversation naturally."
                     )
                     if (suppressNextCloudSwitchMessage) {
                         suppressNextCloudSwitchMessage = false
@@ -432,11 +434,12 @@ class ChatSessionController(
                         onChatReply?.invoke(responseText)
                     }
                 } else {
-                    val currentConversation = conversation
+                    var currentConversation = conversation
                     if (currentConversation == null || !isModelReady) {
                         throw IllegalStateException("Local model is still loading. Try again in a moment.")
                     }
                     val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
+                    currentConversation = prepareLocalConversationForInput(modelPath, text, currentConversation)
                     val localModelTag = localModelTag(modelPath)
                     val streamIdx = uiState.messages.indexOfLast {
                         it.isPending }
@@ -446,10 +449,22 @@ class ChatSessionController(
                             postToMain { setStreamingText(streamIdx, soFar, localModelTag) }
                         }
                     } catch (se: Exception) {
-                        // Some runtime builds may not support async streaming — fall back.
-                        XLog.w(TAG, "local streaming failed, sync fallback: ${se.message}")
-                        currentConversation.sendMessage(text)?.toString() ?: sb.toString()
+                        if (LocalContextBudget.isTokenOverflow(se)) {
+                            XLog.w(TAG, "Local context overflow detected; rebuilding compact conversation and retrying once")
+                            currentConversation = prepareLocalConversationForInput(
+                                modelPath = modelPath,
+                                incomingText = text,
+                                current = currentConversation,
+                                force = true,
+                            )
+                            currentConversation.sendMessage(text)?.toString() ?: sb.toString()
+                        } else {
+                            // Some runtime builds may not support async streaming — fall back.
+                            XLog.w(TAG, "local streaming failed, sync fallback: ${se.message}")
+                            currentConversation.sendMessage(text)?.toString() ?: sb.toString()
+                        }
                     }.ifBlank { "(no response)" }
+                    localConversationApproxChars += text.length + responseText.length + 32
                     recordSharedAssistant(responseText)
                     val inputTokensEst = text.length / 4 + 1
                     val outputTokensEst = responseText.length / 4 + 1
@@ -574,9 +589,10 @@ class ChatSessionController(
                         onChatReply?.invoke(responseText)
                     }
                 } else {
-                    val currentConversation = conversation
+                    var currentConversation = conversation
                         ?: throw IllegalStateException("El modelo local aún está cargando")
                     val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
+                    currentConversation = prepareLocalConversationForInput(modelPath, prompt, currentConversation)
                     val modelTag = localModelTag(modelPath)
                     val visionEnabled = LocalModelRuntime.currentVisionEnabled(modelPath)
                     val responseText = if (visionEnabled == false) {
@@ -595,6 +611,7 @@ class ChatSessionController(
                             currentConversation.sendMessage(prompt)?.contents?.toString()?.trim().orEmpty()
                         }
                     }.ifBlank { "(no response)" }
+                    localConversationApproxChars += prompt.length + responseText.length + 32
                     recordSharedAssistant(responseText)
                     postToMain {
                         setStreamingText(streamIdx, responseText, modelTag)
@@ -711,10 +728,7 @@ class ChatSessionController(
                     val lease = LocalModelRuntime.openConversation(
                         context = activity,
                         modelPath = modelPath,
-                        conversationConfig = ConversationConfig(
-                            systemInstruction = Contents.of(com.blackclaw.android.agent.PromptUtils.applyGlobalPrompt(systemPrompt)),
-                            samplerConfig = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.7)
-                        )
+                        conversationConfig = buildConversationConfig(systemPrompt)
                     )
                     engine = lease.engine
                     conversation = lease.conversation
@@ -868,15 +882,93 @@ class ChatSessionController(
     }
 
     private fun buildConversationConfig(systemPrompt: String? = null): ConversationConfig {
+        val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
+        val tuning = LocalModelTuningStore.get(modelPath)
         val withShared = buildString {
             append(systemPrompt ?: BASE_SYSTEM_PROMPT)
             append(sharedContextSuffix(isLocal = true))
         }
-        val finalPrompt = com.blackclaw.android.agent.PromptUtils.applyGlobalPrompt(withShared)
+        val unbounded = com.blackclaw.android.agent.PromptUtils.applyGlobalPrompt(withShared)
+        val finalPrompt = fitLocalSystemPrompt(unbounded, tuning)
+        localConversationApproxChars = finalPrompt.length
         return ConversationConfig(
             systemInstruction = Contents.of(finalPrompt),
-            samplerConfig = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.7)
+            samplerConfig = tuning.samplerConfig(),
+            maxOutputToken = tuning.maxOutputTokens,
         )
+    }
+
+    private fun fitLocalSystemPrompt(prompt: String, tuning: LocalModelTuning): String {
+        val maxChars = LocalContextBudget.compactContextCharBudget(tuning)
+        if (prompt.length <= maxChars) return prompt
+        val headChars = (maxChars * 0.68).toInt()
+        val tailChars = (maxChars - headChars - 80).coerceAtLeast(0)
+        return buildString(maxChars) {
+            append(prompt.take(headChars))
+            append("\n\n[… contexto local compactado automáticamente …]\n\n")
+            if (tailChars > 0) append(prompt.takeLast(tailChars))
+        }.take(maxChars)
+    }
+
+    private fun buildLocalRecentContext(incomingText: String, tuning: LocalModelTuning): String {
+        val budget = LocalContextBudget.compactContextCharBudget(tuning)
+        val meaningful = uiState.messages.filter {
+            (it.role == ChatMessage.Role.USER || it.role == ChatMessage.Role.ASSISTANT) && !it.isPending
+        }.let { list ->
+            if (list.lastOrNull()?.role == ChatMessage.Role.USER && list.lastOrNull()?.content == incomingText) list.dropLast(1) else list
+        }.takeLast(8)
+
+        val recent = meaningful.joinToString("\n") { message ->
+            val role = if (message.role == ChatMessage.Role.USER) "User" else "Assistant"
+            "$role: ${message.content.take(1800)}"
+        }
+        return buildString {
+            append(BASE_SYSTEM_PROMPT)
+            if (recent.isNotBlank()) {
+                append("\n\nRecent conversation retained after automatic context compaction:\n")
+                append(recent)
+            }
+            append("\n\nContinue naturally. Do not mention the compaction unless the user asks.")
+        }.take(budget)
+    }
+
+    private fun prepareLocalConversationForInput(
+        modelPath: String,
+        incomingText: String,
+        current: Conversation,
+        force: Boolean = false,
+    ): Conversation {
+        val tuning = LocalModelTuningStore.get(modelPath)
+        val incomingTokens = LocalContextBudget.estimateTokensFromChars(incomingText.length)
+        if (incomingTokens >= LocalContextBudget.inputBudgetTokens(tuning)) {
+            throw IllegalArgumentException(
+                "El mensaje por sí solo es demasiado grande para el contexto local de ${tuning.contextWindowTokens} tokens. " +
+                    "Aumenta Contexto / KV-cache en ⚙ Parámetros del modelo o reduce el mensaje."
+            )
+        }
+        if (!force && !LocalContextBudget.shouldRecreate(
+                currentApproxChars = localConversationApproxChars,
+                incomingChars = incomingText.length,
+                tuning = tuning,
+            )) {
+            return current
+        }
+
+        XLog.i(
+            TAG,
+            "Local context guard: recreating conversation (estimated=${LocalContextBudget.estimateTokensFromChars(localConversationApproxChars + incomingText.length)} tokens, budget=${LocalContextBudget.inputBudgetTokens(tuning)})"
+        )
+        try { current.close() } catch (_: Exception) {}
+        val compactPrompt = buildLocalRecentContext(incomingText, tuning)
+        val lease = LocalModelRuntime.openConversation(
+            context = activity,
+            modelPath = modelPath,
+            conversationConfig = buildConversationConfig(compactPrompt),
+        )
+        engine = lease.engine
+        conversation = lease.conversation
+        isModelReady = true
+        return lease.conversation
     }
 
     private fun buildRestoredSystemPrompt(
@@ -919,6 +1011,20 @@ class ChatSessionController(
         if (cloudHistory.isEmpty()) {
             rebuildCloudHistoryFromVisibleMessages()
         }
+    }
+
+    /** Keep cloud histories compatible with strict chat templates such as Qwen's. */
+    private fun appendCloudSystemInstruction(instruction: String) {
+        val systemTexts = cloudHistory
+            .filterIsInstance<SystemMessage>()
+            .map { it.text().trim() }
+            .filter { it.isNotEmpty() }
+        val nonSystemMessages = cloudHistory.filterNot { it is SystemMessage }
+        cloudHistory.clear()
+        cloudHistory.add(
+            SystemMessage.from((systemTexts + instruction.trim()).filter { it.isNotEmpty() }.joinToString("\n\n"))
+        )
+        cloudHistory.addAll(nonSystemMessages)
     }
 
     /**

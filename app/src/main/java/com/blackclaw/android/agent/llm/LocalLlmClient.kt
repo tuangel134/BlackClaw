@@ -39,6 +39,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
     private var processedMessageCount = 0
 
     private var gpuFailed = false
+    private var conversationApproxChars = 0
 
     private fun ensureEngine() {
         val modelPath = config.baseUrl
@@ -80,6 +81,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
         conversation = null
         processedMessageCount = 0
         sendCount = 0
+        conversationApproxChars = 0
         engine = LocalModelRuntime.forceCpuEngine(ClawApplication.instance, config.baseUrl).engine
     }
 
@@ -111,14 +113,12 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
 
         XLog.i(TAG, "createConversation: ${nativeTools.size} native tools")
 
+        val tuning = LocalModelTuningStore.get(config.baseUrl)
         val convConfig = ConversationConfig(
             systemInstruction = Contents.of(systemPrompt),
             tools = nativeTools,
-            samplerConfig = SamplerConfig(
-                topK = 64,
-                topP = 0.95,
-                temperature = config.temperature
-            ),
+            samplerConfig = tuning.samplerConfig(),
+            maxOutputToken = tuning.maxOutputTokens,
             automaticToolCalling = false  // We handle execution in DefaultAgentService
         )
 
@@ -131,6 +131,9 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
         engine = lease.engine
         conversation = lease.conversation
         processedMessageCount = 0
+        conversationApproxChars = systemPrompt.length + toolSpecs.sumOf { spec ->
+            spec.name().length + (spec.description()?.length ?: 0) + runCatching { GSON.toJson(spec.parameters()).length }.getOrDefault(0)
+        }
     }
 
     private var sendCount = 0
@@ -139,8 +142,18 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
         return try {
             chatInternal(messages, toolSpecs)
         } catch (e: Exception) {
-            // GPU inference failure (OpenCL not found) — fallback to CPU and retry once
-            if (!gpuFailed && LocalModelRuntime.isGpuBackendFailure(e)) {
+            if (LocalContextBudget.isTokenOverflow(e)) {
+                val tuning = LocalModelTuningStore.get(config.baseUrl)
+                val baseSystem = messages.filterIsInstance<SystemMessage>().firstOrNull()?.text()
+                    ?: config.systemPrompt.ifEmpty { LOCAL_SYSTEM_PROMPT }
+                val compactSystem = compactAgentSystemPrompt(baseSystem, messages.dropLast(1), tuning)
+                XLog.w(TAG, "chat: native token overflow; retrying once with compact task context")
+                createConversation(compactSystem, toolSpecs)
+                processedMessageCount = (messages.size - 1).coerceAtLeast(0)
+                sendCount = 0
+                chatInternal(messages, toolSpecs)
+            } else if (!gpuFailed && LocalModelRuntime.isGpuBackendFailure(e)) {
+                // GPU inference failure (OpenCL not found) — fallback to CPU and retry once
                 XLog.w(TAG, "chat: GPU inference failed, retrying with CPU: ${e.message}")
                 fallbackToCpu()
                 chatInternal(messages, toolSpecs)
@@ -150,8 +163,58 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
         }
     }
 
+    private fun compactAgentSystemPrompt(
+        baseSystemPrompt: String,
+        messages: List<ChatMessage>,
+        tuning: LocalModelTuning,
+    ): String {
+        val budget = LocalContextBudget.compactContextCharBudget(tuning)
+        val recent = messages.filterNot { it is SystemMessage }.takeLast(5).joinToString("\n") { msg ->
+            when (msg) {
+                is UserMessage -> "User: ${msg.singleText().take(1800)}"
+                is ToolExecutionResultMessage -> "Tool ${msg.toolName()}: ${msg.text().take(1200)}"
+                is AiMessage -> "Assistant: ${msg.text()?.take(1400).orEmpty()}"
+                else -> msg.toString().take(1200)
+            }
+        }
+        val header = baseSystemPrompt.take((budget * 2 / 3).coerceAtLeast(800))
+        return buildString {
+            append(header)
+            if (recent.isNotBlank()) {
+                append("\n\nRecent task context retained after local context compaction:\n")
+                append(recent.take((budget - length).coerceAtLeast(0)))
+            }
+        }.take(budget)
+    }
+
+    private fun prepareAgentContextIfNeeded(messages: List<ChatMessage>, toolSpecs: List<ToolSpecification>) {
+        val tuning = LocalModelTuningStore.get(config.baseUrl)
+        if (!tuning.autoCompactContext) return
+        val unprocessed = messages.drop(processedMessageCount.coerceAtMost(messages.size))
+        val incomingChars = unprocessed.sumOf {
+            when (it) {
+                is UserMessage -> it.singleText().length
+                is ToolExecutionResultMessage -> it.text().length
+                is AiMessage -> it.text()?.length ?: 0
+                else -> 0
+            }
+        }
+        if (!LocalContextBudget.shouldRecreate(conversationApproxChars, incomingChars, tuning)) return
+
+        val baseSystem = messages.filterIsInstance<SystemMessage>().firstOrNull()?.text()
+            ?: config.systemPrompt.ifEmpty { LOCAL_SYSTEM_PROMPT }
+        val compactSystem = compactAgentSystemPrompt(baseSystem, messages.dropLast(1), tuning)
+        XLog.i(TAG, "Context guard: recreating local agent conversation before overflow")
+        createConversation(compactSystem, toolSpecs)
+        // Keep only the newest message as an incremental send; prior context was folded
+        // into compactSystem above.
+        processedMessageCount = (messages.size - 1).coerceAtLeast(0)
+        sendCount = 0
+    }
+
     private fun chatInternal(messages: List<ChatMessage>, toolSpecs: List<ToolSpecification>): LlmResponse {
         ensureEngine()
+        prepareAgentContextIfNeeded(messages, toolSpecs)
 
         // Detect new task or recreate needed
         if (processedMessageCount == 0 || messages.size < processedMessageCount || sendCount >= 8) {
@@ -193,6 +256,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                         }
                     }
                     sendCount++
+                    conversationApproxChars += msg.singleText().length + (lastResponse?.toString()?.length ?: 0)
                 }
                 is AiMessage -> { /* already in conversation state */ }
                 is ToolExecutionResultMessage -> {
@@ -215,6 +279,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                         }
                     }
                     sendCount++
+                    conversationApproxChars += toolResultText.length + (lastResponse?.toString()?.length ?: 0)
                 }
             }
         }

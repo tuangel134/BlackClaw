@@ -4,6 +4,7 @@ import com.blackclaw.android.agent.AgentConfig
 import com.blackclaw.android.agent.langchain.http.OkHttpClientBuilderAdapter
 import dev.langchain4j.agent.tool.ToolSpecification
 import dev.langchain4j.data.message.ChatMessage
+import dev.langchain4j.data.message.SystemMessage
 import dev.langchain4j.model.chat.ChatModel
 import dev.langchain4j.model.chat.StreamingChatModel
 import dev.langchain4j.model.chat.request.ChatRequest
@@ -57,7 +58,7 @@ class OpenAiLlmClient(
 
     override fun chat(messages: List<ChatMessage>, toolSpecs: List<ToolSpecification>): LlmResponse {
         val request = ChatRequest.builder()
-            .messages(messages)
+            .messages(normalizeMessagesForOpenAi(messages))
             .toolSpecifications(toolSpecs)
             .maxOutputTokens(MAX_OUTPUT_TOKENS)
             .build()
@@ -71,7 +72,7 @@ class OpenAiLlmClient(
         listener: StreamingListener
     ): LlmResponse {
         val request = ChatRequest.builder()
-            .messages(messages)
+            .messages(normalizeMessagesForOpenAi(messages))
             .toolSpecifications(toolSpecs)
             .maxOutputTokens(MAX_OUTPUT_TOKENS)
             .build()
@@ -107,6 +108,28 @@ class OpenAiLlmClient(
         errorRef.get()?.let { throw RuntimeException("OpenAI streaming error", it) }
         return resultRef.get()
     }
+
+}
+
+/**
+ * Some OpenAI-compatible chat templates (including Qwen's Jinja template)
+ * only accept a system message at index zero. Model switching and recovery
+ * notices can otherwise leave a second system message in the middle of the
+ * conversation history. Merge all system instructions and put the result
+ * first without mutating the caller's history.
+ */
+internal fun normalizeMessagesForOpenAi(messages: List<ChatMessage>): List<ChatMessage> {
+    val systemTexts = messages
+        .filterIsInstance<SystemMessage>()
+        .map { it.text().trim() }
+        .filter { it.isNotEmpty() }
+    if (systemTexts.isEmpty()) return messages
+
+    val nonSystemMessages = messages.filterNot { it is SystemMessage }
+    val normalized = ArrayList<ChatMessage>(nonSystemMessages.size + 1)
+    normalized.add(SystemMessage.from(systemTexts.joinToString("\n\n")))
+    normalized.addAll(nonSystemMessages)
+    return normalized
 }
 
 internal fun ChatResponse.toLlmResponse(): LlmResponse {

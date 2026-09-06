@@ -249,6 +249,17 @@
                                 android:text="● Not configured"
                                 android:textColor="@color/colorTextTertiary"
                                 android:textSize="12dp" />
+
+                            <TextView
+                                android:id="@+id/btnConfigureLocalParams"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:paddingVertical="5dp"
+                                android:text="⚙ Parámetros del modelo"
+                                android:textColor="@color/colorBrandPrimary"
+                                android:textSize="12dp"
+                                android:visibility="gone" />
                         </LinearLayout>
                     </LinearLayout>
 

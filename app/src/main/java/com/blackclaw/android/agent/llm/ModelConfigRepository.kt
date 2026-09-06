@@ -71,7 +71,9 @@ data class ResolvedModelConfig(
                 modelName = local.modelId,
                 systemPrompt = finalSystemPrompt,
                 maxIterations = maxIterations,
-                temperature = temperature,
+                // Local generation parameters are persisted per model. Cloud callers
+                // still use the explicit temperature argument below.
+                temperature = LocalModelTuningStore.get(local.modelPath).temperature,
                 provider = LlmProvider.LOCAL,
                 streaming = streaming
             )
